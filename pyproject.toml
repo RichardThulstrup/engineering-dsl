@@ -32,5 +32,9 @@ dependencies = [
     "ipython",
 ]
 
+[project.urls]
+Homepage = "https://github.com/RichardThulstrup/engineering-dsl"
+Issues = "https://github.com/RichardThulstrup/engineering-dsl/issues"
+
 [tool.setuptools]
 packages = ["utils"]

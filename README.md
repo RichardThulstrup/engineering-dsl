@@ -61,7 +61,7 @@ not string parsing.
 Requires Python 3.x with Jupyter (developed and tested on Python 3.14).
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/RichardThulstrup/engineering-dsl.git
 cd engineering-dsl
 pip install -e .
 ```
