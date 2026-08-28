@@ -240,15 +240,15 @@ from . import extra_units as _extra_units   # noqa: E402, F401
 # matplotlib — but the import itself is fine even without matplotlib
 # installed, since the matplotlib import only happens inside ``plot()``.
 from . import plotting as _plotting          # noqa: E402, F401
-# Three more plain-Python modules that a notebook may import later:
-# ``Engineer_Style`` (Pygments lexer/style for nbconvert),
-# ``i_mul_fys`` (the standalone implicit-multiplication transformer),
-# and ``netlist_parser``.  Imported post-hook their bare ``=``
-# assignments get rewritten to ``==`` and the modules break with
-# NameErrors — so seed them here like ``chrono`` above.  Each is an
-# optional extra with its own soft dependencies (pygments; ideas /
-# token_utils), so a failing seed must not block the core toolkit.
-for _plain_mod in ("Engineer_Style", "i_mul_fys", "netlist_parser"):
+# Two more plain-Python modules that a notebook may import later:
+# ``Engineer_Style`` (Pygments lexer/style for nbconvert) and
+# ``i_mul_fys`` (the standalone implicit-multiplication transformer).
+# Imported post-hook their bare ``=`` assignments get rewritten to
+# ``==`` and the modules break with NameErrors — so seed them here like
+# ``chrono`` above.  Each is an optional extra with its own soft
+# dependencies (pygments; ideas / token_utils), so a failing seed must
+# not block the core toolkit.
+for _plain_mod in ("Engineer_Style", "i_mul_fys"):
     try:
         __import__(f"{__package__}.{_plain_mod}")
     except Exception:                        # pragma: no cover - optional

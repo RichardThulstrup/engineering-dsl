@@ -4122,9 +4122,6 @@ UNIT_SUFFIX_PREFIX = {
 
 UNIT_NAMES = r"(?:F|H|Hz|Ω|Ohm|V|A|W|s|m)"
 
-def rewrite_resistor_notation(source: str) -> str:
-    return source
-
 # ---------- degree → radian ----------
 
 def rewrite_degrees(source: str) -> str:
@@ -6740,7 +6737,6 @@ def transform_source(source, **_kwargs):
     # ▶ runs early so the captured RHS source text is the user's literal
     # spelling (``mm/s``), not anything pre-mangled by later passes.
     source = rewrite_target_unit(source)
-    source = rewrite_resistor_notation(source)
     source = rewrite_math_assignment(source)
     source = rewrite_parallel(source)
     source = rewrite_postfix_percent(source)
