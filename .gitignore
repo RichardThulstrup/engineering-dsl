@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# C# / Visual Studio (SymbolPaletteWinUI)
+.vs/
+bin/
+obj/
+*.user
+
+# OS / editor
+.DS_Store
+Thumbs.db

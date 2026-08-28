@@ -1,0 +1,69 @@
+<Window
+    x:Class="SymbolPaletteWinUI.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:Controls="using:SymbolPaletteWinUI.Controls"
+    mc:Ignorable="d"
+    Title="Symbol Palette">
+
+    <Grid Padding="14" RowSpacing="10" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Vertical" Spacing="2">
+            <TextBlock Text="Symbol Palette" FontSize="22" FontWeight="SemiBold" />
+            <TextBlock Text="Click any item to insert it. Hover for a description in the status bar."
+                       FontSize="12" Opacity="0.72" />
+        </StackPanel>
+
+        <!-- Tab selector ribbon.  A single-strip TabView could not show
+             all 14 tabs at once and pushed the overflow behind scroll
+             chevrons, costing extra clicks.  This is a multiline
+             selector instead: a WrapPanel of icon buttons (built in
+             code-behind, one per group) wraps to as many rows as the
+             window width needs, so every tab is visible and one click
+             away.
+             The Border gives the icon row a ribbon-like panel so it
+             reads as a distinct toolbar.  Its background and edge use
+             ``CardBackground*`` / ``CardStroke*`` theme resources —
+             those are the system's "raised surface" brushes and resolve
+             automatically: a faint lift above the page in light theme,
+             and a correspondingly faint lift in dark theme, so no
+             theme-specific colour has to be chosen by hand. -->
+        <Border Grid.Row="1"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="8">
+            <Controls:WrapPanel x:Name="TabSelector"
+                                HorizontalSpacing="6"
+                                VerticalSpacing="6" />
+        </Border>
+
+        <!-- Content host.  The selected tab's sections are placed here;
+             switching tabs swaps this Border's child.  The ScrollViewer
+             handles tabs with many entries. -->
+        <ScrollViewer x:Name="TabContentHost"
+                      Grid.Row="2"
+                      HorizontalScrollMode="Disabled"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto"
+                      Padding="8,4,8,8" />
+
+        <TextBlock x:Name="StatusText"
+                   Grid.Row="3"
+                   Text=""
+                   HorizontalAlignment="Stretch"
+                   VerticalAlignment="Center"
+                   TextWrapping="NoWrap"
+                   TextTrimming="CharacterEllipsis"
+                   Opacity="0.72" />
+    </Grid>
+</Window>

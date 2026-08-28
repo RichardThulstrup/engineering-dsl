@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="SymbolPaletteWinUI.Controls.MarkdownTableBuilder"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    mc:Ignorable="d"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+
+    <Grid RowSpacing="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Dimensions: column / row counts and a global alignment. -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12">
+            <NumberBox x:Name="ColumnsBox"
+                       Header="Columns"
+                       Value="3" Minimum="1" Maximum="10"
+                       SpinButtonPlacementMode="Inline"
+                       ValueChanged="OnNumberChanged" />
+            <NumberBox x:Name="RowsBox"
+                       Header="Body rows"
+                       Value="3" Minimum="1" Maximum="30"
+                       SpinButtonPlacementMode="Inline"
+                       ValueChanged="OnNumberChanged" />
+            <ComboBox x:Name="AlignBox"
+                      Header="Column alignment"
+                      SelectionChanged="OnAlignChanged">
+                <ComboBoxItem Content="Left" IsSelected="True" />
+                <ComboBoxItem Content="Center" />
+                <ComboBoxItem Content="Right" />
+            </ComboBox>
+        </StackPanel>
+
+        <TextBlock Grid.Row="1"
+                   Text="Preview — header captions and cells are placeholders to overwrite in the cell"
+                   FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+
+        <!-- Monospace preview of the generated Markdown. -->
+        <Border Grid.Row="2"
+                MinHeight="100"
+                CornerRadius="6"
+                BorderThickness="1"
+                Padding="10"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+            <ScrollViewer HorizontalScrollMode="Auto"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Auto">
+                <TextBlock x:Name="PreviewText"
+                           FontFamily="Cascadia Mono, Consolas, monospace"
+                           FontSize="13"
+                           IsTextSelectionEnabled="True"
+                           TextWrapping="NoWrap" />
+            </ScrollViewer>
+        </Border>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8">
+            <Button Content="Insert table"
+                    Style="{ThemeResource AccentButtonStyle}"
+                    ToolTipService.ToolTip="Insert the Markdown table at the notebook cursor"
+                    Click="Insert_Click" />
+        </StackPanel>
+    </Grid>
+</UserControl>

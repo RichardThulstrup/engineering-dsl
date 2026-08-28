@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "engineering-dsl"
+version = "0.1.0"
+description = "Engineering math in plain notation: a Jupyter DSL with units, significant figures, symbolic math, and Unicode engineering syntax"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Richard Thulstrup" }]
+keywords = [
+    "engineering", "units", "jupyter", "dsl", "sympy",
+    "significant-figures", "electrical-engineering", "notation",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Jupyter",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "ideas",
+    "token-utils",
+    "numpy",
+    "sympy",
+    "forallpeople",
+    "pygments",
+    "matplotlib",
+    "ipython",
+]
+
+[tool.setuptools]
+packages = ["utils"]

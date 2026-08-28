@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="SymbolPaletteWinUI.Controls.FormulaEditor"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:web="using:Microsoft.UI.Xaml.Controls"
+    mc:Ignorable="d"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+
+    <Grid RowSpacing="6">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- The WYSIWYG math surface (MathLive inside WebView2). -->
+        <Border Grid.Row="0"
+                MinHeight="120"
+                CornerRadius="6"
+                BorderThickness="1"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+            <web:WebView2 x:Name="MathView" />
+        </Border>
+
+        <!-- Dim, optional view of the raw LaTeX that will be pasted.
+             Reassurance / debugging only — the user composes visually. -->
+        <TextBlock Grid.Row="1"
+                   x:Name="LatexPreview"
+                   FontFamily="Cascadia Mono, Consolas, monospace"
+                   FontSize="12"
+                   Opacity="0.6"
+                   TextWrapping="NoWrap"
+                   TextTrimming="CharacterEllipsis"
+                   Text="" />
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+            <ToggleButton x:Name="KeyboardToggle"
+                          Content="&#x2328; Symbols"
+                          ToolTipService.ToolTip="Show the on-screen math symbol keyboard"
+                          Checked="KeyboardToggle_Checked"
+                          Unchecked="KeyboardToggle_Unchecked" />
+            <Button Content="Clear" Click="Clear_Click" />
+            <Button x:Name="InsertInlineButton"
+                    Content="Insert  $&#x2026;$"
+                    IsEnabled="False"
+                    ToolTipService.ToolTip="Insert as inline math: $ ... $"
+                    Click="InsertInline_Click" />
+            <Button x:Name="InsertDisplayButton"
+                    Content="Insert  $$&#x2026;$$"
+                    Style="{ThemeResource AccentButtonStyle}"
+                    IsEnabled="False"
+                    ToolTipService.ToolTip="Insert as display math: $$ ... $$"
+                    Click="InsertDisplay_Click" />
+        </StackPanel>
+    </Grid>
+</UserControl>

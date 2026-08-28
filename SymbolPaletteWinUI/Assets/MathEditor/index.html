@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Formula Editor</title>
+  <style>
+    /* Stay neutral — let the WinUI host's chrome do the styling.
+       color-scheme makes the field follow the OS light/dark theme. */
+    :root { color-scheme: light dark; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: transparent;
+      font-family: 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
+    }
+
+    body {
+      display: flex;
+      box-sizing: border-box;
+    }
+
+    math-field {
+      flex: 1;
+      margin: 8px;
+      padding: 10px 12px;
+      font-size: 22px;
+      border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+      border-radius: 6px;
+    }
+
+    math-field:focus-within {
+      outline: 2px solid #2f6fed;
+      outline-offset: -1px;
+    }
+  </style>
+</head>
+<body>
+  <!-- manual keyboard policy: the on-screen symbol keyboard only appears
+       when the host explicitly asks for it (the "Symbols" toggle). -->
+  <math-field id="mf" math-virtual-keyboard-policy="manual"></math-field>
+
+  <script type="module">
+    // ESM entry of the bundled MathLive dist. Importing it registers the
+    // <math-field> custom element as a side effect.
+    import { MathfieldElement } from './mathlive/mathlive.js';
+
+    // Resolve fonts/sounds against the bundled copy => fully offline.
+    MathfieldElement.fontsDirectory  = './mathlive/fonts';
+    MathfieldElement.soundsDirectory = './mathlive/sounds';
+
+    const post = (payload) =>
+      window.chrome?.webview?.postMessage(JSON.stringify(payload));
+
+    await customElements.whenDefined('math-field');
+    const mf = document.getElementById('mf');
+
+    // Tell the host on every edit so it can refresh the preview line
+    // and enable/disable the Insert buttons. mf.value is LaTeX.
+    mf.addEventListener('input', () =>
+      post({ type: 'change', latex: mf.value }));
+// Tell the host whenever the pointer crosses the editor boundary, so
+// it can hand foreground back to the notebook the moment the user
+// starts moving toward the Insert button. The body is the right
+// element because it covers the entire HTML viewport — the virtual
+// symbol keyboard, also inside the WebView2, then does NOT count as
+// "leaving" the editor.
+document.body.addEventListener('pointerleave', () =>
+    post({ type: 'fieldExit' }));
+document.body.addEventListener('pointerenter', () =>
+    post({ type: 'fieldEnter' }));
+
+    // API surface the WinUI side drives via ExecuteScriptAsync(...).
+    window.host = {
+      setValue: (latex) => {
+        mf.value = latex ?? '';
+        post({ type: 'change', latex: mf.value });
+        mf.focus();
+      },
+      clear: () => {
+        mf.value = '';
+        post({ type: 'change', latex: '' });
+        mf.focus();
+      },
+      showKeyboard: () => window.mathVirtualKeyboard.show(),
+      hideKeyboard: () => window.mathVirtualKeyboard.hide(),
+      focusField:   () => mf.focus(),
+    };
+
+    post({ type: 'ready' });
+    mf.focus();
+  </script>
+</body>
+</html>
