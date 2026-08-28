@@ -9,7 +9,6 @@ distinctly:
   * Engineering binary operators     — ``‖``, ``±``, ``∠``, ``≈``  (Operator)
   * Math glyphs / postfix operators  — ``°``, ``²``, ``√``, ``⌊⌋⌈⌉``, ``%``, ``‰``, ``!``  (Operator)
   * Subscript / superscript digits   — ``₀``..``₉``, ``⁰``..``⁹``     (Number.Other)
-  * Resistor / EE notation           — ``4k7``, ``2R2``, ``100n``, ``1M5`` (Number.Engineering)
   * Physical constants               — ``c``, ``h``, ``ℏ``, ``k_B``, ``ε_0`` … (Name.Constant.Physical)
   * SI base + prefixed units         — ``V``, ``Ω``, ``mV``, ``kΩ``, ``nF`` …  (Name.Builtin.Unit)
   * Greek identifier letters         — ``π``, ``α``, ``β``, ``θ``, ``ω`` …    (Name.Builtin.Greek)
@@ -51,7 +50,6 @@ from pygments.token import (
 # Token.  Styles can then target these new kinds while still inheriting
 # everything else from a standard style.
 
-NumberEngineering = Number.Engineering         # 4k7, 2R2, 100n
 NameUnit          = Name.Builtin.Unit          # V, Ω, mV, kΩ
 NameGreek         = Name.Builtin.Greek         # π, α, ω
 NamePhysical      = Name.Constant.Physical     # c, h, ε_0
@@ -149,10 +147,9 @@ class EngineeringDSLLexer(PythonLexer):
     recognised before Python's own rules see them.
 
     Order matters in Pygments:
-      1. Resistor/EE notation (``4k7``) must come before plain numbers.
-      2. Math-assignment glyphs must come before single ``=`` / ``:=``.
-      3. Subscript/superscript digits must come before identifier rules.
-      4. Constants & helper names are matched as bare words (``\\b...\\b``)
+      1. Math-assignment glyphs must come before single ``=`` / ``:=``.
+      2. Subscript/superscript digits must come before identifier rules.
+      3. Constants & helper names are matched as bare words (``\\b...\\b``)
          so they don't fire inside other identifiers.
     """
 
@@ -162,10 +159,6 @@ class EngineeringDSLLexer(PythonLexer):
     mimetypes = []
 
     EXTRA_TOKENS = [
-        # ---- resistor / EE notation: 4k7, 2R2, 100n, 1M5, 4u7 ----
-        # Must precede Pygments' generic Number rule.
-        (r'(?<!\w)\d+[RkMGTmµunp]\d*(?!\w)', NumberEngineering),
-
         # ---- math-assignment glyphs ----
         (r':=|≔|←', Operator.Word),
 
@@ -248,7 +241,6 @@ class EngineeringDSLStyle(Style):
         Name.Exception:             'bold #d2413a',
 
         # ---- DSL-specific overrides ----
-        NumberEngineering:          'bold #c8651b',     # 4k7, 100n
         Operator.Word:              'bold #2b8a3e',     # := ≔ ←
         NamePhysical:               'bold #1f3a93',     # c, h, ε_0
         NameUnit:                   '#0a7d7d',          # V, Ω, mV
@@ -287,7 +279,6 @@ class EngineeringDSLStyleDark(Style):
         Name.Exception:             'bold #f48771',
 
         # ---- DSL-specific overrides ----
-        NumberEngineering:          'bold #ffa657',     # 4k7, 100n
         Operator.Word:              'bold #4ec9b0',     # := ≔ ←
         NamePhysical:               'bold #79c0ff',     # c, h, ε_0
         NameUnit:                   '#76d7c4',          # V, Ω, mV

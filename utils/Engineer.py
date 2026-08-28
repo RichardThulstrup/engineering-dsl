@@ -23,7 +23,7 @@ Side effects performed during this import:
    so they're visible everywhere — no per-cell re-import.
 2. The ``ideas`` source-transform hook is installed via
    ``circuit_dsl.add_hook()`` so the ergonomic syntax (``:=``, ``‖``, ``°``,
-   ``∠``, ``²``, ``√``, ``4k7``, ``log₁₀(...)``, ``Γ(x)``, ``≈``,
+   ``∠``, ``²``, ``√``, ``log₁₀(...)``, ``Γ(x)``, ``≈``,
    ``[a..b]``, ...) is rewritten in every subsequent cell or imported
    module.
 3. ``circuit_dsl`` and ``calc_symbols`` are loaded; their public names

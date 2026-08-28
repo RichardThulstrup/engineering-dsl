@@ -34,9 +34,9 @@ not string parsing.
   subscript indexing (`R₁`, `M₀͵₁`), `∠` phasors, `Γ`, `Σ`, `π`, `≈`,
   inequality for-loops (`for 1 ≤ k ≤ 5:`), set operators (`∩`, `∪`),
   `%` and `‰` as numeric suffixes.
-- **Engineering literals** — RKM notation (`4k7` → 4.7 kΩ), base-subscript
-  integers (`fed₁₆`, `1011₂`), Roman numerals (`"MCMXCIV"ᵣₒₘₑ`), inclusive
-  ranges (`[1..10]`), string/label ranges (`['C8'..'C13']`).
+- **Engineering literals** — base-subscript integers (`fed₁₆`, `1011₂`),
+  Roman numerals (`"MCMXCIV"ᵣₒₘₑ`), inclusive ranges (`[1..10]`),
+  string/label ranges (`['C8'..'C13']`).
 - **Matrices** — a `[[…]]` literal is a real sympy matrix with linear
   algebra (`M.inv()`, `M.det()`, `Mᵀ`), 2-D subscript access `M₀͵₁`
   (0-indexed, like the rest of Python), and LaTeX rendering.

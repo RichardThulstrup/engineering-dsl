@@ -3230,30 +3230,6 @@ def rewrite_plusminus(source: str) -> str:
     return source
 
 
-# ---------- resistor / engineering notation ----------
-
-# EE-style suffix letters and the prefix variable each maps to.
-# Convention: the letter sits where the decimal point goes.
-#   4k7  ->  4.7 * prefix_k     (= 4700)
-#   2R2  ->  2.2                 (R is the placeholder; no multiplier)
-#   100n ->  100 * prefix_n      (= 1e-7)
-#   47R  ->  47
-#   1M5  ->  1.5 * prefix_M
-EE_SUFFIX_PREFIX = {
-    'k': 'prefix_k', 'M': 'prefix_M', 'G': 'prefix_G', 'T': 'prefix_T',
-    'm': 'prefix_m', 'µ': 'prefix_μ', 'μ': 'prefix_μ', 'u': 'prefix_μ',
-    'n': 'prefix_n', 'p': 'prefix_p',
-}
-
-
-def _ee_replace(m):
-    int_part, letter, dec_part = m.group(1), m.group(2), m.group(3)
-    value = f"{int_part}.{dec_part}" if dec_part else int_part
-    if letter == 'R':
-        return f"({value})"
-    return f"({value}*{EE_SUFFIX_PREFIX[letter]})"
-
-
 def rewrite_string_range(source: str) -> str:
     """
     Rewrites a range between two STRING-LITERAL endpoints into a call to
