@@ -99,7 +99,12 @@ matplotlib like any other code.
 `SymbolPaletteWinUI/` contains a WinUI 3 (Windows App SDK) floating symbol
 keyboard — see its [README](SymbolPaletteWinUI/README.md) for build
 instructions. If a built binary is placed at `utils/bin/SymbolPaletteWinUI.exe`
-it is auto-launched on import; otherwise the import stays silent. It vendors
+it is auto-launched on import; otherwise the import stays silent.
+
+A prebuilt Windows x64 build is attached to the
+[latest release](https://github.com/RichardThulstrup/engineering-dsl/releases/latest)
+as `SymbolPaletteWinUI-win-x64.tar.xz` — extract it (`tar -xf …`, built into
+Windows 10+) and move the extracted folder's contents into `utils/bin/`. It vendors
 [MathLive](https://cortexjs.io/mathlive/) (MIT) and the KaTeX fonts (MIT) for
 its formula editor.
 
