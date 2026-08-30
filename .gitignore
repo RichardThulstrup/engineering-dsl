@@ -10,6 +10,17 @@ venv/
 
 # Jupyter
 .ipynb_checkpoints/
+.jupyter/
+
+# Generated hardcopies at repo root (tracked builds live in hardcopy/,
+# which is also ignored — PDFs are build artifacts, not source)
+/DSL_Manual.pdf
+/DSL_Examples.pdf
+/A_Practical_Manual_for_the_Engineering_DSL.pdf
+
+# Hardcopy builds (hardcopy.py)
+hardcopy/
+_hardcopy_*.ipynb
 
 # C# / Visual Studio (SymbolPaletteWinUI)
 .vs/

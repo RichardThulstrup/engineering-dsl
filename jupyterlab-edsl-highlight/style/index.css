@@ -1,0 +1,81 @@
+/* Engineering-DSL live-editor colours — NCS-based palette.
+ *
+ * Base colours (author's choice, from the NCS primaries):
+ *   yellow #fbd924   red #cc1e3b   blue #218bc0   green #19a86d
+ *
+ * Role mapping:
+ *   green  — structure (:= → ▶ ..), reserved words, numbers
+ *   blue   — units, physical constants, value literals (∅)
+ *   red    — strings (and the tab/newline string-argument glyphs)
+ *   yellow — helpers, symbol declarations, currencies
+ *            (light theme uses #a08600 — the same hue darkened for
+ *             readability on white; dark theme uses the raw #fbd924)
+ *   grey italic — comments;  plain — operators (regular weight)
+ *   purple — Greek letters and sub/superscript runs (secondary role,
+ *            outside the four base colours)
+ *
+ * Nothing renders bold (author's preference).  Every rule targets the
+ * decorated span AND its descendant spans — the base highlighter's
+ * spans can nest INSIDE a decoration span, and a direct colour rule on
+ * an inner span beats inherited `!important` from the outer one.
+ */
+
+/* ---- green: structure, keywords, numbers ---- */
+.cm-editor .edsl-opword, .cm-editor .edsl-opword span
+  { color: #19a86d !important; font-weight: normal !important; }
+.cm-editor .edsl-keyword, .cm-editor .edsl-keyword span
+  { color: #19a86d !important; font-weight: normal !important; }
+.cm-editor .edsl-number, .cm-editor .edsl-number span
+  { color: #19a86d !important; font-weight: normal; }
+
+/* ---- blue: units, constants, value literals ---- */
+.cm-editor .edsl-unit, .cm-editor .edsl-unit span
+  { color: #218bc0 !important; font-weight: normal; }
+.cm-editor .edsl-physical, .cm-editor .edsl-physical span
+  { color: #218bc0 !important; font-weight: normal; }
+.cm-editor .edsl-constkw, .cm-editor .edsl-constkw span
+  { color: #218bc0 !important; font-weight: normal; }
+
+/* ---- red: strings ---- */
+.cm-editor .edsl-string, .cm-editor .edsl-string span
+  { color: #cc1e3b !important; font-weight: normal; }
+.cm-editor .edsl-strescape, .cm-editor .edsl-strescape span
+  { color: #cc1e3b !important; font-weight: normal; }
+
+/* ---- yellow: helpers, declarations, currencies ---- */
+.cm-editor .edsl-helper, .cm-editor .edsl-helper span
+  { color: #a08600 !important; font-weight: normal; }
+.cm-editor .edsl-decl, .cm-editor .edsl-decl span
+  { color: #a08600 !important; font-weight: normal; }
+.cm-editor .edsl-currency, .cm-editor .edsl-currency span
+  { color: #a08600 !important; font-weight: normal; }
+
+/* ---- neutrals & secondary roles ---- */
+.cm-editor .edsl-op, .cm-editor .edsl-op span
+  { color: var(--jp-content-font-color1, #000) !important; font-weight: normal !important; }
+.cm-editor .edsl-plain, .cm-editor .edsl-plain span
+  { color: var(--jp-content-font-color1, #000) !important; font-weight: normal; font-style: normal; }
+.cm-editor .edsl-comment, .cm-editor .edsl-comment span
+  { color: #888888 !important; font-style: italic; font-weight: normal !important; }
+.cm-editor .edsl-greek, .cm-editor .edsl-greek span
+  { color: #5a3e8c !important; font-weight: normal; }
+.cm-editor .edsl-subsup, .cm-editor .edsl-subsup span
+  { color: #7a4ea0 !important; font-weight: normal; }
+
+/* ---- dark theme overrides ---- */
+body[data-jp-theme-light='false'] .cm-editor .edsl-string,
+body[data-jp-theme-light='false'] .cm-editor .edsl-string span     { color: #e2506d !important; }
+body[data-jp-theme-light='false'] .cm-editor .edsl-strescape,
+body[data-jp-theme-light='false'] .cm-editor .edsl-strescape span  { color: #e2506d !important; }
+body[data-jp-theme-light='false'] .cm-editor .edsl-helper,
+body[data-jp-theme-light='false'] .cm-editor .edsl-helper span     { color: #fbd924 !important; }
+body[data-jp-theme-light='false'] .cm-editor .edsl-decl,
+body[data-jp-theme-light='false'] .cm-editor .edsl-decl span       { color: #fbd924 !important; }
+body[data-jp-theme-light='false'] .cm-editor .edsl-currency,
+body[data-jp-theme-light='false'] .cm-editor .edsl-currency span   { color: #fbd924 !important; }
+body[data-jp-theme-light='false'] .cm-editor .edsl-comment,
+body[data-jp-theme-light='false'] .cm-editor .edsl-comment span    { color: #9d9d9d !important; }
+body[data-jp-theme-light='false'] .cm-editor .edsl-greek,
+body[data-jp-theme-light='false'] .cm-editor .edsl-greek span      { color: #c586c0 !important; }
+body[data-jp-theme-light='false'] .cm-editor .edsl-subsup,
+body[data-jp-theme-light='false'] .cm-editor .edsl-subsup span     { color: #bb9af7 !important; }

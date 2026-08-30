@@ -1,0 +1,5 @@
+{
+  "packageManager": "python",
+  "packageName": "engineering-dsl",
+  "uninstallInstructions": "Use your Python package manager (pip) to uninstall engineering-dsl"
+}

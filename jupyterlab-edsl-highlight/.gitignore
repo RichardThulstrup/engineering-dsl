@@ -1,0 +1,6 @@
+# The built extension under labextension/ IS committed — it ships in
+# the wheel via setup.py data_files so installs need no node toolchain.
+node_modules/
+lib/
+tsconfig.tsbuildinfo
+package-lock.json

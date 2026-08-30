@@ -563,6 +563,13 @@ def plot(*args, title=None, xlabel=None, ylabel=None,
     are ``"fit: y = ..."`` (with the polynomial spelled out) and a
     dashed line.
 
+    Series colours come from the toolkit's NCS cycle (blue ``#218bc0``,
+    red ``#cc1e3b``, green ``#19a86d``, orange, violet, teal,
+    yellow-green, yellow — see ``_NCS_CYCLE``), matching the syntax
+    highlighter's base palette.  A ``theme=`` changes background,
+    grid, and fonts but the NCS cycle still decides series colours;
+    per-series format strings (``'r--'`` etc.) override as usual.
+
     Pass ``theme=`` to change the visual appearance for THIS plot only
     (theme is applied via a matplotlib style context manager — it does
     NOT poison the rcParams of later plots in the same session).
@@ -629,19 +636,25 @@ def plot(*args, title=None, xlabel=None, ylabel=None,
     """
     import matplotlib.pyplot as plt
     import matplotlib.style as _mplstyle
-    import contextlib
 
-    # Resolve the theme to a matplotlib style spec.  When ``theme`` is
-    # None, ``contextlib.nullcontext()`` is a no-op — same behaviour as
-    # the original code path, no rcParams mucking.
+    # Resolve the theme to a matplotlib style spec.  The NCS series-
+    # colour cycle (author's base palette — see _NCS_CYCLE) applies to
+    # EVERY plot: with an explicit ``theme=`` the theme is composed
+    # under it (theme decides background/grid/fonts, the NCS cycle
+    # still decides series colours); without one, only the cycle is
+    # applied.  ``axes.prop_cycle`` takes effect when an Axes is
+    # CREATED, so overlaying onto a pre-existing Axes keeps that Axes'
+    # cycle — same overlay semantics as before.
     if theme is not None:
         resolved = _resolve_theme(theme)
-        theme_ctx = _mplstyle.context(resolved)
+        specs = list(resolved) if isinstance(resolved, (list, tuple)) \
+            else [resolved]
+        theme_ctx = _mplstyle.context(specs + [_ncs_rc()])
         # Force a fresh figure so the theme's background/grid/fonts
         # actually take effect.  When ax is supplied, we honour it.
         force_fresh = (ax is None)
     else:
-        theme_ctx = contextlib.nullcontext()
+        theme_ctx = _mplstyle.context(_ncs_rc())
         force_fresh = False
 
     with theme_ctx:
@@ -649,6 +662,35 @@ def plot(*args, title=None, xlabel=None, ylabel=None,
             _fig, ax = plt.subplots()
         return _plot_impl(args, title, xlabel, ylabel, style, show, ax,
                           return_ax, fit, fit_label, fit_style, kwargs)
+
+
+# ---------------------------------------------------------------------------
+# NCS series-colour cycle
+# ---------------------------------------------------------------------------
+# Series colours are drawn from the NCS colour circle, anchored on the
+# four elementary hues chosen for the toolkit (the same base palette
+# the syntax highlighter uses): yellow #fbd924, red #cc1e3b, blue
+# #218bc0, green #19a86d.  The other four are the circle's quadrant
+# midpoints — Y50R orange, R50B violet, B50G teal, G50Y yellow-green —
+# giving an 8-colour cycle.  Ordered for maximum adjacent contrast so
+# consecutive series are easy to tell apart; the pure NCS yellow is
+# deepened a touch (#e0b400) so a 1-px line stays visible on white.
+_NCS_CYCLE = [
+    "#218bc0",  # B    blue
+    "#cc1e3b",  # R    red
+    "#19a86d",  # G    green
+    "#ec7c26",  # Y50R orange
+    "#7d4a99",  # R50B violet
+    "#1d9a97",  # B50G teal
+    "#8fc03b",  # G50Y yellow-green
+    "#e0b400",  # Y    yellow (deepened for line visibility)
+]
+
+
+def _ncs_rc():
+    """rcParams dict applying the NCS series-colour cycle."""
+    from cycler import cycler
+    return {"axes.prop_cycle": cycler(color=_NCS_CYCLE)}
 
 
 # ---------------------------------------------------------------------------
@@ -664,6 +706,10 @@ _THEME_ALIASES = {
     "dark":          "dark_background",
     "light":         "default",
     "default":       "default",
+    # The NCS series-colour cycle is ALWAYS active (see _NCS_CYCLE);
+    # this alias exists so ``theme="ncs"`` reads naturally and simply
+    # means "default style + the NCS cycle".
+    "ncs":           "default",
     # Seaborn-flavoured (built into matplotlib as ``seaborn-v0_8-*``,
     # no actual seaborn import needed)
     "darkgrid":      "seaborn-v0_8-darkgrid",

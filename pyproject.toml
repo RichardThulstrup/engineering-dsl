@@ -32,9 +32,26 @@ dependencies = [
     "ipython",
 ]
 
+[project.optional-dependencies]
+# PDF hardcopies via Chromium (`hardcopy()` in a notebook, or
+# `python hardcopy.py`).  After installing, run once:
+#     playwright install chromium
+hardcopy = ["nbconvert[webpdf]"]
+
+[project.entry-points."nbconvert.exporters"]
+# The toolkit's own hardcopy rendering (DSL syntax colours, print-view
+# controls hidden, `no-print` cell tags honoured).  Available on the CLI
+# (--to edsl_print), at /nbconvert/edsl_print/<notebook> on a running
+# server (what print_view() opens), and in JupyterLab's export menu.
+edsl_print = "utils.print_exporter:EDSLPrintExporter"
+edsl_pdf = "utils.print_exporter:EDSLPDFExporter"
+
 [project.urls]
 Homepage = "https://github.com/RichardThulstrup/engineering-dsl"
 Issues = "https://github.com/RichardThulstrup/engineering-dsl/issues"
 
 [tool.setuptools]
 packages = ["utils"]
+
+[tool.setuptools.package-data]
+utils = ["templates/edsl-print/*"]

@@ -248,7 +248,7 @@ from . import plotting as _plotting          # noqa: E402, F401
 # ``chrono`` above.  Each is an optional extra with its own soft
 # dependencies (pygments; ideas / token_utils), so a failing seed must
 # not block the core toolkit.
-for _plain_mod in ("Engineer_Style", "i_mul_fys"):
+for _plain_mod in ("Engineer_Style", "i_mul_fys", "hardcopy_helpers"):
     try:
         __import__(f"{__package__}.{_plain_mod}")
     except Exception:                        # pragma: no cover - optional
@@ -271,6 +271,7 @@ from .chrono import *           # noqa: F401, F403  (ISO 8601 date/time)
 from .symbolic import *         # noqa: F401, F403  (sympy bridge)
 from .iso286 import *           # noqa: F401, F403  (ISO 286 limits & fits)
 from .radix_formats import *    # noqa: F401, F403  (extra integer formats: roman)
+from .hardcopy_helpers import *  # noqa: F401, F403  (print_view, hardcopy — see Step 2 seed)
 
 # Currency markers (``DKK``, ``USD``, ``EUR`` …) and helpers.  The
 # currency module is a soft dependency — it is imported defensively
@@ -341,6 +342,7 @@ math = _math
 from . import circuit_dsl as _cd, calc_symbols as _cs, chrono as _ch, symbolic as _sm  # noqa: E402
 from . import extra_units as _eu, plotting as _pl  # noqa: E402
 from . import iso286 as _iso, radix_formats as _rf  # noqa: E402
+from . import hardcopy_helpers as _hc  # noqa: E402
 try:
     from . import currencies as _cur  # noqa: E402
 except Exception:  # pragma: no cover - optional component
@@ -354,6 +356,7 @@ __all__ = sorted(set(getattr(_cd, "__all__", []))
                  | set(getattr(_pl, "__all__", []))
                  | set(getattr(_iso, "__all__", []))
                  | set(getattr(_rf, "__all__", []))
+                 | set(getattr(_hc, "__all__", []))
                  | set(getattr(_cur, "__all__", []) if _cur else [])
                  | {"si", "eng", "math", "np", "launch_palette"})
 

@@ -66,6 +66,11 @@ cd engineering-dsl
 pip install -e .
 ```
 
+(For a non-development install on a fresh machine, see
+[Installing on a fresh machine](#installing-on-a-fresh-machine) — a
+plain `pip install` also sets up the print/PDF exporters and the
+JupyterLab editor highlighting automatically.)
+
 Then in a notebook started from the repo root (or any environment where the
 package is installed):
 
@@ -93,6 +98,97 @@ the significant-figures number type; `utils/symbolic.py` bridges to sympy;
 Because the transforms produce plain Python, everything composes with the
 normal ecosystem — the rewritten cells call into numpy, sympy, and
 matplotlib like any other code.
+
+## Printing and PDFs
+
+JupyterLab's own print command (Ctrl+P) cannot render the math — it uses
+a script-blocked iframe, so results print as raw LaTeX. The toolkit
+ships two replacements that work out of the box:
+
+- **`print_view()`** — run it in any cell to get a **🖨 Print…** button
+  that opens the notebook's printable rendering in a new tab and pops
+  the print dialog once the math is typeset. The rendering is the
+  toolkit's own `edsl_print` nbconvert exporter, which typesets code as
+  monochrome engineering notation — variables italic with real
+  subscripts (`R_total` prints as *R*‹total›), units and numbers
+  upright, comments grey — plus print controls hidden and cells tagged
+  `no-print` omitted (add the tag in JupyterLab's property inspector).
+  It also appears in Lab's *File → Save and Export Notebook As* menu.
+  Prefer colours? `c.EDSLPrintExporter.code_style = "color"` in your
+  Jupyter config switches to the DSL's Pygments palette.
+- **`hardcopy()`** — renders the notebook's last-saved state to a PDF
+  next to it (`hardcopy('DSL_Manual.ipynb')` to pick another). It warns
+  when the saved file has no outputs; `hardcopy(execute=True)` runs the
+  notebook fresh during export instead of relying on what was saved.
+  PDF output needs a one-time install:
+
+  ```bash
+  pip install "engineering-dsl[hardcopy]"     # or: pip install "nbconvert[webpdf]"
+  playwright install chromium
+  ```
+
+  Without it, `hardcopy()` falls back to a standalone `.html`.
+
+For batch exports of all the manuals (HTML + GitHub-renderable Markdown
++ PDF in one go, executed once per notebook), use
+[`hardcopy.py`](hardcopy.py):
+
+```bash
+python hardcopy.py
+```
+
+## Editor highlighting (JupyterLab)
+
+The DSL's notation is highlighted live in JupyterLab by a bundled
+extension (`jupyterlab-edsl-highlight/`): units and constants in NCS
+blue, numbers and reserved words in NCS green, strings in NCS red,
+helpers in amber, subscript indices in purple, comments grey italic —
+matching the print/PDF exporters, which use the same vocabulary via the
+Pygments lexer in `utils/Engineer_Style.py`. Plots use the same NCS
+base palette for their series-colour cycle.
+
+The extension ships prebuilt inside the package (a regular
+`pip install` places it where JupyterLab finds it — no node, no
+`jupyter labextension install`). Restart or refresh JupyterLab after
+installing. `jupyter labextension list` should show
+`jupyterlab-edsl-highlight … enabled ok`.
+
+## Installing on a fresh machine
+
+Everything a new user needs, end to end:
+
+```bash
+# 1. The toolkit — also registers the edsl_print / edsl_pdf exporters
+#    (entry points) and installs the JupyterLab highlighting extension
+#    (prebuilt, bundled in the package):
+pip install git+https://github.com/RichardThulstrup/engineering-dsl.git
+
+# 2. PDF hardcopies (optional — print_view()'s browser printing works
+#    without it; hardcopy() falls back to HTML):
+pip install "engineering-dsl[hardcopy]"
+playwright install chromium
+```
+
+Then start JupyterLab and put `from utils.Engineer import *` in the
+first cell. Checklist of what each piece gives you:
+
+| Piece | Installed by | Check |
+|---|---|---|
+| DSL + units + sig-figs + sympy bridge | step 1 | `from utils.Engineer import *` runs |
+| `edsl_print` / `edsl_pdf` exporters | step 1 (entry points) | `jupyter nbconvert --list-exporters` lists them; *File → Save and Export Notebook As* shows *Edsl_print* |
+| Live editor highlighting | step 1 (bundled labextension) | `jupyter labextension list` shows `jupyterlab-edsl-highlight` |
+| `hardcopy()` PDF output | step 2 | `hardcopy()` produces a `.pdf`, not `.html` |
+| Symbol palette (optional, Windows) | download from [Releases](https://github.com/RichardThulstrup/engineering-dsl/releases), place per [Symbol palette app](#symbol-palette-app) | palette auto-launches on import |
+
+Two caveats worth knowing:
+
+- **Editable installs** (`pip install -e .`) do *not* install the
+  bundled labextension (pip skips `data_files` for editables). For a
+  development setup, copy it once into a Jupyter data path — see
+  [jupyterlab-edsl-highlight/README.md](jupyterlab-edsl-highlight/README.md).
+- The exporters and highlighting install **per Python environment**;
+  if JupyterLab runs from a different environment than the one you
+  installed into, install there instead.
 
 ## Symbol palette app
 

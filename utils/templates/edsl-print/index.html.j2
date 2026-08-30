@@ -1,0 +1,62 @@
+{%- extends 'lab/index.html.j2' -%}
+
+{#-
+  edsl-print: the engineering-dsl hardcopy rendering.
+
+  Extends the standard "lab" HTML template with:
+    * the DSL's own Pygments colours (injected by EDSLPrintExporter
+      as resources.edsl_pygments_css),
+    * hiding of the in-notebook print controls (print_view() output
+      and its cell),
+    * print-friendly pagination rules.
+
+  Cells tagged "no-print" are removed by the exporter before the
+  template ever sees them.
+-#}
+
+{%- block html_head_js_mathjax -%}
+{{ super() }}
+{%- if resources.get('edsl_svg_math') %}
+<!-- PDF hardcopies: render math as SVG.  Chromium's print-to-PDF
+     collapses CommonHTML's assembled stretchy delimiters (matrix
+     brackets shrink to inline "[ ]"); SVG output prints vector-perfect. -->
+<script type="text/x-mathjax-config">
+MathJax.Hub.Config({ menuSettings: { renderer: "SVG" }, SVG: { font: "TeX" } });
+</script>
+{%- endif %}
+{%- endblock html_head_js_mathjax -%}
+
+{% block extra_css %}
+{{ super() }}
+<style>
+/* A hardcopy is a light-background document, whatever the screen theme. */
+:root { color-scheme: light only; }
+
+/* Hide the print_view() controls and the cell that produced them —
+   including stale outputs saved by older print_view() versions, which
+   lack the wrapper class but always carry an /nbconvert/ button. */
+.jp-Cell:has(.edsl-printview),
+.jp-Cell:has(button[onclick*="/nbconvert/"]) { display: none !important; }
+.edsl-printview { display: none !important; }
+
+/* Engineering-DSL syntax colours (only injected in code_style='color'). */
+{{ resources.get('edsl_pygments_css', '') }}
+
+/* Math-style code typography (code_style='math', the default):
+   monochrome engineering notation — variables italic with real
+   subscripts, units/functions/numbers upright, comments grey. */
+.edsl-math pre        { color: #000; }
+.edsl-math .edsl-var  { font-style: italic; }
+.edsl-math .edsl-var sub { font-size: 0.72em; }
+.edsl-math .edsl-up   { font-style: normal; }
+.edsl-math .edsl-str  { font-style: normal; }
+.edsl-math .edsl-kw   { font-weight: 600; }
+.edsl-math .edsl-comment { color: #767676; font-style: italic; }
+
+@media print {
+  h1, h2, h3, h4 { break-after: avoid-page; }
+  .highlight pre { break-inside: avoid-page; }
+  img, svg { break-inside: avoid-page; }
+}
+</style>
+{% endblock extra_css %}

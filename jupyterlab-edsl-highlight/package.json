@@ -1,0 +1,31 @@
+{
+  "name": "jupyterlab-edsl-highlight",
+  "version": "0.1.0",
+  "description": "Live CodeMirror highlighting for the engineering DSL, mirroring utils/Engineer_Style.py",
+  "license": "MIT",
+  "author": "Richard Thulstrup",
+  "main": "src/index.js",
+  "style": "style/index.css",
+  "files": [
+    "src/**/*.js",
+    "style/**/*.css"
+  ],
+  "scripts": {
+    "build": "jupyter labextension build .",
+    "clean": "rimraf labextension"
+  },
+  "dependencies": {
+    "@codemirror/language": "^6.0.0",
+    "@codemirror/state": "^6.0.0",
+    "@codemirror/view": "^6.0.0",
+    "@jupyterlab/application": "^4.0.0",
+    "@jupyterlab/codemirror": "^4.0.0"
+  },
+  "devDependencies": {
+    "@jupyterlab/builder": "^4.0.0"
+  },
+  "jupyterlab": {
+    "extension": true,
+    "outputDir": "labextension"
+  }
+}
