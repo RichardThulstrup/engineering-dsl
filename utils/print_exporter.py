@@ -37,15 +37,35 @@ from nbconvert.exporters.webpdf import WebPDFExporter
 TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
 
+def _dsl_lexer():
+    """The DSL lexer with a stream filter that re-types the assignment
+    glyphs.  In some contexts a PythonLexer compound rule consumes
+    ``:=`` with plain ``Operator`` before the DSL's prepended rule sees
+    it — normalise so the glyphs always style as ``Operator.Word``."""
+    from pygments.filter import Filter
+    from pygments.token import Operator
+
+    from .Engineer_Style import EngineeringDSLLexer
+
+    class _AssignGlyphs(Filter):
+        def filter(self, lexer, stream):
+            for ttype, value in stream:
+                if value in (":=", "≔", "←") and ttype in Operator:
+                    ttype = Operator.Word
+                yield ttype, value
+
+    lexer = EngineeringDSLLexer()
+    lexer.add_filter(_AssignGlyphs())
+    return lexer
+
+
 def _dsl_highlight_filter():
     """A ``highlight_code`` Jinja filter using the DSL lexer, matching
     the markup shape of nbconvert's stock ``Highlight2HTML``."""
     from pygments import highlight
     from pygments.formatters import HtmlFormatter
 
-    from .Engineer_Style import EngineeringDSLLexer
-
-    lexer = EngineeringDSLLexer()
+    lexer = _dsl_lexer()
 
     def highlight_code(source, language=None, metadata=None):
         formatter = HtmlFormatter(cssclass=f"highlight hl-{language or 'ipython3'}")
@@ -100,9 +120,7 @@ def _mathstyle_filter():
 
     from pygments import lex
 
-    from .Engineer_Style import EngineeringDSLLexer
-
-    lexer = EngineeringDSLLexer()
+    lexer = _dsl_lexer()
 
     def highlight_code(source, language=None, metadata=None):
         parts = []
@@ -119,11 +137,19 @@ def _mathstyle_filter():
 
 
 def _dsl_pygments_css():
+    """CSS for the DSL colour scheme (``Engineer_Style``) with every
+    bold weight stripped — the JupyterLab editor look, print-calibrated:
+    bold code prints heavy and uneven on paper."""
     from pygments.formatters import HtmlFormatter
 
     from .Engineer_Style import EngineeringDSLStyle
 
-    return HtmlFormatter(style=EngineeringDSLStyle).get_style_defs(".highlight")
+    css = HtmlFormatter(style=EngineeringDSLStyle).get_style_defs(".highlight")
+    css = css.replace("font-weight: bold", "font-weight: normal")
+    # The Lab theme sheet bolds several token classes (.o, .k, .ow …)
+    # that this style doesn't always redefine — the blanket rule wins
+    # over any of them, so no code prints bold anywhere.
+    return css + "\n.highlight span { font-weight: normal !important; }"
 
 
 def _edsl_clean_html():
@@ -154,13 +180,15 @@ class EDSLPrintExporter(HTMLExporter):
     export_from_notebook = "EDSL print view"
 
     code_style = Enum(
-        ("math", "color", "stock"),
-        default_value="math",
+        ("color", "math", "stock"),
+        default_value="color",
         config=True,
-        help="How code cells are typeset: 'math' (monochrome engineering "
+        help="How code cells are typeset: 'color' (the DSL's Pygments "
+             "colours, matching the JupyterLab editor scheme, with bold "
+             "stripped for print), 'math' (monochrome engineering "
              "typography — variables italic with real subscripts, units "
-             "upright, comments grey), 'color' (the DSL's Pygments "
-             "colours), or 'stock' (nbconvert's default highlighting).",
+             "upright, comments grey), or 'stock' (nbconvert's default "
+             "highlighting).",
     )
 
     @default("template_name")

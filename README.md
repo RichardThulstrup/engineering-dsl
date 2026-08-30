@@ -108,14 +108,14 @@ ships two replacements that work out of the box:
 - **`print_view()`** — run it in any cell to get a **🖨 Print…** button
   that opens the notebook's printable rendering in a new tab and pops
   the print dialog once the math is typeset. The rendering is the
-  toolkit's own `edsl_print` nbconvert exporter, which typesets code as
-  monochrome engineering notation — variables italic with real
-  subscripts (`R_total` prints as *R*‹total›), units and numbers
-  upright, comments grey — plus print controls hidden and cells tagged
-  `no-print` omitted (add the tag in JupyterLab's property inspector).
-  It also appears in Lab's *File → Save and Export Notebook As* menu.
-  Prefer colours? `c.EDSLPrintExporter.code_style = "color"` in your
-  Jupyter config switches to the DSL's Pygments palette.
+  toolkit's own `edsl_print` nbconvert exporter: code keeps the DSL
+  colour scheme from the JupyterLab editor (bold stripped for print),
+  print controls are hidden, and cells tagged `no-print` are omitted
+  (add the tag in JupyterLab's property inspector). It also appears in
+  Lab's *File → Save and Export Notebook As* menu. Prefer monochrome?
+  `c.EDSLPrintExporter.code_style = "math"` in your Jupyter config
+  typesets code as engineering notation instead — variables italic
+  with real subscripts, units upright, comments grey.
 - **`hardcopy()`** — renders the notebook's last-saved state to a PDF
   next to it (`hardcopy('DSL_Manual.ipynb')` to pick another). It warns
   when the saved file has no outputs; `hardcopy(execute=True)` runs the

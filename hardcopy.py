@@ -225,6 +225,7 @@ def build_notebook(nb_path: pathlib.Path, opts: argparse.Namespace,
         for fmt in opts.formats:
             t0 = time.perf_counter()
             to = {"md": "markdown"}.get(fmt, fmt)
+            to = opts.exporter_map.get(to, to)
             args = ["--to", to, "--output", stem,
                     "--output-dir", str(opts.out)]
             if opts.no_input:
@@ -318,6 +319,22 @@ def main() -> int:
 
     if opts.qpdf and not shutil.which("qpdf"):
         opts.qpdf = False   # silently skip; it is only a nicety
+
+    # Prefer the toolkit's own exporters (utils/print_exporter.py — the
+    # editor colour scheme, print controls hidden, `no-print` tags, SVG
+    # math in PDFs) when their entry points are installed; plain
+    # html/webpdf otherwise.
+    try:
+        from importlib.metadata import entry_points
+
+        installed = {ep.name for ep in entry_points(group="nbconvert.exporters")}
+    except Exception:
+        installed = set()
+    opts.exporter_map = {}
+    if "edsl_print" in installed:
+        opts.exporter_map["html"] = "edsl_print"
+    if "edsl_pdf" in installed:
+        opts.exporter_map["webpdf"] = "edsl_pdf"
 
     mathjax_url = resolve_mathjax(opts.mathjax)
     opts.out = opts.out.resolve()
