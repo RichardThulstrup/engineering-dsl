@@ -11,7 +11,7 @@ The Pygments patterns are written with only regex features JavaScript
 also supports (alternation, character classes, lookarounds), so they
 transfer verbatim; the ``u`` flag handles the non-BMP-free Unicode.
 
-Three rules in EXTRA_TOKENS use ``bygroups`` (a Python callable that
+A few rules in EXTRA_TOKENS use ``bygroups`` (a Python callable that
 cannot be introspected cleanly); those are recognised by their pattern
 text and emitted with an explicit per-group class list.  One extra
 JS-only rule is appended for trailing-dot decimals (``10.`` — DSL
@@ -50,8 +50,12 @@ TOKEN_CLASS = {
 rules = []
 for pattern, action in EngineeringDSLLexer.EXTRA_TOKENS:
     if callable(action):
-        # The three bygroups rules — identified by pattern content.
-        if r'\.\.' in pattern:
+        # The bygroups rules — identified by pattern content.
+        if pattern.startswith(r'(?<!\.)(\.\.)'):
+            # number AFTER the range dots: dots, space, sign, number
+            groups = ['edsl-op', None, 'edsl-op', 'edsl-number']
+        elif r'\.\.' in pattern:
+            # integer BEFORE the range dots
             groups = ['edsl-number', 'edsl-op']
         elif 'ᵀ' in pattern:
             groups = [None, 'edsl-op']

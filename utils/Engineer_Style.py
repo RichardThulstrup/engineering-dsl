@@ -335,6 +335,14 @@ class EngineeringDSLLexer(PythonLexer):
         # rule would consume ``1.`` out of ``[1..10]`` before the
         # scanner ever reaches the range operator.
         (r'(\d+)(\.\.)(?!\.)', bygroups(Number.Integer, Operator)),
+        # The number AFTER ``..`` needs its own rule as well — not for
+        # Pygments (its float rule picks ``125.`` up fine once ``..`` is
+        # consumed) but for the live editor: CodeMirror's Python parser
+        # emits an error node for ``125`` in ``55 °C..125 °C`` and
+        # ``[1..10]``, so the base theme leaves it uncoloured unless the
+        # overlay claims it.  Same token stream either way.
+        (r'(?<!\.)(\.\.)(?!\.)(\s*)([+-]?)(\d+(?:\.\d*)?(?:[eE][+-]?\d+)?|\.\d+)',
+         bygroups(Operator, Text, Operator, Number.Float)),
         (r'‥|(?<!\.)\.\.(?!\.)', Operator),
 
         # ---- DSL structural operators ----

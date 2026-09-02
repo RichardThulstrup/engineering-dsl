@@ -33,6 +33,8 @@ __all__ = [
     "list_protected", "clear_protections",
     # Emitted by rewrite_list_unit_multiply — must be importable.
     "_CommaArray", "CommaArray", "_range_inc", "_range_ineq", "_str_range", "_as_matrix",
+    # Emitted by rewrite_interval_dots — the ``a ‥ b`` closed-interval form.
+    "_interval",
     "_idx", "_idx_set",
     # Emitted by rewrite_abs_bars — the |…| bars dispatch through this.
     "_abs_or_size",
@@ -1175,6 +1177,15 @@ def _range_inc(start, stop, step=None):
             return out
         return CommaArray(np.array(out, dtype=object))
 
+    # ---- Unit-carrying endpoints — ``(-55 °C .. 125 °C)``, ``[1 kΩ .. 5 kΩ]`` ----
+    # A ``Physical`` can't be handed to ``range()`` (that was the
+    # ``'Physical' object cannot be interpreted as an integer`` crash).
+    # Enumerate in the unit the endpoints were WRITTEN in, then put the
+    # unit back — so ``(-55.0 °C .. 125.0 °C)`` and ``(-55.0 .. 125.0) °C``
+    # produce the same array.
+    if _is_physical(_peel(start)[0]) or _is_physical(_peel(stop)[0]):
+        return _range_inc_physical(start, stop, step)
+
     s = _peel(start)[0]
     e = _peel(stop)[0]
     if step is None:
@@ -1249,6 +1260,138 @@ def _range_inc(start, stop, step=None):
     if range_dp is not None and range_dp > 0:
         return [Sig(v, _sf_for(v)) for v in rng]
     return rng
+
+
+def _is_physical(x) -> bool:
+    """Duck-typed test for a forallpeople ``Physical`` (has ``.value``
+    and ``.dimensions``).  A ``_DeltaTemp`` is deliberately NOT one —
+    it has neither attribute."""
+    return hasattr(x, "value") and hasattr(x, "dimensions")
+
+
+# Kelvin → reading in a written scale, and the factor that turns a kelvin
+# SPAN into a span in that scale (1 K = 1 °C-degree = 9/5 °F-degrees).
+# The display mirror of these lives in ``sigfig._format_temperature``.
+_TEMP_READING = {
+    "K":    lambda k: k,
+    "degC": lambda k: k - 273.15,
+    "degF": lambda k: (k - 273.15) * 9.0 / 5.0 + 32.0,
+    "degR": lambda k: k * 9.0 / 5.0,
+}
+_TEMP_SPAN_FACTOR = {"K": 1.0, "degC": 1.0, "degF": 9.0 / 5.0, "degR": 9.0 / 5.0}
+
+
+def _snap(x: float) -> float:
+    """Kill binary-float dust from a unit conversion (``218.15 - 273.15``
+    is ``-55.00000000000003``) so an enumerated range starts on the
+    number the user actually wrote."""
+    return float(f"{x:.12g}")
+
+
+def _range_inc_physical(start, stop, step=None):
+    """``_range_inc`` for endpoints that carry a unit.
+
+    Both endpoints must be ``Physical`` (optionally ``Sig``-wrapped) of
+    the same dimension.  The sequence is enumerated NUMERICALLY in the
+    unit the start was written in — the auto-prefixed display unit for
+    ordinary quantities (``1 kΩ .. 5 kΩ`` steps in kΩ, not Ω), the
+    written scale for absolute temperatures (``-55 °C .. 125 °C`` steps
+    in °C-degrees, and comes back tagged so it displays in °C) — and
+    the unit is then re-applied element-wise.  The numeric enumeration
+    goes through ``_range_inc`` itself, so decimal-place precision
+    behaves exactly as for ``(-55.0 .. 125.0) °C``.
+
+    ``step`` may be a plain number (meaning "that many of the unit"), a
+    ``Physical`` of the same dimension, or — for temperatures — a
+    ``ΔC``/``ΔK``/``ΔF`` span.
+    """
+    from .sigfig import Sig, _is_pure_temperature
+    raw_s, sf_s = _peel(start)
+    raw_e, sf_e = _peel(stop)
+    if not (_is_physical(raw_s) and _is_physical(raw_e)):
+        raise TypeError(
+            f"range endpoints must both carry a unit or both be plain "
+            f"numbers: got {start!r} and {stop!r}")
+    if raw_s.dimensions != raw_e.dimensions:
+        raise TypeError(
+            f"range endpoints have different units: {start!r} and {stop!r}")
+
+    raw_step = None if step is None else _peel(step)[0]
+
+    # ---- Absolute temperatures: enumerate in the written scale ----
+    if _is_pure_temperature(raw_s):
+        scale = (getattr(start, "_temp_scale", None)
+                 or getattr(stop, "_temp_scale", None) or "K")
+        reading = _TEMP_READING.get(scale, _TEMP_READING["K"])
+        s_num = Sig(_snap(reading(raw_s.value)), sf_s)
+        e_num = Sig(_snap(reading(raw_e.value)), sf_e)
+        if raw_step is None:
+            st = None
+        elif _is_physical(raw_step) and getattr(step, "_temp_scale", None) \
+                and _is_pure_temperature(raw_step):
+            # ``.. 5 °C`` as a step means five degrees on that scale.
+            st = _snap(reading(raw_step.value))
+        elif _is_physical(raw_step):
+            st = _snap(raw_step.value * _TEMP_SPAN_FACTOR.get(scale, 1.0))
+        else:
+            # A ``ΔC``/``ΔK``/``ΔF`` span floats to its kelvin span; a
+            # plain number is already "degrees on this scale".
+            span_k = float(raw_step)
+            st = _snap(span_k * _TEMP_SPAN_FACTOR.get(scale, 1.0)) \
+                if type(raw_step).__name__ == "_DeltaTemp" else span_k
+        nums = _range_inc(s_num, e_num, st)
+        from .extra_units import from_degC, from_degF, from_degR, _tag_temp_scale
+        ctor = {"degC": from_degC, "degF": from_degF, "degR": from_degR}.get(scale)
+        if ctor is not None:
+            return ctor(list(nums))
+        one_K = raw_s / raw_s.value
+        vals = [float(n) for n in nums]
+        return _tag_temp_scale(np.array(vals, dtype=float) * one_K, list(nums), "K")
+
+    # ---- Ordinary quantities: enumerate in the endpoints' display unit ----
+    # forallpeople auto-prefixes by magnitude (``0.5 V`` shows as
+    # ``500 mV``), so take the COARSER prefix of the two ends — for
+    # ``0.5 V .. 2.5 V`` that is volts, giving 0.5, 1.0, … exactly as
+    # ``[0.5..2.5..0.5] V`` does.  A zero endpoint has no prefix of its
+    # own and defers to the other end.
+    ratios = []
+    for r in (raw_s, raw_e):
+        if r.value != 0:
+            ratio = abs(r.value / float(r))    # display-unit size in SI (1000 for kΩ)
+            pow10 = 10.0 ** round(math.log10(ratio))
+            if abs(ratio / pow10 - 1.0) < 1e-9:
+                ratio = pow10                  # snap 999.9999999 → 1000
+            ratios.append(ratio)
+    if not ratios:
+        return CommaArray(np.array([start], dtype=object))
+    ratio = max(ratios)
+    base = raw_s if raw_s.value != 0 else raw_e
+    unit = (base / base.value) * ratio         # one display unit, as a Physical
+
+    def _num(x):
+        # ``1 kΩ`` is 1000.0 / 1000 = 1.0 — hand the numeric range an int
+        # when the reading is whole, so ``[1 kΩ..5 kΩ]`` takes the same
+        # integer path (and prints ``1 kΩ``) as ``[1..5] kΩ`` does.
+        x = _snap(x)
+        return int(x) if x.is_integer() else x
+
+    s_num = Sig(_num(raw_s.value / ratio), sf_s)
+    e_num = Sig(_num(raw_e.value / ratio), sf_e)
+    if raw_step is None:
+        st = None
+    elif _is_physical(raw_step):
+        if raw_step.dimensions != raw_s.dimensions:
+            raise TypeError(
+                f"range step {step!r} has a different unit than {start!r}")
+        st = _num(raw_step.value / ratio)
+    else:
+        st = raw_step
+    # Every element goes back as a ``Sig`` (exact when the range carried
+    # no decimal-place precision) so the unit multiplication yields
+    # sf-aware values — a bare float times a Physical would print at
+    # forallpeople's fixed 3-decimal default (``1.000 kΩ``).
+    elems = [n if isinstance(n, Sig) else Sig(n, _INF) for n in _range_inc(s_num, e_num, st)]
+    return CommaArray(np.array(elems, dtype=object)) * unit
 
 
 def _range_ineq(start, stop, left_closed, right_closed):
@@ -1867,6 +2010,36 @@ def plusminus(x, y):
     return Range.from_pm(x, y)
 
 
+def _interval(low, high):
+    """Closed interval from its two ends: ``low ‥ high``.
+
+    This is the INPUT form of ``Range``'s own printout — ``5 ± 2``
+    displays as ``(3 ‥ 7)``, and pasting ``(3 ‥ 7)`` back in rebuilds
+    the same ``Range``.  Not to be confused with ``a..b`` (two ASCII
+    dots), which ENUMERATES every step between the ends: ``3..7`` is
+    ``[3, 4, 5, 6, 7]``, ``3 ‥ 7`` is the single interval ``[3, 7]``.
+
+    Mirrors ``plusminus``: a ``Sig`` endpoint makes the result a
+    ``Sig(Range(...))`` with bare endpoints inside (so the two ends
+    never collapse visually), carrying the smaller sf of the two, and
+    a temperature written in °C/°F keeps its scale so the interval
+    displays as ``(-55.0 °C ‥ 125. °C)`` rather than in kelvin.
+    """
+    from .sigfig import Sig, _unwrap, _sf_of
+    if isinstance(low, Sig) or isinstance(high, Sig):
+        sfs = [s for s in (_sf_of(low), _sf_of(high)) if s is not None]
+        result = Sig(Range(_unwrap(low), _unwrap(high)), min(sfs) if sfs else _INF)
+        scale = (getattr(low, "_temp_scale", None)
+                 or getattr(high, "_temp_scale", None))
+        if scale and scale != "K":
+            try:
+                result._temp_scale = scale
+            except Exception:
+                pass
+        return result
+    return Range(low, high)
+
+
 def σ(data, ddof=0):
     """Standard deviation, significant-figure- and UNIT-aware.
 
@@ -2404,9 +2577,13 @@ def _rewrite_absolute_temperatures(source: str) -> str:
 
     # Numeric-literal pattern for the operand immediately left of the
     # glyph: optional sign, digits with optional decimal/exponent.  A
-    # bare leading ``.5`` form is allowed too.
+    # bare leading ``.5`` form is allowed too — but NOT when the dot is
+    # the second half of a range ``..``: in ``[0 °C..100 °C]`` the second
+    # operand is ``100``, not ``.100`` (that mis-capture used to leave
+    # ``from_degC(0).from_degC(.100)`` behind, which then parsed as an
+    # attribute access on the first temperature).
     _num = re.compile(
-        r'([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*$'
+        r'([+-]?(?:\d+\.?\d*|(?<!\.)\.\d+)(?:[eE][+-]?\d+)?)\s*$'
     )
 
     def _find_paren_start(s, close_idx):
@@ -2971,7 +3148,17 @@ _BINOP_RHS = (
     # ``_UNIT_NAMES_FOR_BINDING``; we don't accept arbitrary trailing
     # identifiers because that would silently consume the next variable
     # in expressions like ``a ± b c`` (where ``a ± b`` is intended).
-    rf'{_BINOP_RHS_BARE}(?:\s+{_UNIT_NAME_ALT}(?![A-Za-z0-9_]))?'
+    #
+    # The whitespace before the unit is OPTIONAL: ``1.0V`` is as legal
+    # as ``1.0 V`` in the DSL (the token pass binds a glued unit to its
+    # number just the same), so the operand pattern must see ``1.0V``
+    # as one thing.  Otherwise ``1.0V .. 20.0V`` split into ``1.0`` and
+    # ``V .. 20.0`` and died in the tokenizer, and ``1.0V ± 0.1V``
+    # silently became ``1.0 · (V ± 0.1) · V`` — a V² interval.  There is
+    # no ambiguity risk: an identifier operand is consumed greedily by
+    # ``_BINOP_ATOM``, so a unit can only glue onto a number, ``)``
+    # or ``]`` — juxtaposition, which in the DSL means multiplication.
+    rf'{_BINOP_RHS_BARE}(?:\s*{_UNIT_NAME_ALT}(?![A-Za-z0-9_]))?'
 )
 
 
@@ -3363,6 +3550,39 @@ def rewrite_range_dots(source: str) -> str:
         r'_range_inc(\1, \2)',
         source,
     )
+    return source
+
+
+def rewrite_interval_dots(source: str) -> str:
+    """
+    Rewrites the closed-interval operator ``‥`` (U+2025 TWO DOT LEADER):
+
+        a ‥ b            -> _interval(a, b)
+        (3 ‥ 7)          -> (_interval(3, 7))
+        12 Ω ‥ 15 Ω      -> _interval(12 Ω, 15 Ω)
+
+    ``‥`` is the glyph ``Range`` prints itself with — ``5 ± 2`` shows
+    ``(3 ‥ 7)`` — so this pass makes that printout valid input: what
+    you see is what you can paste back.  It is distinct from the
+    two-ASCII-dot ``a..b`` handled by :func:`rewrite_range_dots`, which
+    ENUMERATES the steps between the ends (``3..7`` → ``[3,4,5,6,7]``).
+
+    Runs before ``rewrite_range_dots``; the two never overlap because
+    ``‥`` is a single code point that the ``..`` pattern can't match.
+    Operands are the same shapes ``..`` accepts (literals, identifiers,
+    calls, parenthesised groups, optionally unit-suffixed, optional
+    leading sign).  Same caveat as the other regex rewriters: a ``‥``
+    inside a string literal is rewritten too.
+    """
+    RANGE_OP = rf'(?:[+-]\s*)?{_BINOP_RHS}'
+    previous = None
+    while source != previous:
+        previous = source
+        source = re.sub(
+            rf'(?<![A-Za-z0-9_.]){RANGE_OP}\s*‥\s*{RANGE_OP}',
+            lambda m: _wrap_binop('_interval', '‥', m.group(0)),
+            source,
+        )
     return source
 
 # ---------- inequality-style for-loop ----------
@@ -6708,6 +6928,10 @@ def transform_source(source, **_kwargs):
     # rewriter, so string endpoints are turned into ``_str_range`` splices
     # and the numeric rewriter never sees them.
     source = rewrite_string_range(source)
+    # Closed interval ``a ‥ b`` (the glyph ``Range`` prints with) before
+    # the enumerating ``a..b`` — distinct code points, no overlap, but
+    # keeping them adjacent documents that they are siblings.
+    source = rewrite_interval_dots(source)
     source = rewrite_range_dots(source)
     # Inequality-style for-loop headers.  Must run after normalize_source
     # (so ``≤``/``≥`` have already become ``<=``/``>=``) and after

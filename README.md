@@ -35,7 +35,9 @@ not string parsing.
   inequality for-loops (`for 1 ≤ k ≤ 5:`), set operators (`∩`, `∪`),
   `%` and `‰` as numeric suffixes.
 - **Engineering literals** — base-subscript integers (`fed₁₆`, `1011₂`),
-  Roman numerals (`"MCMXCIV"ᵣₒₘₑ`), inclusive ranges (`[1..10]`),
+  Roman numerals (`"MCMXCIV"ᵣₒₘₑ`), inclusive ranges (`[1..10]`, also
+  between unit-carrying ends: `[-55 °C..125 °C]`), closed intervals
+  (`3 ‥ 7` — the form a `±` result prints in, so output pastes back as input),
   string/label ranges (`['C8'..'C13']`).
 - **Matrices** — a `[[…]]` literal is a real sympy matrix with linear
   algebra (`M.inv()`, `M.det()`, `Mᵀ`), 2-D subscript access `M₀͵₁`
