@@ -133,6 +133,29 @@ check("ellipsis untouched", r == (1, 2, Ellipsis), repr(r))
 
 print()
 print("=" * 70)
+print("[a..b] unit — bare base units print like prefixed (Sig-wrapped) ones")
+print("=" * 70)
+a = run("[1..5] V")
+check("[1..5] V prints exact", [repr(x) for x in a] == ["1 V", "2 V", "3 V", "4 V", "5 V"], repr(a))
+a = run("[10..8] V")
+check("[10..8] V prints exact", [repr(x) for x in a] == ["10 V", "9 V", "8 V"], repr(a))
+a = run("[1..3] / s")
+check("[1..3] / s prints exact", [repr(x) for x in a] == ["1 Hz", "2 Hz", "3 Hz"], repr(a))
+a = run("[1..3] · V")
+check("[1..3] · V prints exact", [repr(x) for x in a] == ["1 V", "2 V", "3 V"], repr(a))
+a = run("[1..3] * 2")
+check("[1..3] * 2 unaffected", [repr(x) for x in a] == ["2", "4", "6"], repr(a))
+a = run("[1..5]")
+check("[1..5] stays a numeric array", a.dtype != object and list(a) == [1, 2, 3, 4, 5], f"{a!r} dtype={a.dtype}")
+a = run("[0.5..2.5..0.5] V")
+check("[0.5..2.5..0.5] V keeps its precision", [repr(x) for x in a] == ["500 mV", "1.0 V", "1.5 V", "2.0 V", "2.5 V"], repr(a))
+a = run("[1, 2, 3] V")
+check("[1, 2, 3] V unchanged", [repr(x) for x in a] == ["1 V", "2 V", "3 V"], repr(a))
+r = run("Σ([n for n in 1..4])")
+check("bare 1..4 still a plain range for loops", r == 10, repr(r))
+
+print()
+print("=" * 70)
 print("glued units — ``1.0V`` must behave exactly like ``1.0 V`` in every binary rewriter")
 print("=" * 70)
 for glued, spaced in [
@@ -143,6 +166,11 @@ for glued, spaced in [
     ("1.0V ± 0.1V", "1.0 V ± 0.1 V"),
     ("4.7kΩ ‖ 4.7kΩ", "4.7 kΩ ‖ 4.7 kΩ"),
     ("-55.0°C..125.0°C", "-55.0 °C .. 125.0 °C"),
+    # trailing-dot decimal glued to the unit — used to split into
+    # ``110.`` and ``V..200V`` and evaluate to ``110 · [1 V .. 200 V]``
+    ("110.V..200V", "110. V .. 200 V"),
+    ("110.V ± 5.V", "110. V ± 5. V"),
+    ("[10.V..20.V..5.V]", "[10. V..20. V..5. V]"),
 ]:
     try:
         a, b = run(glued), run(spaced)

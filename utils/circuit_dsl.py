@@ -2130,6 +2130,41 @@ class CommaArray(np.ndarray):
         # Required for subclassing ndarray; nothing extra to track.
         pass
 
+    # ---- unit binding for numeric-dtype arrays ---------------------------
+    # ``[1..5] V`` is emitted as ``_CommaArray(_range_inc(1, 5)) * V``.  A
+    # range of exact integers arrives as an int64 array, and int64 times
+    # a BARE forallpeople unit (``V``, ``s``, ``m`` — the base units live
+    # in builtins as plain Physicals) gives bare Physicals, which repr at
+    # forallpeople's fixed three decimals: ``[1.000 V, 2.000 V, …]``.  A
+    # PREFIXED unit (``kΩ``, ``ms`` — ``Sig``-wrapped in calc_symbols)
+    # gives ``Sig`` elements and prints ``[1 kΩ, 2 kΩ, …]``.  Same range,
+    # two looks.  So before a numeric array meets a Physical, lift its
+    # elements to exact ``Sig``s (``sf = ∞`` — the endpoints were exact,
+    # or ``_range_inc`` would already have produced ``Sig`` elements at
+    # the endpoints' decimal-place precision).  Object-dtype arrays
+    # (list literals, float ranges with precision, dates) pass through
+    # untouched, and so does everything that isn't a unit multiplication
+    # — ``[1..N]`` stays a fast numeric array for loops and numpy maths.
+    def _lifted_for(self, other):
+        if self.dtype == object or self.dtype.kind not in "iuf":
+            return self
+        if not _is_physical(other):
+            return self
+        flat = [Sig(v, _INF) for v in self.ravel().tolist()]
+        return CommaArray(np.array(flat, dtype=object).reshape(self.shape))
+
+    def __mul__(self, other):
+        return np.ndarray.__mul__(self._lifted_for(other), other)
+
+    def __rmul__(self, other):
+        return np.ndarray.__rmul__(self._lifted_for(other), other)
+
+    def __truediv__(self, other):
+        return np.ndarray.__truediv__(self._lifted_for(other), other)
+
+    def __rtruediv__(self, other):
+        return np.ndarray.__rtruediv__(self._lifted_for(other), other)
+
     def _render(self):
         """Produce the bracketed, comma-separated string.
 
@@ -3158,7 +3193,18 @@ _BINOP_RHS = (
     # no ambiguity risk: an identifier operand is consumed greedily by
     # ``_BINOP_ATOM``, so a unit can only glue onto a number, ``)``
     # or ``]`` — juxtaposition, which in the DSL means multiplication.
-    rf'{_BINOP_RHS_BARE}(?:\s*{_UNIT_NAME_ALT}(?![A-Za-z0-9_]))?'
+    #
+    # A trailing-dot decimal glued to a unit — ``110.V`` — is the one
+    # number shape ``_BINOP_ATOM`` cannot supply: its ``\d+\.`` form
+    # refuses a following letter (so ``x = 3.real`` style attribute
+    # access is never mistaken for a number).  Python itself tokenises
+    # ``110.V`` as the float ``110.`` and the name ``V``, and the token
+    # pass binds them, so the operand must too — or ``110.V..200V``
+    # matched as ``110`` followed by ``V..200V``, and evaluated to
+    # ``110 · [1 V .. 200 V]``.  Tried first so the plain-atom branch
+    # can't settle for the bare integer.
+    rf'(?:\d+\.(?=[A-Za-z_])\s*{_UNIT_NAME_ALT}(?![A-Za-z0-9_])'
+    rf'|{_BINOP_RHS_BARE}(?:\s*{_UNIT_NAME_ALT}(?![A-Za-z0-9_]))?)'
 )
 
 
