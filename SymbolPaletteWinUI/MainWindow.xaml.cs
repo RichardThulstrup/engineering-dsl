@@ -563,12 +563,77 @@ public sealed partial class MainWindow : Window
             Tag = entry,
         };
 
+        // Subscript / superscript glyphs are tiny by design and, centred
+        // in the button, give no clue whether they sit above or below the
+        // line.  Show the *plain* character at full size instead, parked
+        // in the top third (superscript) or bottom third (subscript) of
+        // the face — the position says up/down, the size keeps it legible.
+        // The click still pastes ``entry.Text`` (the real ₂ / ² glyph).
+        var script = ScriptKindOf(entry.Text);
+        if (script != ScriptKind.None && entry.Label is null)
+        {
+            button.Padding = new Thickness(12, 2, 12, 2);
+            button.VerticalContentAlignment = VerticalAlignment.Stretch;
+            button.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+            button.Content = new Grid
+            {
+                MinHeight = 38,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = BaseCharacterOf(entry.Text),
+                        FontSize = 20,
+                        FontWeight = FontWeights.SemiBold,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = script == ScriptKind.Superscript
+                            ? VerticalAlignment.Top
+                            : VerticalAlignment.Bottom,
+                        Margin = script == ScriptKind.Superscript
+                            ? new Thickness(0, -2, 0, 0)
+                            : new Thickness(0, 0, 0, -2),
+                    },
+                },
+            };
+        }
+
         button.Click += SymbolButton_Click;
         button.PointerEntered += SymbolButton_PointerEntered;
         button.PointerExited += SymbolButton_PointerExited;
 
         return button;
     }
+
+    private enum ScriptKind { None, Subscript, Superscript }
+
+    /// <summary>
+    /// Classify a one-character paste text as a Unicode subscript,
+    /// superscript, or neither.  Decided by code point so the symbol data
+    /// needs no annotation: U+2080–U+209C and the four phonetic
+    /// subscripts ᵢ ᵣ ᵤ ᵥ (U+1D62–U+1D65) plus ⱼ (U+2C7C) are subscripts;
+    /// anything else whose NFKC form is a different character (², ⁿ,
+    /// ᵃ, ʰ, ᶜ …) is a superscript.
+    /// </summary>
+    private static ScriptKind ScriptKindOf(string text)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length != 1)
+            return ScriptKind.None;
+
+        int cp = text[0];
+        if ((cp >= 0x2080 && cp <= 0x209C) || (cp >= 0x1D62 && cp <= 0x1D65) || cp == 0x2C7C)
+            return ScriptKind.Subscript;
+
+        string plain = text.Normalize(System.Text.NormalizationForm.FormKC);
+        if (plain != text && plain.Length == 1 && !char.IsWhiteSpace(plain[0]))
+            return ScriptKind.Superscript;
+
+        return ScriptKind.None;
+    }
+
+    /// <summary>The ordinary character a sub/superscript glyph stands for
+    /// (``₂`` → ``2``, ``ⁿ`` → ``n``).</summary>
+    private static string BaseCharacterOf(string text) =>
+        text.Normalize(System.Text.NormalizationForm.FormKC);
 
     /// <summary>
     /// Paste a ready-made payload into the previously active window, via
