@@ -1103,6 +1103,58 @@ class Sig:
     def __abs__(self):
         return self._copy_display_hints(Sig(abs(self.value), self.sf))
 
+    # ---- rounding protocol ---------------------------------------------
+    # ``round(x, n)`` is the everyday "give me two decimals" — it used to
+    # raise ``TypeError: type Sig doesn't define __round__``.  The result
+    # stays a ``Sig`` so units survive (``round(1.2345 V, 2)`` → ``1.23 V``)
+    # and the sf is capped at what the rounded digits can claim.  A
+    # ``Physical`` has no ``__round__`` of its own, so round its SI
+    # magnitude and rebuild through the unit.  ``math.floor/ceil/trunc``
+    # return plain ints, as Python's protocol requires.
+    def __round__(self, ndigits=None):
+        import math as _m
+        v = self.value
+        if hasattr(v, "value") and hasattr(v, "dimensions"):      # Physical
+            mag = float(v.value)
+            r = round(mag, ndigits)
+            new = v * (r / mag) if mag else v
+        else:
+            r = round(v, ndigits)
+            new = r
+            mag = float(v) if not isinstance(v, complex) else abs(v)
+        if ndigits is None:
+            sf = self.sf
+        else:
+            # sf implied by ``ndigits`` decimals at this magnitude.
+            try:
+                order = _m.floor(_m.log10(abs(float(r)))) if float(r) else 0
+                sf = min(self.sf, max(1, order + 1 + ndigits))
+            except (ValueError, OverflowError, TypeError):
+                sf = self.sf
+        return self._copy_display_hints(Sig(new, sf))
+
+    def __floor__(self):
+        import math as _m
+        return _m.floor(self.value)
+
+    def __ceil__(self):
+        import math as _m
+        return _m.ceil(self.value)
+
+    def __trunc__(self):
+        import math as _m
+        return _m.trunc(self.value)
+
+    def __contains__(self, item):
+        # ``102 Ω in (95 Ω ‥ 105 Ω)`` — the interval sits inside the Sig.
+        return item in self.value
+
+    def __divmod__(self, other):
+        return (self // other, self % other)
+
+    def __rdivmod__(self, other):
+        return (other // self, other % self)
+
     # ---- bitwise & shift (integer-only) ----------------------------------
     # The DSL hands numeric literals in as ``Sig``, so ``data₁ << 2`` arrives
     # as ``<Integer> << Sig(2)``; without these, the shift amount being a
@@ -1159,6 +1211,32 @@ class Sig:
     def arcsin(self):  import math as _m; return self._smooth_apply(_m.asin)
     def arccos(self):  import math as _m; return self._smooth_apply(_m.acos)
     def arctan(self):  import math as _m; return self._smooth_apply(_m.atan)
+    def arcsinh(self): import math as _m; return self._smooth_apply(_m.asinh)
+    def arccosh(self): import math as _m; return self._smooth_apply(_m.acosh)
+    def arctanh(self): import math as _m; return self._smooth_apply(_m.atanh)
+    def log1p(self):   import math as _m; return self._smooth_apply(_m.log1p)
+    def expm1(self):   import math as _m; return self._smooth_apply(_m.expm1)
+    def exp2(self):    return self._smooth_apply(lambda v: 2.0 ** v)
+    def cbrt(self):    import math as _m; return self._smooth_apply(_m.cbrt)
+    def square(self):  return self._smooth_apply(lambda v: v * v)
+    def degrees(self): import math as _m; return self._smooth_apply(_m.degrees)
+    def radians(self): import math as _m; return self._smooth_apply(_m.radians)
+    def deg2rad(self): import math as _m; return self._smooth_apply(_m.radians)
+    def rad2deg(self): import math as _m; return self._smooth_apply(_m.degrees)
+    # Rounding / sign ufuncs — exact results, sf kept as a formality.
+    def floor(self):   import math as _m; return Sig(_m.floor(self.value), self.sf)
+    def ceil(self):    import math as _m; return Sig(_m.ceil(self.value), self.sf)
+    def trunc(self):   import math as _m; return Sig(_m.trunc(self.value), self.sf)
+    def rint(self):    return Sig(round(self.value), self.sf)
+    def sign(self):
+        v = self.value
+        return Sig((v > 0) - (v < 0), _INF)
+    def absolute(self): return abs(self)
+    def fabs(self):     return abs(self)
+    def conjugate(self): return Sig(self.value.conjugate() if hasattr(self.value, "conjugate") else self.value, self.sf)
+    def isnan(self):   import math as _m; return _m.isnan(float(self.value))
+    def isinf(self):   import math as _m; return _m.isinf(float(self.value))
+    def isfinite(self): import math as _m; return _m.isfinite(float(self.value))
 
     # ---- comparisons (return plain bool) ---------------------------------
 

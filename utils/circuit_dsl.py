@@ -27,6 +27,8 @@ __all__ = [
     "Γ", "Π", "log10", "log2", "ln", "floor", "ceil",
     "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
     "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "exp",
+    "hypot", "cbrt", "sign", "clamp", "norm", "dot", "cross",
+    "gcd", "lcm", "comb", "perm", "nan", "_eq",
     "phasor", "to_dB_v", "to_dB_p", "from_dB_v", "from_dB_p",
     "approx",
     # Identifier-protection API:
@@ -591,6 +593,44 @@ class Range:
     def __neg__(self):
         return Range(-self.high, -self.low)
 
+    def __pos__(self):
+        return self
+
+    def __abs__(self):
+        """``|R|`` — the interval of magnitudes.  A zero-crossing interval
+        folds at 0: ``|(-3 ‥ 5)|`` is ``(0 ‥ 5)``."""
+        zero = self.low * 0 + self.high * 0   # (-0.0) + 0.0 == 0.0, never ``-0.0 Ω``
+        if self.low >= zero:
+            return self
+        if self.high <= zero:
+            return Range(-self.high, -self.low)
+        return Range(zero, max(-self.low, self.high))
+
+    @property
+    def width(self):
+        """Full width ``high - low`` (``tol`` is the half-width)."""
+        return self.high - self.low
+
+    def __contains__(self, x):
+        """``102 Ω in (95 Ω ‥ 105 Ω)`` — closed-interval membership.  A
+        Range operand is contained when it lies entirely inside."""
+        try:
+            from .sigfig import _unwrap
+            x = _unwrap(x)
+        except Exception:
+            pass
+        if isinstance(x, Range):
+            return bool(self.low <= x.low and x.high <= self.high)
+        return bool(self.low <= x <= self.high)
+
+    def __rpow__(self, base):
+        """``b ** R`` for a scalar base — monotone in the exponent, rising
+        for ``b > 1`` and falling for ``0 < b < 1``."""
+        if isinstance(base, Range):
+            return NotImplemented
+        lo, hi = base ** self.low, base ** self.high
+        return Range(min(lo, hi), max(lo, hi))
+
     def __mul__(self, other):
         other = Range.coerce(other)
         vals = [
@@ -977,6 +1017,34 @@ def rewrite_base_suffixed_numbers(source: str) -> str:
     return source
 
 
+# Symbol names declared WITH a subscript (``symbols: R₁, R₂``), raw
+# spelling → the ASCII name the declaration bound (``R_1``).  Filled by
+# the declaration rewriters and consulted by ``rewrite_subscript_indices``
+# so a later ``R₁`` in the same session means the symbol, not ``R[1]``.
+# Session-scoped by design (like ``▸ roman`` registration): the
+# declaration must run before the use, as it must for the symbol to exist.
+_DECLARED_SUBSCRIPT_SYMBOLS: dict = {}
+
+
+def _register_subscript_symbols(targets):
+    for t in targets:
+        ascii_name = _sympy_symbol_name(t)
+        if ascii_name != t:
+            _DECLARED_SUBSCRIPT_SYMBOLS[t] = ascii_name
+
+
+def _substitute_declared_symbols(source: str) -> str:
+    if not _DECLARED_SUBSCRIPT_SYMBOLS:
+        return source
+    tail = r'[₀₁₂₃₄₅₆₇₈₉₊₋₍₎ₐₑₒₓₔₕₖₗₘₙₚₛₜᵢⱼᵣᵤᵥ]'
+    for raw, ascii_name in sorted(_DECLARED_SUBSCRIPT_SYMBOLS.items(),
+                                  key=lambda kv: -len(kv[0])):
+        source = re.sub(
+            rf'(?<![{IDENT_CONT}]|{tail})' + re.escape(raw) + rf'(?![{IDENT_CONT}]|{tail})',
+            ascii_name, source)
+    return source
+
+
 def rewrite_subscript_indices(source: str) -> str:
     """
     Rewrites postfix Unicode subscripts as Python index expressions.
@@ -1018,6 +1086,10 @@ def rewrite_subscript_indices(source: str) -> str:
     use ``x_1``, ``x1``, or any other naming you like — the math-style
     subscript notation is reserved for indexing.
     """
+
+    # Names declared as subscripted sympy symbols are identifiers, not
+    # index expressions — swap them for their ASCII spelling first.
+    source = _substitute_declared_symbols(source)
 
     SUB_DIGIT_OR_SIGN = r'₀₁₂₃₄₅₆₇₈₉₊₋₍₎'
     SUB_LETTER = r'ₐₑₒₓₔₕₖₗₘₙₚₛₜᵢⱼᵣᵤᵥ'
@@ -1142,6 +1214,42 @@ def rewrite_subscript_indices(source: str) -> str:
 
 
 # ---------- runtime helper functions ----------
+
+def _range_apply(fn, r, critical=None):
+    """Image of the interval ``r`` under the scalar function ``fn``.
+
+    ``fn`` is evaluated at both endpoints and at every *critical point*
+    (where ``fn`` turns) that falls strictly inside the interval; the
+    result is the min/max of those samples.  For a monotone ``fn`` the
+    endpoints alone are enough (``critical=None``).  ``critical`` is a
+    callable ``(low, high) -> iterable`` of interior turning points.
+    """
+    lo, hi = float(r.low), float(r.high)
+    samples = [fn(lo), fn(hi)]
+    if critical is not None:
+        samples.extend(fn(c) for c in critical(lo, hi) if lo < c < hi)
+    return Range(min(samples), max(samples))
+
+
+def _turning_points(period_start, period):
+    """Critical points of a periodic function: ``period_start + k·period``
+    for every integer ``k`` — used by ``sin`` (π/2 + kπ) and ``cos`` (kπ)."""
+    def crit(lo, hi):
+        k0 = math.floor((lo - period_start) / period)
+        k1 = math.ceil((hi - period_start) / period)
+        return [period_start + k * period for k in range(k0, k1 + 1)]
+    return crit
+
+
+_RANGE_CRITICAL = {
+    "sin": _turning_points(math.pi / 2, math.pi),
+    "cos": _turning_points(0.0, math.pi),
+    "cosh": lambda lo, hi: [0.0],
+}
+_RANGE_POLES = {          # fn -> turning-point generator for its poles
+    "tan": _turning_points(math.pi / 2, math.pi),
+}
+
 
 def _peel(x):
     """Strip any Sig wrappers and return (raw_value, sf)."""
@@ -2234,6 +2342,12 @@ def sqrt(x):
 
 # ---------- new runtime helpers ----------
 
+# Integer helpers straight from ``math`` (exact by nature).  ``comb`` is
+# the binomial coefficient — not ``C``, which is the coulomb.
+gcd, lcm, comb, perm = math.gcd, math.lcm, math.comb, math.perm
+nan = float("nan")
+
+
 class CommaArray(np.ndarray):
     """ndarray subclass that prints with comma separators.
 
@@ -2411,6 +2525,9 @@ def _math_or_sympy(x, math_fn, sympy_fn_name):
         import sympy
         return getattr(sympy, sympy_fn_name)(x)
     raw, sf = _peel(x)
+    if isinstance(raw, Range):
+        # All users of this helper (logs, floor, ceil) are monotone.
+        return Sig(_range_apply(lambda v: math_fn(v), raw), sf)
     return Sig(math_fn(float(raw)), sf)
 
 
@@ -2475,6 +2592,144 @@ def Π(data):
 # Greek-letter forms ever appear.
 
 
+def _eq(a, b):
+    """Runtime target of a math-style ``=`` (``x² = 4``, ``print(a = b)``).
+
+    Plain values compare with ``==`` and give a ``bool``, exactly as
+    before.  When either side is symbolic the result is a sympy ``Eq``
+    — so ``solve(x² = 4, x)`` finds ``[-2, 2]`` instead of solving the
+    structural comparison ``False``, and ``eq := x² = 4`` is an equation
+    you can ``pp`` or hand to ``nsolve``.
+    """
+    ra, _ = _peel(a)
+    rb, _ = _peel(b)
+    if _is_symbolic(ra) or _is_symbolic(rb):
+        import sympy
+        try:
+            return sympy.Eq(ra, rb)
+        except Exception:
+            pass
+    return a == b
+
+
+def _vector_parts(v):
+    """Split a vector-like into ``(unit_or_None, [floats])`` for the
+    linear-algebra helpers.  Accepts lists/tuples, numpy arrays (the
+    DSL's ``[…] V`` CommaArray), sympy row/column matrices, and any
+    iterable of numbers, Sigs or same-dimension Physicals."""
+    from .sigfig import _unwrap, _sf_of
+    items = list(v.tolist() if hasattr(v, "tolist") else v)
+    # sympy column/row matrices come back as nested one-element lists
+    if items and isinstance(items[0], list):
+        items = [x[0] if len(x) == 1 else x for x in items]
+    sf = min((_sf_of(x) for x in items), default=_INF)
+    raw = [_unwrap(x) for x in items]
+    unit = None
+    if raw and any(_is_physical(x) for x in raw):
+        if not all(_is_physical(x) for x in raw):
+            raise TypeError("vector mixes dimensioned and plain elements")
+        dims = {tuple(x.dimensions) for x in raw}
+        if len(dims) != 1:
+            raise TypeError("vector elements have different dimensions")
+        unit = raw[0] / float(raw[0].value) if float(raw[0].value) else None
+        if unit is None:
+            nz = next((x for x in raw if float(x.value)), None)
+            unit = nz / float(nz.value) if nz is not None else raw[0]
+        vals = [float(x.value) for x in raw]
+    else:
+        vals = [float(x) for x in raw]
+    return unit, vals, sf
+
+
+def norm(v):
+    """Euclidean norm ``‖v‖`` — unit-aware.  ``‖[3., 4.] N‖`` is ``5.0 N``;
+    a sympy matrix uses its own ``.norm()``; a scalar gives ``abs``."""
+    raw, _ = _peel(v)
+    if _is_symbolic(raw) or hasattr(raw, "det"):
+        return raw.norm()
+    if isinstance(raw, (int, float, complex, Range)) or _is_physical(raw):
+        return abs(v)
+    unit, vals, sf = _vector_parts(v)
+    n = math.sqrt(sum(x * x for x in vals))
+    return Sig(n * unit if unit is not None else n, sf)
+
+
+def dot(u, v):
+    """Dot product, unit-aware: ``dot([1,2,3] N, [4,5,6] m)`` is ``32 J``."""
+    if hasattr(u, "det") or hasattr(v, "det"):
+        return u.dot(v)
+    uu, uv, sfu = _vector_parts(u)
+    vu, vv, sfv = _vector_parts(v)
+    if len(uv) != len(vv):
+        raise ValueError("dot(): vectors have different lengths")
+    s = sum(a * b for a, b in zip(uv, vv))
+    unit = None
+    if uu is not None or vu is not None:
+        unit = (uu if uu is not None else 1) * (vu if vu is not None else 1)
+    return Sig(s * unit if unit is not None else s, min(sfu, sfv))
+
+
+def cross(u, v):
+    """Cross product of two 3-vectors, unit-aware; returns a CommaArray."""
+    if hasattr(u, "det") or hasattr(v, "det"):
+        return u.cross(v)
+    uu, a, sfu = _vector_parts(u)
+    vu, b, sfv = _vector_parts(v)
+    if len(a) != 3 or len(b) != 3:
+        raise ValueError("cross(): both vectors must have 3 components")
+    c = [a[1] * b[2] - a[2] * b[1],
+         a[2] * b[0] - a[0] * b[2],
+         a[0] * b[1] - a[1] * b[0]]
+    sf = min(sfu, sfv)
+    unit = None
+    if uu is not None or vu is not None:
+        unit = (uu if uu is not None else 1) * (vu if vu is not None else 1)
+    out = [Sig(x * unit if unit is not None else x, sf) for x in c]
+    return np.array(out, dtype=object).view(_CommaArray)
+
+
+def hypot(*legs):
+    """``√(a² + b² + …)`` — unit-aware and sf-aware: ``hypot(3.0 m, 4.0 m)``
+    is ``5.0 m``.  Symbolic legs go through sympy."""
+    if not legs:
+        raise TypeError("hypot() needs at least one argument")
+    if any(_is_symbolic(_peel(x)[0]) for x in legs):
+        import sympy
+        return sympy.sqrt(sum(_peel(x)[0] ** 2 for x in legs))
+    total = legs[0] * legs[0]
+    for x in legs[1:]:
+        total = total + x * x
+    return total ** 0.5
+
+
+def cbrt(x):
+    """Cube root, unit-aware: ``cbrt(8.0 m³)`` is ``2.0 m``.  Same as ``³√x``."""
+    raw, sf = _peel(x)
+    if _is_symbolic(raw):
+        import sympy
+        return sympy.cbrt(raw)
+    if isinstance(raw, (int, float)) and raw < 0:
+        return Sig(-((-raw) ** (1.0 / 3.0)), sf)
+    return x ** (1.0 / 3.0)
+
+
+def sign(x):
+    """Signum: ``-1``, ``0`` or ``1`` (exact).  Symbolic → ``sympy.sign``."""
+    raw, _ = _peel(x)
+    if _is_symbolic(raw):
+        import sympy
+        return sympy.sign(raw)
+    zero = raw * 0
+    return Sig((raw > zero) - (raw < zero), _INF)
+
+
+def clamp(x, lo, hi):
+    """Clip ``x`` into ``[lo, hi]`` — works with units and Sigs."""
+    if lo > hi:
+        raise ValueError("clamp(): lo must not exceed hi")
+    return lo if x < lo else hi if x > hi else x
+
+
 def _numeric_or_symbolic(x, math_fn, sympy_name, *, fn_label):
     """Shared body of the trig / hyperbolic / exp wrappers.
 
@@ -2495,6 +2750,17 @@ def _numeric_or_symbolic(x, math_fn, sympy_name, *, fn_label):
             f"{fn_label}() needs a dimensionless argument, got {raw}. "
             "Divide by a reference quantity first (e.g. sin(θ) with "
             "θ = arc/r), or use ° / radians for angles.")
+    if isinstance(raw, Range):
+        # Interval argument (``sin(θ ± 0.1)``): the image of the interval,
+        # taking interior turning points into account for the periodic
+        # functions; a pole inside the interval is an error.
+        poles = _RANGE_POLES.get(fn_label)
+        if poles is not None and any(float(raw.low) < c < float(raw.high)
+                                     for c in poles(float(raw.low), float(raw.high))):
+            raise ValueError(f"{fn_label}() is unbounded on {raw}: the "
+                             "interval contains a pole")
+        return Sig(_range_apply(lambda v: math_fn(v), raw,
+                                _RANGE_CRITICAL.get(fn_label)), sf)
     if _is_symbolic(raw):
         import sympy
         res = getattr(sympy, sympy_name)(raw)
@@ -2607,6 +2873,8 @@ def log10(x):
         import sympy
         return sympy.log(x, 10)
     raw, sf = _peel(x)
+    if isinstance(raw, Range):
+        return Sig(_range_apply(math.log10, raw), sf)
     return Sig(math.log10(float(raw)), sf)
 
 
@@ -2619,6 +2887,8 @@ def log2(x):
         import sympy
         return sympy.log(x, 2)
     raw, sf = _peel(x)
+    if isinstance(raw, Range):
+        return Sig(_range_apply(math.log2, raw), sf)
     return Sig(math.log2(float(raw)), sf)
 
 
@@ -2631,6 +2901,8 @@ def ln(x):
         import sympy
         return sympy.log(x)
     raw, sf = _peel(x)
+    if isinstance(raw, Range):
+        return Sig(_range_apply(math.log, raw), sf)
     return Sig(math.log(float(raw)), sf)
 
 
@@ -2643,6 +2915,8 @@ def floor(x):
         import sympy
         return sympy.floor(x)
     raw, sf = _peel(x)
+    if isinstance(raw, Range):
+        return Sig(Range(math.floor(raw.low), math.floor(raw.high)), sf)
     return Sig(math.floor(raw), sf)
 
 
@@ -2659,6 +2933,8 @@ def ceil(x):
         import sympy
         return sympy.ceiling(x)
     raw, sf = _peel(x)
+    if isinstance(raw, Range):
+        return Sig(Range(math.ceil(raw.low), math.ceil(raw.high)), sf)
     return Sig(math.ceil(raw), sf)
 
 
@@ -2765,6 +3041,66 @@ def approx(a, b, rtol=1e-9, atol=1e-12):
 
 
 # ---------- source normalization ----------
+
+_NORM_OPEN_BEFORE = frozenset("=([{,:+-*/%<>!&|^~")
+
+
+def rewrite_norm_bars(source: str) -> str:
+    """``‖v‖`` → ``norm(v)``, and ``∥`` (U+2225 PARALLEL TO) → ``‖``.
+
+    The same glyph is the parallel operator (``R₁ ‖ R₂``), so the bars
+    are read as a norm only when the opening ``‖`` starts an expression
+    — preceded by nothing, an operator, an opening bracket, a comma or
+    an assignment — and a closing ``‖`` follows at bracket depth 0 on
+    the same line.  ``a ‖ b`` never starts an expression with ``‖``, so
+    the two readings cannot collide; ``a ‖ (‖v‖)`` works because the
+    inner bars follow a ``(``.
+    """
+    source = source.replace("∥", "‖")
+    out = []
+    i, n = 0, len(source)
+    while i < n:
+        c = source[i]
+        if c != "‖":
+            out.append(c)
+            i += 1
+            continue
+        # Expression-start test on what precedes the glyph.
+        j = i - 1
+        while j >= 0 and source[j] in " \t":
+            j -= 1
+        starts = j < 0 or source[j] == "\n" or source[j] in _NORM_OPEN_BEFORE
+        if starts and j >= 0 and source[j] == "|" and j >= 1 and source[j - 1] == "|":
+            starts = False          # ``a || ‖v‖``? not a form we accept
+        if not starts:
+            out.append(c)
+            i += 1
+            continue
+        # Find the closing bar at depth 0 on this line.
+        depth = 0
+        k = i + 1
+        close = -1
+        while k < n and source[k] != "\n":
+            ch = source[k]
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                if depth == 0:
+                    break
+                depth -= 1
+            elif ch == "‖" and depth == 0:
+                close = k
+                break
+            k += 1
+        body = source[i + 1:close].strip() if close > i else ""
+        if close < 0 or not body:
+            out.append(c)
+            i += 1
+            continue
+        out.append(f"norm({body})")
+        i = close + 1
+    return "".join(out)
+
 
 def rewrite_set_membership_swap(source: str) -> str:
     """
@@ -3076,6 +3412,20 @@ def normalize_source(source: str) -> str:
         "≥": ">=",
         "‖": "||",
         "∞": "inf",
+        # Roots: ``∛x`` / ``∜x`` are the precomposed forms of ``³√x`` / ``⁴√x``.
+        "∛": "³√",
+        "∜": "⁴√",
+        # Logic: ``a ∧ b``, ``a ∨ b``, ``¬a``.
+        "∧": " and ",
+        "∨": " or ",
+        "¬": " not ",
+        # Calculus glyphs as function names: ``∫(f, x)`` / ``∫(f, (x, 0, 1))``
+        # is ``integrate``, ``∂(f, x)`` is ``diff``.  Neither character is
+        # legal in a Python identifier, so the alias must be textual.
+        "∫": "integrate",
+        "∂": "diff",
+        # U+2206 INCREMENT looks like Δ and is what some keyboards emit.
+        "∆": "Δ",
         # Alternative glyph for the Mathcad-style target-unit operator.
         # ``▶`` (U+25B6 BLACK RIGHT-POINTING TRIANGLE) is the canonical
         # form the rest of the pipeline expects; ``▸`` (U+25B8 BLACK
@@ -3169,6 +3519,10 @@ def normalize_source(source: str) -> str:
 
     for old, new in replacements.items():
         source = source.replace(old, new)
+
+    # ``sin⁻¹(x)`` is the inverse function, not ``sin`` to the power -1.
+    source = re.sub(r'(?<![\w])(sin|cos|tan|sinh|cosh|tanh)⁻¹(?=\s*\()',
+                    r'a\1', source)
 
     # Make π separable when glued to adjacent math text,
     # but do not break a standalone line like: π = pi
@@ -5916,6 +6270,36 @@ def find_top_level_assignment_ops(code: str):
     return spans
 
 
+# Placeholder emitted by ``replace_top_level_single_equals`` for a
+# math-style ``=``; consumed by ``rewrite_math_equality``.
+_MATH_EQ_GLYPH = "⩵"          # U+2A75 TWO CONSECUTIVE EQUALS SIGNS
+
+
+def rewrite_math_equality(source: str) -> str:
+    """``a ⩵ b`` (the placeholder for a math-style ``=``) → ``_eq(a, b)``.
+
+    Uses the same operand scanner as ``≈`` so the call has comparison
+    precedence.  ``_eq`` returns a plain ``bool`` for ordinary values and
+    a sympy ``Eq`` when either side is symbolic — which is what makes
+    ``solve(x² = 4, x)`` work.
+    """
+    while True:
+        pos = source.find(_MATH_EQ_GLYPH)
+        if pos < 0:
+            return source
+        start, end = _approx_operand_bounds(source, pos)
+        lhs = source[start:pos].strip()
+        rhs = source[pos + 1:end].strip()
+        if not lhs or not rhs:
+            # Nothing sensible on one side — fall back to Python's ``==``
+            # so the error message is Python's own.
+            source = source[:pos] + "==" + source[pos + 1:]
+            continue
+        seg = source[start:pos]
+        lead = seg[:len(seg) - len(seg.lstrip())]
+        source = source[:start] + lead + f"_eq({lhs}, {rhs})" + source[end:]
+
+
 def replace_top_level_single_equals(code: str) -> str:
     """
     Rewrite bare ``=`` into ``==`` for use as a comparison operator,
@@ -6089,16 +6473,19 @@ def replace_top_level_single_equals(code: str) -> str:
             is_compound = prev in "<>!=:+-*/%&|^@" or nxt == "="
 
             if not is_compound:
+                # Emit a placeholder glyph; ``rewrite_math_equality`` turns
+                # ``a ⩵ b`` into ``_eq(a, b)`` (symbolic-aware equality)
+                # once the operand boundaries can be scanned.
                 if depth == 0:
                     # Top-level: always rewrite (math-style convention).
-                    out.append("==")
+                    out.append(_MATH_EQ_GLYPH)
                     i += 1
                     continue
                 # Inside brackets: rewrite only if the LHS isn't a bare
                 # identifier (i.e. not a kwarg / default-param target).
                 lhs_text = "".join(out[lhs_start_stack[-1]:])
                 if not _is_kwarg_lhs(lhs_text):
-                    out.append("==")
+                    out.append(_MATH_EQ_GLYPH)
                     i += 1
                     continue
 
@@ -6272,6 +6659,7 @@ def rewrite_symbol_declaration_prefix(source: str) -> str:
     def replace(m):
         indent, token, targets_text = m.group(1), m.group(2), m.group(3)
         targets = _expand_symbol_targets(targets_text)
+        _register_subscript_symbols(targets)
 
         # Same ASCII-translation policy as the postfix form so that
         # ``symbols: x₁, x₂`` and ``x₁, x₂ := symbols`` produce the
@@ -6326,6 +6714,7 @@ def rewrite_symbol_declaration(source: str) -> str:
         # name range (``x..z``, ``R1..R4``) into its sequence — see
         # ``_expand_symbol_targets``.
         targets = _expand_symbol_targets(targets_text)
+        _register_subscript_symbols(targets)
 
         # We use ASCII-translated names on BOTH the Python LHS and the
         # sympy ``symbols(...)`` string.  This is the cleanest option:
@@ -7306,6 +7695,7 @@ def transform_source(source, **_kwargs):
     # user wrote it.  After this pass the only set-theory glyphs left
     # are the ones with direct character-level translations, which
     # normalize_source handles.
+    source = rewrite_norm_bars(source)
     source = rewrite_set_membership_swap(source)
 
     source = normalize_source(source)
@@ -7402,6 +7792,7 @@ def transform_source(source, **_kwargs):
     source = _rewrite_idx_assignment(source)
     source = rewrite_plusminus(source)
     source = rewrite_approx(source)
+    source = rewrite_math_equality(source)
     tokens = token_utils.tokenize(source)
     if not tokens:
         return source

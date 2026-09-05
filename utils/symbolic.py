@@ -35,12 +35,12 @@ symbol that sympy renders cleanly as ``x_1`` in LaTeX/Unicode output.
 
 Subscripts and the math DSL
 ---------------------------
-The math/EE DSL rewrites ``xₙ`` to ``x[n]`` (indexing) globally.  That
-applies even after a symbolic declaration: writing ``x₁ := symbols``
-followed later by ``x₁ + 1`` will index ``x[1]`` rather than reference
-the symbol you declared.  For symbolic work that uses subscripted
-names, prefer plain identifiers (``x_1``, not ``x₁``) until the
-toolkit grows a domain-routing system.
+The math/EE DSL rewrites ``xₙ`` to ``x[n]`` (indexing) by default.  A
+symbol declaration is the exception: ``x₁ := symbols`` (or
+``symbols: x₁``) registers ``x₁`` for the session, and every later
+``x₁`` in user code is spelled ``x_1`` — the declared symbol — before
+the subscript-as-index pass runs (``circuit_dsl._DECLARED_SUBSCRIPT_SYMBOLS``).
+Names that were never declared keep the indexing meaning.
 
 Mixing with the numeric DSL
 ---------------------------
@@ -83,6 +83,9 @@ from sympy import (
     Symbol, Eq, Rational, oo,
     solve, expand, factor, simplify,
     diff, integrate, limit, series,
+    lambdify, nsimplify,
+    Matrix, det, eye, zeros, ones, diag,
+    Reals, Integers, Naturals,
     # Trig, exponential, log — re-exported so users don't have to
     # remember the ``sym.`` prefix in plotting expressions or
     # ordinary numeric work.  Note the gotcha documented below: when
@@ -108,6 +111,31 @@ from .circuit_dsl import (                       # noqa: E402
 # unit-loss but means ``√(4 m²)`` raises).  Import sympy's version
 # under a private name so the wrapper below can delegate to it.
 from sympy import sqrt as _sym_sqrt
+from sympy import nsolve as _sym_nsolve
+from sympy import latex as _sym_latex
+
+
+def latex(expr, **settings):
+    """``sympy.latex`` that first peels the DSL's ``Sig`` wrapper — the
+    expression ``x² + 1`` reaches Python as ``x ** Sig(2)``, which is a
+    ``Sig`` carrying a sympy value; without the peel sympy would print
+    it as ``\\mathtt{\\text{x**2 + 1}}``."""
+    from .sigfig import _unwrap
+    return _sym_latex(_unwrap(expr), **settings)
+
+
+def nsolve(*args, **kwargs):
+    """``sympy.nsolve`` that accepts the DSL's ``Sig``-wrapped numbers:
+    ``nsolve(cos(x) - x, x, 1)`` — the starting guess ``1`` arrives as a
+    ``Sig`` and mpmath cannot convert that, so unwrap first."""
+    from .sigfig import _unwrap
+
+    def _plain(v):
+        if isinstance(v, (list, tuple)):
+            return type(v)(_plain(i) for i in v)
+        return _unwrap(v)
+    return _sym_nsolve(*[_plain(a) for a in args],
+                       **{k: _plain(v) for k, v in kwargs.items()})
 from sympy.core.sympify import SympifyError as _SympifyError
 
 
@@ -150,7 +178,9 @@ def sqrt(x):
     """
     try:
         return _sym_sqrt(x)
-    except _SympifyError:
+    except (_SympifyError, TypeError):
+        # Physical (refuses sympification) or an interval ``Range``
+        # (sympy tries ``float()`` on it) — both have a proper ``**``.
         return x ** 0.5
 
 # NOTE: the trig / hyperbolic / ``exp`` names exported here are the
@@ -1104,6 +1134,9 @@ __all__ = [
     "Symbol", "Eq", "Rational", "oo",
     "solve", "expand", "factor", "simplify",
     "diff", "integrate", "limit", "series",
+    "nsolve", "lambdify", "latex", "nsimplify",
+    "Matrix", "det", "eye", "zeros", "ones", "diag",
+    "Reals", "Integers", "Naturals",
     # Trig / exp / log / sqrt — see the comment near the imports for
     # the unit-shadowing caveat.
     "sin", "cos", "tan", "asin", "acos", "atan", "atan2",

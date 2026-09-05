@@ -267,6 +267,10 @@ _DSL_HELPERS = (
     'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2',
     'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh',
     'exp', 'log',
+    'nsolve', 'lambdify', 'latex', 'nsimplify',
+    'Matrix', 'det', 'eye', 'zeros', 'ones', 'diag',
+    'hypot', 'cbrt', 'sign', 'clamp', 'norm', 'dot', 'cross',
+    'gcd', 'lcm', 'comb', 'perm',
     # iso286.py — limits & fits
     'hole', 'shaft', 'fit', 'it_grade', 'tolerance_unit',
     # radix_formats.py + the ``▸`` display-tag names.  ``hex``/``bin``/
