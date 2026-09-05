@@ -583,7 +583,7 @@ public sealed partial class MainWindow : Window
                     new TextBlock
                     {
                         Text = BaseCharacterOf(entry.Text),
-                        FontSize = 20,
+                        FontSize = 18,
                         FontWeight = FontWeights.SemiBold,
                         HorizontalAlignment = HorizontalAlignment.Center,
                         VerticalAlignment = script == ScriptKind.Superscript
