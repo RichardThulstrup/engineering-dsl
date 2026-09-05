@@ -28,6 +28,7 @@ __all__ = [
     "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
     "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "exp",
     "hypot", "cbrt", "sign", "clamp", "norm", "dot", "cross",
+    "interp", "polar", "rect",
     "gcd", "lcm", "comb", "perm", "nan", "_eq",
     "phasor", "to_dB_v", "to_dB_p", "from_dB_v", "from_dB_p",
     "approx",
@@ -185,8 +186,33 @@ def _expand_nfkc_variants(word):
     return forms
 
 
+def _discover_extra_unit_names():
+    """Names of every unit-valued object ``extra_units`` exports, so a new
+    unit binds tightly (``5 mAh / 2 hr``) without a manual table edit.
+    Callables (the temperature helpers) and display sentinels are
+    skipped; a failed import (a stripped-down install) leaves the static
+    table in force."""
+    try:
+        from . import extra_units as _eu
+    except Exception:                       # pragma: no cover
+        return frozenset()
+    names = set()
+    for name in getattr(_eu, "__all__", ()):
+        obj = getattr(_eu, name, None)
+        if obj is None or callable(obj) and not hasattr(obj, "dimensions"):
+            continue
+        inner = obj.value if isinstance(obj, Sig) else obj
+        kind = type(inner).__name__
+        if (hasattr(inner, "dimensions") and hasattr(inner, "value")
+                or kind in ("_DisplayUnit", "_DeltaUnit")
+                or (isinstance(obj, Sig) and isinstance(inner, (int, float))
+                    and name not in ("HMS", "hms"))):
+            names.add(name)
+    return frozenset(names)
+
+
 _UNIT_NAMES_FOR_BINDING = frozenset(
-    form for name in _UNIT_NAMES_FOR_BINDING
+    form for name in (_UNIT_NAMES_FOR_BINDING | _discover_extra_unit_names())
     for form in _expand_nfkc_variants(name)
 )
 
@@ -238,7 +264,9 @@ _CONSTANT_NAMES = frozenset({
     # Physical constants
     "c", "h", "ℏ", "ħ",   # both NFKC variants
     "k_B", "N_A", "q_e", "R_gas", "g_n", "T_0",
-    "ε_0", "μ_0", "m_e", "m_p",
+    "ε_0", "μ_0", "m_e", "m_p", "m_n",
+    "G", "σ_SB", "Faraday", "F_c", "α_fs", "alpha_fs", "a_0", "μ_B",
+    "Z_0", "R_inf", "b_wien", "p_0",
     # Subscript/superscript-bearing aliases for the constants above.
     # Python normalizes identifiers via NFKC at parse time (PEP 3131),
     # so the user's typed ``εₒ`` becomes ``εo`` in the parse tree.  The
@@ -2730,6 +2758,92 @@ def clamp(x, lo, hi):
     return lo if x < lo else hi if x > hi else x
 
 
+def interp(x, xs, ys, *, extrapolate=False):
+    """Piecewise-linear table lookup, unit-aware.
+
+    ``interp(350 K, T_table, cp_table)`` — ``xs`` must be increasing and
+    share a dimension with ``x``; the result carries ``ys``'s unit.
+    Outside the table the end value is held (like ``numpy.interp``)
+    unless ``extrapolate=True`` continues the end segments.  ``x`` may
+    itself be a list/array, giving an array back.
+    """
+    xu, xv, sfx = _vector_parts(xs)
+    yu, yv, sfy = _vector_parts(ys)
+    if len(xv) != len(yv) or len(xv) < 2:
+        raise ValueError("interp(): xs and ys must have the same length (≥ 2)")
+    if any(xv[i + 1] <= xv[i] for i in range(len(xv) - 1)):
+        raise ValueError("interp(): xs must be strictly increasing")
+
+    def _one(q):
+        rq, sq = _peel(q)
+        if _is_physical(rq) != (xu is not None):
+            raise TypeError("interp(): x and xs must both carry units, or neither")
+        if _is_physical(rq):
+            if rq.dimensions != xu.dimensions:
+                raise TypeError("interp(): x and xs have different dimensions")
+            qv = float(rq.value)
+        else:
+            qv = float(rq)
+        if qv <= xv[0]:
+            i = 0
+        elif qv >= xv[-1]:
+            i = len(xv) - 2
+        else:
+            i = max(k for k in range(len(xv) - 1) if xv[k] <= qv)
+        if not extrapolate:
+            qv = min(max(qv, xv[0]), xv[-1])
+        t = (qv - xv[i]) / (xv[i + 1] - xv[i])
+        val = yv[i] + t * (yv[i + 1] - yv[i])
+        sf = min(sq, sfx, sfy)
+        out = Sig(val * yu if yu is not None else val, sf)
+        # Keep the table's written unit (``kJ/(kg·K)``) on the result.
+        try:
+            first = ys[0]
+            if isinstance(first, Sig):
+                first._copy_display_hints(out)
+        except Exception:
+            pass
+        return out
+
+    if isinstance(x, (list, tuple)) or (hasattr(x, "ndim") and getattr(x, "ndim", 0) > 0):
+        return np.array([_one(q) for q in x], dtype=object).view(_CommaArray)
+    return _one(x)
+
+
+class _Polar(complex):
+    """A ``complex`` that remembers it was built as a phasor and prints
+    as ``5.0 ∠ 30°`` — the form ``∠`` accepts back as input.  Arithmetic
+    returns plain ``complex`` (the tag is display-only); ``polar(z)``
+    re-tags a result."""
+    __slots__ = ()
+
+    def __repr__(self):
+        return _format_polar(self, 4)
+
+
+def _format_polar(z, sf):
+    mag = abs(z)
+    ang = math.degrees(math.atan2(z.imag, z.real))
+    if abs(ang) < 1e-9:
+        ang = 0.0
+    from .sigfig import _format_sig
+    return f"{_format_sig(mag, sf)} ∠ {_format_sig(ang, sf)}°"
+
+
+def polar(z):
+    """Tag a complex value to display in polar form: ``polar(Z)`` →
+    ``5.0 ∠ 30°``.  ``abs()``/``.real``/``.imag`` and all arithmetic
+    are unchanged."""
+    raw, sf = _peel(z)
+    return Sig(_Polar(complex(raw)), sf)
+
+
+def rect(z):
+    """Undo :func:`polar` — display in rectangular ``a+bj`` form."""
+    raw, sf = _peel(z)
+    return Sig(complex(raw), sf)
+
+
 def _numeric_or_symbolic(x, math_fn, sympy_name, *, fn_label):
     """Shared body of the trig / hyperbolic / exp wrappers.
 
@@ -2982,7 +3096,7 @@ def phasor(magnitude, angle_rad):
             # Convert to a Python complex.  ``complex(...)`` works on
             # sympy expressions whose value is a finite complex number.
             rotor = complex(rotor_sym)
-            return Sig(float(raw_mag) * rotor, sf)
+            return Sig(_Polar(float(raw_mag) * rotor), sf)
     except (ImportError, TypeError, ValueError):
         # Fall through to numeric path on any conversion failure.
         pass
@@ -2990,7 +3104,7 @@ def phasor(magnitude, angle_rad):
     # Numeric angle path: standard floating-point trig.
     a = float(raw_ang)
     rotor = complex(math.cos(a), math.sin(a))
-    return Sig(float(raw_mag) * rotor, sf)
+    return Sig(_Polar(float(raw_mag) * rotor), sf)
 
 
 def to_dB_v(x):
@@ -3022,15 +3136,37 @@ def from_dB_p(x):
     return Sig(10 ** (float(raw) / 10), sf)
 
 
-def approx(a, b, rtol=1e-9, atol=1e-12):
+def approx(a, b, rtol=1e-9, atol=1e-12, sf=False):
     """Approximately equal: |a − b| ≤ max(rtol·max(|a|,|b|), atol).
 
     Used by the ``≈`` operator: ``a ≈ b`` becomes ``approx(a, b)``.
     Default tolerances are tight (1 ppb relative) — pass keyword args
     explicitly if you want a looser comparison: ``approx(a, b, rtol=1e-3)``.
+
+    ``sf=True`` compares *to the stated precision* instead: the two
+    values agree when they round to the same number at the smaller of
+    their significant-figure counts — ``approx(5.00 V, 5.01 V, sf=True)``
+    is ``False`` (3 sf resolves 0.01 V) but ``approx(5.0 V, 5.01 V,
+    sf=True)`` is ``True``.  Exact values fall back to the tolerance test.
     """
-    ra, _ = _peel(a)
-    rb, _ = _peel(b)
+    ra, sa = _peel(a)
+    rb, sb = _peel(b)
+    if sf:
+        n = min(sa, sb)
+        if n != _INF:
+            try:
+                if _is_physical(ra) != _is_physical(rb):
+                    return False
+                if _is_physical(ra):
+                    if ra.dimensions != rb.dimensions:
+                        return False
+                    fa, fb = float(ra.value), float(rb.value)
+                else:
+                    fa, fb = float(ra), float(rb)
+                n = max(1, int(n))
+                return format(fa, f".{n}g") == format(fb, f".{n}g")
+            except (TypeError, ValueError):
+                pass
     try:
         diff = abs(ra - rb)
         scale = max(abs(ra), abs(rb))
@@ -8196,3 +8332,13 @@ def add_hook(**_kwargs):
         transform_source=transform_source,
         hook_name="circuit_dsl",
     )
+
+
+# Register the polar-form formatter for ``_Polar`` complex values now
+# that this module (which defines ``_Polar``) is fully loaded.
+try:
+    from .sigfig import _register_polar_formatter as _rpf
+    _rpf()
+    del _rpf
+except Exception:                           # pragma: no cover
+    pass

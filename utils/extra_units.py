@@ -28,6 +28,7 @@ To use this module, importing ``Engineer.py`` brings the whole set in via
     from utils.extra_units import inch, ft, psi, bar
 """
 
+import math as _math
 from .sigfig import exact
 import forallpeople as _si_internal
 from forallpeople import (
@@ -241,6 +242,35 @@ kC      = exact(1e3)            * C             # kilocoulombs
 
 
 # ---------------------------------------------------------------------------
+# Conductance — siemens and prefixes (the output side already prints mS)
+# ---------------------------------------------------------------------------
+S_unit  = _A * _A * _s * _s * _s / (_kg * _m * _m)   # siemens = 1/Ω
+siemens = S_unit
+mho     = S_unit
+kS      = exact(1e3)            * S_unit
+mS      = exact(1e-3)           * S_unit
+μS      = exact(1e-6)           * S_unit
+uS      = μS
+
+# ---------------------------------------------------------------------------
+# Charge capacity — ampere-hour (battery datasheets)
+# ---------------------------------------------------------------------------
+Ah      = exact(3600)           * C
+mAh     = exact(3.6)            * C
+kAh     = exact(3.6e6)          * C
+
+# ---------------------------------------------------------------------------
+# Magnetic flux density — tesla prefixes and the gauss
+# ---------------------------------------------------------------------------
+T_unit  = _kg / (_A * _s * _s)                  # tesla = V·s/m²
+mT      = exact(1e-3)           * T_unit
+μT      = exact(1e-6)           * T_unit
+uT      = μT
+nT      = exact(1e-9)           * T_unit
+gauss   = exact(1e-4)           * T_unit        # CGS; the Earth's field ≈ 0.5 G
+Gs      = gauss                                 # ``G`` is the gravitational constant
+
+# ---------------------------------------------------------------------------
 # Capacitance — farad and prefixes
 # ---------------------------------------------------------------------------
 # Farad is enormous as a base unit; real capacitors are typically pF, nF,
@@ -268,6 +298,9 @@ mF      = exact(1e-3)           * F_unit        # millifarads
 # the modern definition (133.322_387_415 Pa).
 Pa      = N / (_m * _m)                         # base
 hPa     = exact(100)            * Pa            # hectopascal — meteorology
+mPa     = exact(1e-3)           * Pa
+μPa     = exact(1e-6)           * Pa            # acoustics reference (20 μPa)
+uPa     = μPa
 kPa     = exact(1000)           * Pa
 MPa     = exact(1_000_000)      * Pa
 GPa     = exact(1_000_000_000)  * Pa
@@ -296,6 +329,14 @@ Cal     = exact(4184)           * J             # food calorie = kcal
 kcal    = Cal                                   # alias
 BTU     = exact(1055.055_852_62) * J            # international table BTU
 kWh     = exact(3_600_000)      * J             # kilowatt-hour
+MWh     = exact(3.6e9)          * J             # megawatt-hour
+GWh     = exact(3.6e12)         * J
+mWh     = exact(3.6)            * J
+mJ      = exact(1e-3)           * J
+μJ      = exact(1e-6)           * J
+uJ      = μJ
+nJ      = exact(1e-9)           * J
+pJ      = exact(1e-12)          * J
 Wh      = exact(3600)           * J             # watt-hour
 eV      = exact(1.602_176_634e-19) * J          # electron-volt (defined)
 keV     = exact(1000)           * eV
@@ -482,6 +523,29 @@ lbf_inch = _DisplayUnit(lbf * inch, "lbf·inch")       # fastener specs
 # and ``in`` can never be one, it's a Python keyword.  The two-word
 # spelling ``20 ozf inch`` works too, via tag composition above.
 ozf_inch = _DisplayUnit(ozf * inch, "ozf·inch")       # small-motor torque
+kip      = _DisplayUnit(exact(1000) * lbf, "kip")      # kilopound-force (structural)
+dyn      = dyne
+yd       = yard
+nmi      = nautical_mile
+
+# ---------------------------------------------------------------------------
+# Photometry — lumen and lux (display-tagged: cd·sr reduces to cd)
+# ---------------------------------------------------------------------------
+lm      = _DisplayUnit(_cd, "lm")                       # lumen = cd·sr
+lx      = _DisplayUnit(_cd / (_m * _m), "lx")           # lux = lm/m²
+klx     = _DisplayUnit(exact(1e3) * _cd / (_m * _m), "klx")
+
+# ---------------------------------------------------------------------------
+# Radioactivity and dose (display-tagged: 1/s would print as Hz, J/kg as Gy)
+# ---------------------------------------------------------------------------
+Bq      = _DisplayUnit(exact(1) / _s, "Bq")
+kBq     = _DisplayUnit(exact(1e3) / _s, "kBq")
+MBq     = _DisplayUnit(exact(1e6) / _s, "MBq")
+Ci      = _DisplayUnit(exact(3.7e10) / _s, "Ci")        # curie
+Sv      = _DisplayUnit(_m * _m / (_s * _s), "Sv")       # sievert = J/kg
+mSv     = _DisplayUnit(exact(1e-3) * _m * _m / (_s * _s), "mSv")
+μSv     = _DisplayUnit(exact(1e-6) * _m * _m / (_s * _s), "μSv")
+uSv     = μSv
 
 
 # ---------------------------------------------------------------------------
@@ -547,6 +611,14 @@ GW      = exact(1_000_000_000)  * W
 hp      = exact(745.699_871_582_270_22) * W     # mechanical horsepower
 hp_metric = exact(735.498_75)   * W             # metric / German horsepower
 hp_electrical = exact(746)      * W             # used in motor labels
+# Apparent and reactive power share the watt's dimension; keep the
+# written form so an ``S = V·I`` result is not relabelled as W.
+VA      = _DisplayUnit(W, "VA")
+kVA     = _DisplayUnit(exact(1e3) * W, "kVA")
+MVA     = _DisplayUnit(exact(1e6) * W, "MVA")
+var     = _DisplayUnit(W, "var")
+kvar    = _DisplayUnit(exact(1e3) * W, "kvar")
+Mvar    = _DisplayUnit(exact(1e6) * W, "Mvar")
 
 
 # ---------------------------------------------------------------------------
@@ -583,6 +655,41 @@ qt_uk   = gal_uk / exact(4)                     # imperial quart
 pt_uk   = qt_uk / exact(2)                      # imperial pint
 fl_oz_uk = pt_uk / exact(20)                    # imperial fluid ounce (note: 20!)
 barrel  = exact(42)             * gal_us        # oil barrel = 42 US gal
+L       = liter                                 # the SI-accepted symbol
+kL      = exact(1e3)            * liter
+cL      = exact(1e-5)           * _m * _m * _m
+μL      = exact(1e-9)           * _m * _m * _m
+uL      = μL                                    # ASCII alias
+
+# ---------------------------------------------------------------------------
+# Area
+# ---------------------------------------------------------------------------
+are     = exact(100)            * _m * _m
+ha      = exact(1e4)            * _m * _m       # hectare
+hectare = ha
+acre    = exact(4046.856_422_4) * _m * _m       # international acre (exact)
+
+# ---------------------------------------------------------------------------
+# Amount of substance
+# ---------------------------------------------------------------------------
+mmol    = exact(1e-3)           * _mol
+μmol    = exact(1e-6)           * _mol
+umol    = μmol
+kmol    = exact(1e3)            * _mol
+
+# ---------------------------------------------------------------------------
+# Viscosity
+# ---------------------------------------------------------------------------
+# Dynamic viscosity is Pa·s (= kg/(m·s)); the poise is the CGS unit.
+# Kinematic viscosity is m²/s; the stokes is its CGS unit.  Pa·s shares
+# its dimension with nothing common, so no display tag is needed.
+Pa_s    = _kg / (_m * _s)                       # pascal-second
+poise   = exact(0.1)            * Pa_s
+P_visc  = poise                                 # ``P`` alone is too ambiguous
+cP      = exact(1e-3)           * Pa_s          # centipoise (water ≈ 1 cP)
+mPa_s   = cP                                    # the SI spelling of the same
+St      = exact(1e-4)           * _m * _m / _s  # stokes
+cSt     = exact(1e-6)           * _m * _m / _s  # centistokes
 
 
 # ---------------------------------------------------------------------------
@@ -627,6 +734,26 @@ month   = exact(365.2425 / 12) * day             # average Gregorian month
 # postfix (``30°`` → ``30·π/180``).
 rad = exact(1)
 sr  = exact(1)
+mrad    = exact(1e-3)
+μrad    = exact(1e-6)
+urad    = μrad
+deg     = exact(_math.pi / 180)                 # ``30 deg`` == ``30°``
+arcmin  = deg / exact(60)
+arcsec  = deg / exact(3600)
+rev     = exact(2 * _math.pi)                   # one turn, in radians
+turn    = rev
+gon     = exact(_math.pi / 200)                 # gradian
+grad    = gon
+
+# ---------------------------------------------------------------------------
+# Rotational speed — rpm / rps as FREQUENCIES (1/minute, 1/second)
+# ---------------------------------------------------------------------------
+# ``3000 rpm ▸ Hz`` is 50 Hz, and ``50 Hz ▸ rpm`` is 3000 rpm — the same
+# convention as ``Hz`` itself (turns per second).  The angular velocity
+# is ``ω := 2π · n`` as always.  Display-tagged so a value entered in
+# rpm keeps printing in rpm rather than collapsing to Hz.
+rpm     = _DisplayUnit(exact(1) / minute, "rpm")
+rps     = _DisplayUnit(exact(1) / _s, "rps")
 
 
 # ``HMS`` — a display-target sentinel for ``duration ▶ HMS``.
@@ -1048,7 +1175,24 @@ __all__ = [
     "qt_uk", "pt_uk", "fl_oz_uk", "barrel",
     # Time — derived
     "minute", "hour", "hr", "day", "week", "year_julian", "year_tropical", "yr",
-    "rad", "sr",
+    "rad", "sr", "mrad", "μrad", "urad", "deg", "arcmin", "arcsec",
+    "rev", "turn", "gon", "grad", "rpm", "rps",
+    # Volume / area / amount / viscosity
+    "L", "kL", "cL", "μL", "uL", "are", "ha", "hectare", "acre",
+    "mmol", "μmol", "umol", "kmol",
+    "Pa_s", "poise", "P_visc", "cP", "mPa_s", "St", "cSt",
+    # Conductance, charge capacity, magnetism
+    "S_unit", "siemens", "mho", "kS", "mS", "μS", "uS",
+    "Ah", "mAh", "kAh",
+    "T_unit", "mT", "μT", "uT", "nT", "gauss", "Gs",
+    # Energy down-prefixes and large watt-hours; apparent/reactive power
+    "MWh", "GWh", "mWh", "mJ", "μJ", "uJ", "nJ", "pJ",
+    "VA", "kVA", "MVA", "var", "kvar", "Mvar",
+    # Force / length aliases, photometry, radiation, pressure prefixes
+    "kip", "dyn", "yd", "nmi",
+    "lm", "lx", "klx",
+    "Bq", "kBq", "MBq", "Ci", "Sv", "mSv", "μSv", "uSv",
+    "mPa", "μPa", "uPa",
     "year", "month", "HMS", "hms",
     # Astronomy / geology / cosmology time scales
     "kyr", "Myr", "Gyr",

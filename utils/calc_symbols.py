@@ -144,6 +144,19 @@ T_0  := exact(273.15) * K                          # ice point (defined)
 μ_0  := measured(1.256_637_062_12e-6, 12) * N/A/A # vacuum permeability
 m_e  := measured(9.109_383_701_5e-31, 11) * kg    # electron rest mass
 m_p  := measured(1.672_621_923_69e-27, 12) * kg   # proton rest mass
+m_n  := measured(1.674_927_498_04e-27, 12) * kg    # neutron rest mass
+G    := measured(6.674_30e-11, 5) * m*m*m/kg/s/s   # Newtonian gravitation
+σ_SB := measured(5.670_374_419e-8, 10) * W/m/m/K/K/K/K   # Stefan–Boltzmann (exact in SI 2019; 10 digits kept)
+Faraday := N_A * q_e                               # Faraday constant (derived, exact) — ``F`` is the farad
+F_c  := Faraday
+α_fs := measured(7.297_352_5693e-3, 11)           # fine-structure constant (dimensionless)
+alpha_fs := α_fs
+a_0  := measured(5.291_772_109_03e-11, 12) * m     # Bohr radius
+μ_B  := measured(9.274_010_0783e-24, 11) * J/T     # Bohr magneton
+Z_0  := measured(376.730_313_668, 12) * Ω          # impedance of free space
+R_inf := measured(10_973_731.568_160, 14) / m      # Rydberg constant (write R_∞ in source)
+b_wien := measured(2.897_771_955e-3, 10) * m*K     # Wien displacement constant
+p_0  := exact(101_325) * Pa                        # standard atmosphere
 
 # Subscript/superscript-bearing aliases — same physical constants under
 # the visually-richer notation that engineers often prefer.  Note that
@@ -196,7 +209,9 @@ __all__ := [
     "π", "pi", "e", "mm", "cm", "μm", "nm", "pm", "ms", "degC", "i",
     # Physical constants:
     "c", "h", "ħ", "k_B", "N_A", "q_e", "R_gas", "g_n", "T_0",
-    "ε_0", "μ_0", "m_e", "m_p",
+    "ε_0", "μ_0", "m_e", "m_p", "m_n",
+    "G", "σ_SB", "Faraday", "F_c", "α_fs", "alpha_fs", "a_0", "μ_B",
+    "Z_0", "R_inf", "b_wien", "p_0",
     # Same constants under subscript/superscript-bearing aliases.  The
     # names listed here are the NFKC-NORMALIZED forms — Python parses
     # ``εₒ`` (the visual form) into the identifier ``εo``, so the

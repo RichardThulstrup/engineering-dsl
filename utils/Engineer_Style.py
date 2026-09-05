@@ -270,6 +270,7 @@ _DSL_HELPERS = (
     'nsolve', 'lambdify', 'latex', 'nsimplify',
     'Matrix', 'det', 'eye', 'zeros', 'ones', 'diag',
     'hypot', 'cbrt', 'sign', 'clamp', 'norm', 'dot', 'cross',
+    'interp', 'polar', 'rect', 'bode',
     'gcd', 'lcm', 'comb', 'perm',
     # iso286.py — limits & fits
     'hole', 'shaft', 'fit', 'it_grade', 'tolerance_unit',

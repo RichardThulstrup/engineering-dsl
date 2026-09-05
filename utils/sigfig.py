@@ -2093,6 +2093,17 @@ def _(value, sf):
 _COMPLEX_INF_DISPLAY_SF = 4
 
 
+def _register_polar_formatter():
+    try:
+        from .circuit_dsl import _Polar, _format_polar
+    except Exception:                       # pragma: no cover
+        return
+
+    @_format_sig.register(_Polar)
+    def _(value, sf):
+        return _format_polar(value, sf if sf != _INF else _COMPLEX_INF_DISPLAY_SF)
+
+
 @_format_sig.register(complex)
 def _(value, sf):
     # ``sf=inf`` on a complex quantity typically means "exact within
@@ -2777,6 +2788,25 @@ def in_units(quantity, target, label: str | None = None) -> _InUnits:
     # Guarded by ``_is_pure_time`` — ``▶ HMS`` only means "break into
     # d/h/m/s" for a genuine duration.  A frequency or a velocity tagged
     # ``▶ HMS`` falls through to the normal unit path (dimension error).
+    # ``R ▶ plusminus`` / ``R ▶ percent`` / ``R ▶ permille`` — interval
+    # display forms; ``Z ▶ polar`` / ``Z ▶ rect`` — complex display forms.
+    _fn_name = getattr(target, "__name__", None)
+    if not isinstance(_fn_name, str):
+        _fn_name = label.strip() if isinstance(label, str) else None
+    if _fn_name in ("plusminus", "percent", "permille"):
+        _probe = _unwrap(quantity)
+        if type(_probe).__name__ == "Range":
+            return _PMDisplay(quantity, _fn_name, sf=q_sf)
+    if _fn_name in ("polar", "rect") and callable(target):
+        return target(quantity)
+
+    # A ``datetime.timedelta`` expressed in a time unit: ``td ▶ hour``.
+    if type(quantity).__name__ == "timedelta" and hasattr(_unwrap(target), "dimensions"):
+        from forallpeople import s as _second
+        quantity = Sig(quantity.total_seconds() * _second, _INF)
+        q_sf = _INF
+        result_sf = t_sf
+
     _hms_label = None
     if isinstance(label, str):
         _hms_label = label.strip()
@@ -3655,6 +3685,74 @@ def _is_physical(x):
 # value is unchanged — still a duration in seconds — and the tag is
 # consumed by any arithmetic.
 
+class _PMDisplay:
+    """Display wrapper: render an interval as ``centre ± tol`` (``▶ plusminus``)
+    or ``centre ± tol%`` (``▶ percent`` / ``▶ permille``).
+
+    Created by :func:`in_units` when the target is one of those three
+    helpers and the quantity unwraps to a ``Range``.  Transparent under
+    arithmetic: every operator unwraps to the underlying interval.
+    """
+
+    __slots__ = ("value", "sf", "mode")
+
+    def __init__(self, value, mode, sf=None):
+        self.value = value
+        self.mode = mode
+        self.sf = _sf_of(value) if sf is None else sf
+
+    def _range(self):
+        v = self.value
+        while isinstance(v, Sig):
+            v = v.value
+        return v
+
+    def __repr__(self) -> str:
+        r = self._range()
+        centre, tol = r.center, r.tol
+        c_txt = _format_sig(centre, self.sf)
+        if self.mode == "plusminus":
+            return f"{c_txt} ± {_format_sig(tol, self.sf)}"
+        try:
+            ratio = float(tol / centre)
+        except Exception:
+            return f"{c_txt} ± {_format_sig(tol, self.sf)}"
+        if self.mode == "permille":
+            return f"{c_txt} ± {_format_sig(ratio * 1000, min(self.sf, 3))}‰"
+        return f"{c_txt} ± {_format_sig(ratio * 100, min(self.sf, 3))}%"
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
+    def __format__(self, spec: str) -> str:
+        return format(self.value, spec) if spec else self.__repr__()
+
+    def _repr_latex_(self):
+        return None
+
+    def __add__(self, o):      return _pm_unwrap(self) + _pm_unwrap(o)
+    def __radd__(self, o):     return _pm_unwrap(o) + _pm_unwrap(self)
+    def __sub__(self, o):      return _pm_unwrap(self) - _pm_unwrap(o)
+    def __rsub__(self, o):     return _pm_unwrap(o) - _pm_unwrap(self)
+    def __mul__(self, o):      return _pm_unwrap(self) * _pm_unwrap(o)
+    def __rmul__(self, o):     return _pm_unwrap(o) * _pm_unwrap(self)
+    def __truediv__(self, o):  return _pm_unwrap(self) / _pm_unwrap(o)
+    def __rtruediv__(self, o): return _pm_unwrap(o) / _pm_unwrap(self)
+    def __pow__(self, o):      return _pm_unwrap(self) ** _pm_unwrap(o)
+    def __neg__(self):         return -_pm_unwrap(self)
+    def __abs__(self):         return abs(_pm_unwrap(self))
+    def __eq__(self, o):       return _pm_unwrap(self) == _pm_unwrap(o)
+    def __hash__(self):        return hash(_pm_unwrap(self))
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return getattr(self.value, name)
+
+
+def _pm_unwrap(x):
+    return x.value if isinstance(x, _PMDisplay) else x
+
+
 class _HMSDisplay:
     """Display wrapper: render a duration as ``d/h/m/s`` (``▶ HMS``).
 
@@ -3782,3 +3880,9 @@ def wrap_numeric_literals(source: str) -> str:
                 tok.string = f"_S({literal}, {sf_str})"
 
     return token_utils.untokenize(tokens)
+
+
+# The polar (``5 ∠ 30°``) formatter needs ``circuit_dsl._Polar``; that
+# module imports this one, so register lazily on first use of ``_format_sig``
+# via ``_register_polar_formatter`` — called from ``circuit_dsl`` once it
+# has finished loading.

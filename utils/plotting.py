@@ -52,9 +52,10 @@ continue customising there.
 from __future__ import annotations
 
 import numpy as np
+from .sigfig import _unwrap
 import datetime as _datetime
 
-__all__ = ["plot", "linefit", "polyfit", "list_themes"]
+__all__ = ["plot", "bode", "linefit", "polyfit", "list_themes"]
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +257,46 @@ def _seq_is_dates(seq) -> bool:
     except TypeError:
         pass
     return False
+
+
+def _si_float(v):
+    v = _unwrap(v)
+    if hasattr(v, "dimensions") and hasattr(v, "value"):
+        return float(v.value)
+    return float(v)
+
+
+def _strip_with_errors(arr):
+    """Like :func:`_strip_with_unit`, but a series of ``±`` intervals
+    (``Sig(Range)`` elements) is split into centres and half-widths:
+    returns ``(centres, unit_label, half_widths_or_None)`` with both
+    arrays on the same display scale."""
+    try:
+        items = list(arr.tolist() if hasattr(arr, "tolist") and not isinstance(arr, (list, tuple)) else arr)
+    except TypeError:
+        stripped, unit = _strip_with_unit(arr)
+        return stripped, unit, None
+    inner = [_unwrap(v) for v in items]
+    if not any(type(v).__name__ == "Range" for v in inner):
+        stripped, unit = _strip_with_unit(arr)
+        return stripped, unit, None
+    centres, tols = [], []
+    for v, orig in zip(inner, items):
+        if type(v).__name__ == "Range":
+            centres.append(v.center)
+            tols.append(v.tol)
+        else:
+            centres.append(orig)
+            tols.append(v * 0)
+    stripped, unit = _strip_with_unit(centres)
+    si = [_si_float(c) for c in centres]
+    scale = 1.0
+    for s_val, si_val in zip(np.asarray(stripped, dtype=float).ravel(), si):
+        if si_val:
+            scale = s_val / si_val
+            break
+    err = np.asarray([_si_float(t) * scale for t in tols], dtype=float)
+    return stripped, unit, err
 
 
 def _strip_with_unit(arr):
@@ -525,7 +566,9 @@ def _unwrap_sympy(expr):
 def plot(*args, title=None, xlabel=None, ylabel=None,
          style=None, show=True, ax=None, return_ax=False,
          fit=None, fit_label=None, fit_style=None,
-         theme=None, **kwargs):
+         theme=None, logx=False, logy=False, loglog=False,
+         grid=None, xlim=None, ylim=None, figsize=None, save=None,
+         **kwargs):
     """Unit-aware, symbolic-aware plot wrapper.
 
     A single call may contain multiple series; each series is one of:
@@ -657,11 +700,16 @@ def plot(*args, title=None, xlabel=None, ylabel=None,
         theme_ctx = _mplstyle.context(_ncs_rc())
         force_fresh = False
 
+    axes_opts = dict(logx=logx or loglog, logy=logy or loglog, grid=grid,
+                     xlim=xlim, ylim=ylim, save=save)
     with theme_ctx:
-        if force_fresh:
-            _fig, ax = plt.subplots()
+        if force_fresh or (ax is None and figsize is not None):
+            if figsize is not None:          # DSL literals arrive as Sig
+                figsize = tuple(float(_unwrap(v)) for v in figsize)
+            _fig, ax = plt.subplots(figsize=figsize)
         return _plot_impl(args, title, xlabel, ylabel, style, show, ax,
-                          return_ax, fit, fit_label, fit_style, kwargs)
+                          return_ax, fit, fit_label, fit_style, kwargs,
+                          axes_opts)
 
 
 # ---------------------------------------------------------------------------
@@ -784,7 +832,7 @@ def list_themes():
 
 
 def _plot_impl(args, title, xlabel, ylabel, style, show, ax,
-               return_ax, fit, fit_label, fit_style, kwargs):
+               return_ax, fit, fit_label, fit_style, kwargs, axes_opts=None):
     """Inner implementation of ``plot()`` — kept separate from ``plot``
     so the theme context-manager can wrap the entire body cleanly.
     All arguments are positional here because there's no public API
@@ -827,6 +875,22 @@ def _plot_impl(args, title, xlabel, ylabel, style, show, ax,
     for series in series_list:
         x_data = series["x"]
         y_data = series["y"]
+        # Object arrays of ``Sig`` upset matplotlib's log-scale code
+        # (``np.isfinite`` on dtype=object); a float view is equivalent
+        # for anything that is not a date axis.
+        for _k in ("x", "y"):
+            _d = x_data if _k == "x" else y_data
+            _is_float_arr = (getattr(_d, "dtype", None) is not None
+                             and np.issubdtype(_d.dtype, np.floating))
+            if not _is_float_arr and not _seq_is_dates(_d):
+                try:
+                    _d = np.asarray([float(_unwrap(v)) for v in _d], dtype=float)
+                    if _k == "x":
+                        x_data = _d
+                    else:
+                        y_data = _d
+                except (TypeError, ValueError):
+                    pass
         label = series.get("label")
         line_kwargs = dict(kwargs)
         if label is not None:
@@ -835,7 +899,14 @@ def _plot_impl(args, title, xlabel, ylabel, style, show, ax,
         # Per-series style trumps the global style= kwarg; if neither
         # is set, matplotlib's default applies (a coloured line).
         series_style = series.get("style") or style
-        if series_style is not None:
+        if series.get("yerr") is not None:
+            # ``±`` data: centre with error bars.
+            eb_kwargs = dict(line_kwargs)
+            eb_kwargs.setdefault("capsize", 3)
+            eb_kwargs.setdefault("fmt", series_style or "o")
+            ax.errorbar(x_data, y_data, yerr=series["yerr"],
+                        xerr=series.get("xerr"), **eb_kwargs)
+        elif series_style is not None:
             ax.plot(x_data, y_data, series_style, **line_kwargs)
         else:
             ax.plot(x_data, y_data, **line_kwargs)
@@ -916,10 +987,34 @@ def _plot_impl(args, title, xlabel, ylabel, style, show, ax,
     if title:
         ax.set_title(title)
 
-    # ---- Legend if any series had a label ----
+    _opts = axes_opts or {}
+    if _opts.get("logx"):
+        ax.set_xscale("log")
+    if _opts.get("logy"):
+        ax.set_yscale("log")
+    if _opts.get("grid") is not None:
+        if _opts["grid"] is True:
+            ax.grid(True, which="both" if (_opts.get("logx") or _opts.get("logy")) else "major",
+                    alpha=0.3)
+        elif _opts["grid"] is False:
+            ax.grid(False)
+        else:
+            ax.grid(True, which=str(_opts["grid"]), alpha=0.3)
+    if _opts.get("xlim") is not None:
+        ax.set_xlim(*[float(_unwrap(v)) if not hasattr(_unwrap(v), "dimensions")
+                      else float(_unwrap(v).value) for v in _opts["xlim"]])
+    if _opts.get("ylim") is not None:
+        ax.set_ylim(*[float(_unwrap(v)) if not hasattr(_unwrap(v), "dimensions")
+                      else float(_unwrap(v).value) for v in _opts["ylim"]])
+
     if any(line.get_label() and not line.get_label().startswith("_")
-           for line in ax.get_lines()):
-        ax.legend()
+           for line in ax.get_lines()) or ax.containers:
+        handles, labels = ax.get_legend_handles_labels()
+        if labels:
+            ax.legend()
+
+    if _opts.get("save"):
+        ax.get_figure().savefig(_opts["save"], bbox_inches="tight")
 
     if show:
         plt.show()
@@ -1182,7 +1277,7 @@ def _reapply_units(value, y_unit_obj, x_unit_obj, power):
     # we compose a ``"y/x"`` (or ``"y/x²"``) string so the coefficient
     # at least reads sensibly.
     if isinstance(y_unit_obj, str):
-        from .sigfig import _InUnits as _IU
+        from .sigfig import _unwrap, _InUnits as _IU
         if x_unit_obj is None or power == 0 or not isinstance(x_unit_obj, str):
             label = y_unit_obj
         else:
@@ -1324,8 +1419,8 @@ def _parse_series(args):
                 # silently disagree with the plotted magnitudes (which
                 # happened when an offset-removed array had a ``0``
                 # first element printing as base-unit ``0 m``).
-                x_stripped, x_unit = _strip_with_unit(x)
-                y_stripped, y_unit = _strip_with_unit(y)
+                x_stripped, x_unit, x_err = _strip_with_errors(x)
+                y_stripped, y_unit, y_err = _strip_with_errors(y)
                 series_list.append({
                     "x": x_stripped,
                     "y": y_stripped,
@@ -1339,12 +1434,13 @@ def _parse_series(args):
                     "xcaption": _is_caption(x),
                     "ycaption": _is_caption(y),
                     "var_name": None,
+                    "xerr": x_err, "yerr": y_err,
                 })
                 i += 2
             else:
                 # y-only
                 y = a
-                y_stripped, y_unit = _strip_with_unit(y)
+                y_stripped, y_unit, y_err = _strip_with_errors(y)
                 series_list.append({
                     "x": np.arange(len(y_stripped)),
                     "y": y_stripped,
@@ -1354,6 +1450,7 @@ def _parse_series(args):
                     "xcaption": False,
                     "ycaption": _is_caption(y),
                     "var_name": None,
+                    "yerr": y_err,
                 })
                 i += 1
 
@@ -1594,3 +1691,54 @@ def _strip_physical_atoms(expr):
         return e
 
     return _walk(expr), seen_units
+
+
+def bode(H, var, frange, *, n=400, s=True, title=None, show=True,
+         theme=None, return_axes=False, save=None):
+    """Bode plot of a transfer function: magnitude in dB and phase in
+    degrees on twin panels over a logarithmic frequency axis.
+
+    ``H`` is a sympy expression in ``var``.  With ``s=True`` (default)
+    ``var`` is the Laplace variable and is replaced by ``j·2π·f`` while
+    ``f`` sweeps ``frange = (f_min, f_max)`` in hertz (unit-carrying ends
+    are fine: ``(1 Hz, 1 MHz)``).  With ``s=False`` ``var`` is the
+    angular frequency ω itself (for an expression written with an
+    explicit ``i·ω``), swept over ``frange`` in rad/s.
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.style as _mplstyle
+    import sympy as _sym
+
+    lo, hi = (_si_float(v) for v in frange)
+    if lo <= 0 or hi <= lo:
+        raise ValueError("bode(): frange must be (f_min, f_max) with 0 < f_min < f_max")
+    freqs = np.logspace(np.log10(lo), np.log10(hi), int(n))
+    expr = _unwrap(H)
+    fn = _sym.lambdify(var, expr, modules="numpy")
+    arg = 2j * np.pi * freqs if s else freqs
+    vals = np.asarray(fn(arg), dtype=complex) * np.ones_like(freqs)
+    mag_db = 20 * np.log10(np.abs(vals))
+    phase = np.degrees(np.unwrap(np.angle(vals)))
+
+    if theme is not None:
+        resolved = _resolve_theme(theme)
+        specs = list(resolved) if isinstance(resolved, (list, tuple)) else [resolved]
+        ctx = _mplstyle.context(specs + [_ncs_rc()])
+    else:
+        ctx = _mplstyle.context(_ncs_rc())
+    with ctx:
+        fig, (ax_m, ax_p) = plt.subplots(2, 1, sharex=True)
+        ax_m.semilogx(freqs, mag_db)
+        ax_m.set_ylabel("|H| [dB]")
+        ax_m.grid(True, which="both", alpha=0.3)
+        ax_p.semilogx(freqs, phase)
+        ax_p.set_ylabel("∠H [°]")
+        ax_p.set_xlabel("f [Hz]" if s else "ω [rad/s]")
+        ax_p.grid(True, which="both", alpha=0.3)
+        if title:
+            ax_m.set_title(title)
+        if save:
+            fig.savefig(save, bbox_inches="tight")
+        if show:
+            plt.show()
+    return (ax_m, ax_p) if return_axes else None

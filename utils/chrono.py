@@ -68,16 +68,17 @@ __all__ = [
 # means months when it sits before ``T`` and minutes when it sits after,
 # so we have separate named groups (``months`` vs ``mins``) to avoid
 # the ambiguity at parse time.
+_NUM = r'\d+(?:[.,]\d+)?'
 _DUR_RE = re.compile(
-    r'^P'
-    r'(?:(?P<years>\d+)Y)?'
-    r'(?:(?P<months>\d+)M)?'
-    r'(?:(?P<weeks>\d+)W)?'
-    r'(?:(?P<days>\d+)D)?'
+    r'^(?P<sign>[-+])?P'
+    rf'(?:(?P<years>{_NUM})Y)?'
+    rf'(?:(?P<months>{_NUM})M)?'
+    rf'(?:(?P<weeks>{_NUM})W)?'
+    rf'(?:(?P<days>{_NUM})D)?'
     r'(?:T'
-    r'(?:(?P<hours>\d+)H)?'
-    r'(?:(?P<mins>\d+)M)?'
-    r'(?:(?P<secs>\d+(?:\.\d+)?)S)?'
+    rf'(?:(?P<hours>{_NUM})H)?'
+    rf'(?:(?P<mins>{_NUM})M)?'
+    rf'(?:(?P<secs>{_NUM})S)?'
     r')?$'
 )
 
@@ -89,24 +90,19 @@ def _parse_duration(s: str) -> timedelta:
     if not m:
         raise ValueError(f"not a valid ISO 8601 duration: {s!r}")
     g = m.groupdict()
+    sign = -1 if g.pop('sign') == '-' else 1
     if not any(g.values()):
         # The regex matched, but every component is empty — i.e. the
         # string was just "P" (or "PT" with nothing after).  ISO 8601
         # requires at least one component.
         raise ValueError(f"empty ISO 8601 duration: {s!r}")
 
-    days = 0.0
-    if g['years']:    days += int(g['years']) * 365.25
-    if g['months']:   days += int(g['months']) * 30.4375
-    if g['weeks']:    days += int(g['weeks']) * 7
-    if g['days']:     days += int(g['days'])
+    def num(k):
+        return float(g[k].replace(',', '.')) if g[k] else 0.0
 
-    seconds = 0.0
-    if g['hours']:    seconds += int(g['hours']) * 3600
-    if g['mins']:     seconds += int(g['mins']) * 60
-    if g['secs']:     seconds += float(g['secs'])
-
-    return timedelta(days=days, seconds=seconds)
+    days = num('years') * 365.25 + num('months') * 30.4375 + num('weeks') * 7 + num('days')
+    seconds = num('hours') * 3600 + num('mins') * 60 + num('secs')
+    return sign * timedelta(days=days, seconds=seconds)
 
 
 def _format_duration(td: timedelta) -> str:
@@ -116,6 +112,14 @@ def _format_duration(td: timedelta) -> str:
 
     sign = "-" if total < 0 else ""
     total = abs(total)
+
+    # A duration that is an exact whole number of years, months or weeks
+    # (as this module defines them) formats back in that unit, so
+    # ``iso(iso("P1Y")) == "P1Y"`` round-trips.
+    for unit, secs in (("Y", 365.25 * 86400), ("M", 30.4375 * 86400), ("W", 7 * 86400)):
+        k = total / secs
+        if k >= 1 and abs(k - round(k)) < 1e-9:
+            return f"{sign}P{int(round(k))}{unit}"
 
     days = int(total // 86400)
     rem = total - days * 86400
@@ -176,7 +180,7 @@ def iso(x):
             return datetime.now(timezone.utc)
 
         # ISO 8601 durations always start with a literal P.
-        if s.startswith("P"):
+        if s.startswith("P") or s[:2] in ("-P", "+P"):
             return _parse_duration(s)
 
         # ISO 8601 instant.  Allow space as the date/time separator —
