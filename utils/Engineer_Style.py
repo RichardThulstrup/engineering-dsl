@@ -433,6 +433,16 @@ class EngineeringDSLLexer(PythonLexer):
         (r'(?<![A-Za-z_0-9])([a-fA-F]+)(₁₆)',
          bygroups(Number.Hex, Number.Other)),
 
+        # ---- unit-position h / min / in ----
+        # ``5 km/h``, ``20 L/min``, ``lbf/in²``: after a digit, a closing
+        # bracket, or a ``/`` ``·`` ``*`` the three read as hour, minute
+        # and inch (circuit_dsl's unit-position rule) — colour them as
+        # units there.  ``in`` must not be followed by an operand
+        # (``3 in xs`` stays the keyword).  Mirrored in generate_rules.py.
+        (r'(?<=[\d)\]/·⋅*])(\s*)(h|min|in)(?![' + _ID_CHAR + r'(])'
+         r'(?!\s*[A-Za-z_(\[{\d"' + "'" + r'])',
+         bygroups(Text, NameUnit)),
+
         # ---- physical constants ----
         # Lookarounds (rather than \b) accept numeric / Greek prefix and
         # block alphanumeric continuation, so ``2π`` recognises the constant

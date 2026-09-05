@@ -5022,6 +5022,10 @@ def rewrite_target_unit(source: str) -> str:
         # via ``_restore_unit_labels``.  Placeholders survive every
         # subsequent regex/token rewriter untouched.
         label = _prettify_unit_label(rhs_text)
+        # The three unit-position names as a ``▸`` target: ``t ▸ h``,
+        # ``t ▸ min``, ``d ▸ in`` mean the hour, minute and inch (the
+        # token pass never sees a ``▸``, so resolve them here).
+        rhs_text = {"h": "hr", "min": "minute", "in": "inch"}.get(rhs_text, rhs_text)
         placeholder = _stash_unit_label(label)
         # Escape defensively, though placeholders are pure ASCII.
         placeholder = placeholder.replace("\\", "\\\\").replace('"', '\\"')
@@ -8097,27 +8101,70 @@ def transform_source(source, **_kwargs):
 
     new_tokens = [prev_token]
 
-    for token in tokens[1:]:
-        # ``5 km/h`` and ``20 L/min`` read as speed and flow, but ``h``
-        # is Planck's constant and ``min`` is Python's builtin — the
-        # first evaluates silently to nonsense (``7.5e+36 kg⁻¹·m⁻¹·s``),
-        # the second to a TypeError.  Warn when a bare ``h`` / ``min``
-        # directly follows ``<unit>/``; the hour is ``hr`` (or ``hour``)
-        # and the minute is ``minute``.  A warning, not an error: ``J/h``
-        # (a frequency from an energy) is legitimate physics.
-        if (token.is_identifier() and str(token) in ("h", "min")
-                and str(prev_token) == "/" and len(new_tokens) >= 2
-                and new_tokens[-2].is_identifier()
-                and str(new_tokens[-2]) in _UNIT_NAMES_FOR_BINDING):
-            import warnings
-            _meant = "hr" if str(token) == "h" else "minute"
-            warnings.warn(
-                f"'{new_tokens[-2]}/{token}': '{token}' here is "
-                + ("Planck's constant" if str(token) == "h"
-                   else "the Python builtin min()")
-                + f", not a time unit — write '{new_tokens[-2]}/{_meant}' "
-                "for a rate per " + ("hour" if _meant == "hr" else "minute")
-                + ".", SyntaxWarning, stacklevel=2)
+    def _in_unit_position(prev_toks):
+        """True when the NEXT token sits where a unit name goes: directly
+        after a numeric literal (``5 h``), or after ``/`` / ``*`` that
+        itself follows a unit name (``km/h``, ``W·h``).  A single ``(``
+        is looked through, because the superscript pass has already
+        turned ``in²`` into ``(in)**(2)`` by the time tokens are seen."""
+        def _num(t):
+            return hasattr(t, "is_number") and t.is_number()
+
+        def _unit(t):
+            return (hasattr(t, "is_identifier") and t.is_identifier()
+                    and str(t) in _UNIT_NAMES_FOR_BINDING)
+
+        toks = list(prev_toks)
+        if toks and str(toks[-1]) == "(":
+            toks = toks[:-1]
+        if not toks:
+            return False
+        last = toks[-1]
+        if _num(last) or _unit(last):
+            return True                     # ``5 h``; ``5 kW h``
+        if str(last) in ("/", "*") and len(toks) >= 2:
+            # ``new_tokens`` also holds the plain-string ``"*"`` this
+            # pass inserts for implicit multiplication (``5 (in)``).
+            before = toks[-2]
+            if _num(before) or _unit(before):
+                return True
+            # Deliberately NOT after ``)``: ``(3 eV)/h`` is a frequency
+            # from an energy — Planck's constant — and is the common
+            # spelling, while ``(90 km)/h`` is not how speeds are written.
+        return False
+
+    def _starts_operand(tok):
+        """True when ``tok`` can begin an operand — which makes a
+        preceding ``in`` the membership keyword, not the inch."""
+        if tok is None:
+            return False
+        s = str(tok)
+        if tok.is_number() or tok.is_identifier():
+            return True
+        if s in ("(", "[", "{", "not", "lambda", "~"):
+            return True
+        return tok.is_string() if hasattr(tok, "is_string") else s[:1] in "'\""
+
+    for _ti, token in enumerate(tokens[1:], start=1):
+        # ---- unit-position rule for the three name clashes -------------
+        # ``h`` is Planck's constant, ``min`` is a builtin and ``in`` is a
+        # keyword, yet ``5 km/h``, ``20 L/min`` and ``lbf/in²`` are how
+        # engineers write hours, minutes and inches.  In *unit position*
+        # (see ``_in_unit_position``) the three spell the units and are
+        # rewritten to ``hr`` / ``minute`` / ``inch``; anywhere else they
+        # keep their Python meaning, so ``E := h·ν``, ``min(a, b)``,
+        # ``for x in xs`` and ``102 Ω in R`` are untouched.  For ``in``
+        # the token AFTER it must not start an operand, which is what
+        # separates ``5 in`` (inches) from ``5 in R`` (membership).
+        _s = str(token)
+        if _s in ("h", "min", "in") and _in_unit_position(new_tokens):
+            _next = tokens[_ti + 1] if _ti + 1 < len(tokens) else None
+            if _s != "in" or not _starts_operand(_next):
+                token.string = {"h": "hr", "min": "minute", "in": "inch"}[_s]
+                try:
+                    token._dsl_written = _s      # display label as typed
+                except Exception:
+                    pass
         insert_mul = (
             (
                 prev_token.is_number()
@@ -8290,7 +8337,7 @@ def transform_source(source, **_kwargs):
         # The label is the canonical spelling: a literal typed with the
         # MICRO SIGN displays with the same μ as one typed with the
         # Greek letter, so the two spellings print identically.
-        label = name.translate(_NFKC_CANONICAL)
+        label = getattr(tok, "_dsl_written", name).translate(_NFKC_CANONICAL)
         tok.string = f"_wu({name}, {_stash_unit_label(repr(label))})"
 
     if wrap_inserts:

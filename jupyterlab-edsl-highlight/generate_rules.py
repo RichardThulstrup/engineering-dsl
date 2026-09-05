@@ -59,6 +59,9 @@ for pattern, action in EngineeringDSLLexer.EXTRA_TOKENS:
             groups = ['edsl-number', 'edsl-op']
         elif 'ᵀ' in pattern:
             groups = [None, 'edsl-op']
+        elif '(h|min|in)' in pattern:
+            # unit-position hour / minute / inch (whitespace, unit)
+            groups = [None, 'edsl-unit']
         elif '0-9a-fA-F' in pattern or '[a-fA-F]+' in pattern:
             # base-suffixed integer literals (mantissa + base subscript)
             groups = ['edsl-number', 'edsl-subsup']
