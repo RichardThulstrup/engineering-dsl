@@ -131,9 +131,11 @@ _SI_UNITS = (
     'parsec', 'pc', 'ly', 'au', 'kpc', 'Mpc', 'Gpc',
     'km', 'hm', 'dam', 'dm', 'fm', 'Å',
     # Time
-    'fs', 'ks', 'minute', 'hour', 'day', 'week', 'month', 'year',
+    'fs', 'ks', 'minute', 'hour', 'hr', 'day', 'week', 'month', 'year',
     'year_julian', 'year_tropical', 'yr', 'kyr', 'Myr', 'Gyr',
     'HMS', 'hms',
+    # Angle (dimensionless)
+    'rad', 'sr',
     # Mass
     'g', 'mg', 'μg', 'ng', 'lb', 'lbm', 'oz', 'grain', 'slug', 'stone',
     'ton_us', 'ton_uk', 'tonne', 'ozt', 'Da', 'amu',

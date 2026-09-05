@@ -25,6 +25,8 @@ __all__ = [
     "plusminus", "σ", "Σ", "mean", "sqrt", "add_hook",
     # Math/engineering additions:
     "Γ", "Π", "log10", "log2", "ln", "floor", "ceil",
+    "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
+    "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "exp",
     "phasor", "to_dB_v", "to_dB_p", "from_dB_v", "from_dB_p",
     "approx",
     # Identifier-protection API:
@@ -136,7 +138,7 @@ _UNIT_NAMES_FOR_BINDING = (
         "liter", "litre", "mL", "dL", "cc",
         "gal_us", "gal_uk", "qt_us", "pt_us", "fl_oz_us",
         "qt_uk", "pt_uk", "fl_oz_uk", "barrel",
-        "minute", "hour", "day", "week",
+        "minute", "hour", "hr", "day", "week",
         "year_julian", "year_tropical",
         "mph", "kph", "knot",
         "km", "hm", "dam", "dm", "fm", "Å",
@@ -1672,13 +1674,14 @@ def _DSLMatrix(m):
                 except (AttributeError, TypeError):
                     return None
 
-            def __getitem__(self, key):
-                # Native 0-based, but keep the single-int → row behaviour
-                # so sympy internals and any 0-based ``M[i][j]`` still work.
-                idx = None if isinstance(key, (tuple, slice)) else self._to_int(key)
-                if idx is not None and self.rows != 1:
-                    return self.row(idx)
-                return super().__getitem__(key)
+            # NOTE: ``__getitem__`` is deliberately NOT overridden.  An
+            # earlier version returned a whole ROW for a single integer
+            # key so that ``M[i][j]`` chained; but sympy's own internals
+            # (``M**2``, ``M.pow``, ``jordan_form`` …) index elements
+            # flat — ``a[2]`` — and the override made every matrix power
+            # raise ``IndexError``.  DSL subscripts never reach
+            # ``__getitem__``: they are routed to ``_dsl_get`` / ``_dsl_set``
+            # via ``_idx`` / ``_idx_set``.
 
             def _bounds(self, i, limit, what):
                 # Python semantics: negative indices count from the end.
@@ -1901,12 +1904,37 @@ def _str_range(start, stop, step=None):
         f"a numeric tail ('C8'..'C13')")
 
 
+class _Ratio(Sig):
+    """A dimensionless ratio that was WRITTEN as a percentage or permille.
+
+    ``percent`` / ``permille`` return this subclass so that consumers
+    which care about *how* a number was written can tell — most
+    importantly ``plusminus``, where ``100 Ω ± 5%`` must mean a tolerance
+    of 5 % **of the centre** (±5 Ω), not an absolute ±0.05 Ω.
+
+    The tag is consumed by the first arithmetic operation (``Sig._binop``
+    builds a plain ``Sig``), so ``1 + 25%`` is an ordinary ``1.25`` and
+    ``120 V · (1 + 10%)`` behaves exactly as before.
+    """
+    __slots__ = ()
+
+
+def _as_ratio(value):
+    if isinstance(value, _Ratio):
+        return value
+    if isinstance(value, Sig):
+        return value._copy_display_hints(_Ratio(value.value, value.sf))
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return _Ratio(value, _INF)
+    return value            # sympy symbols etc. — leave untouched
+
+
 def percent(x):
-    return x / 100
+    return _as_ratio(x / 100)
 
 
 def permille(x):
-    return x / 1000
+    return _as_ratio(x / 1000)
 
 
 def fact(x):
@@ -1981,6 +2009,16 @@ def _abs_or_size(x):
     """
     if isinstance(x, (set, frozenset, dict, list, tuple, str)):
         return len(x)
+    if hasattr(x, "det") and hasattr(x, "rows") and hasattr(x, "cols"):
+        # A matrix: ``|M|`` is the determinant; for a row/column vector
+        # the bars mean the Euclidean norm.  Never the element count.
+        if x.rows == x.cols:
+            return x.det()
+        if x.rows == 1 or x.cols == 1:
+            return x.norm()
+        raise ValueError(
+            f"|M| is undefined for a non-square {x.rows}×{x.cols} matrix "
+            "(use M.norm() for a matrix norm)")
     if hasattr(x, "__len__") and not _looks_numeric(x):
         return len(x)
     return abs(x)
@@ -2017,6 +2055,12 @@ def plusminus(x, y):
                          _is_pure_temperature)  # local import to
     # avoid a circular reference at module-load time; sigfig imports
     # this module's Range class.
+    if isinstance(y, _Ratio):
+        # ``100 Ω ± 5%`` — a tolerance written as a percentage (or
+        # permille) is RELATIVE to the centre: the half-width is
+        # ``centre × ratio``.  ``x * Sig`` goes through the normal
+        # Sig/Physical arithmetic, so units and sf are handled for us.
+        y = x * Sig(y.value, y.sf)
     if isinstance(x, Sig) or isinstance(y, Sig):
         # Unwrap each to a bare value, build the Range from bare
         # endpoints, then wrap.  sf is computed by the addsub rule
@@ -2431,6 +2475,129 @@ def Π(data):
 # Greek-letter forms ever appear.
 
 
+def _numeric_or_symbolic(x, math_fn, sympy_name, *, fn_label):
+    """Shared body of the trig / hyperbolic / exp wrappers.
+
+    * Symbolic input with free symbols → ``sympy.<fn>(x)`` (stays
+      symbolic so ``diff``, ``solve``, plotting sweeps all work).
+    * Symbolic input WITHOUT free symbols (``30°`` is ``pi/6``) →
+      ``sympy.<fn>`` first; an exact closed form (``1/2``, ``sqrt(3)/2``)
+      is returned as-is, but anything sympy leaves unevaluated or with a
+      Float inside (``cos(0.333·pi)``) is collapsed to a number.
+    * Plain / ``Sig`` numbers → ``math.<fn>``, re-wrapped with the input's
+      sf.  Previously these came back as unevaluated sympy (``exp(1.0)``
+      printed ``E``, ``sinh(1.0)`` printed ``sinh(1)``) with sf discarded.
+    * A dimensioned argument is an error: ``sin(2 V)`` is meaningless.
+    """
+    raw, sf = _peel(x)
+    if _is_physical(raw) or type(raw).__name__ == "_DisplayUnit":
+        raise TypeError(
+            f"{fn_label}() needs a dimensionless argument, got {raw}. "
+            "Divide by a reference quantity first (e.g. sin(θ) with "
+            "θ = arc/r), or use ° / radians for angles.")
+    if _is_symbolic(raw):
+        import sympy
+        res = getattr(sympy, sympy_name)(raw)
+        if res.free_symbols:
+            return res
+        # A MEASURED input (finite sf, e.g. ``45.0°``) always yields a
+        # number — sympy would otherwise hand back ``sqrt(2)/2`` for
+        # ``sin(0.25·pi)`` because 0.25 is an exact binary fraction,
+        # while ``cos(30.0°)`` (1/6 is not) came back numeric: the
+        # display would depend on floating-point trivia.  An EXACT
+        # input keeps sympy's closed form unless it was left
+        # unevaluated or carries a Float.
+        if (sf != _INF or res.has(sympy.Float)
+                or res.atoms(sympy.Function)):
+            try:
+                return Sig(float(res), sf)
+            except (TypeError, ValueError):
+                return res                      # complex-valued etc.
+        return res                              # exact closed form
+    if isinstance(raw, complex):
+        import cmath
+        return Sig(getattr(cmath, math_fn.__name__)(raw), sf)
+    return Sig(math_fn(float(raw)), sf)
+
+
+def sin(x):
+    """Sine — numeric on numbers (sf-preserving), symbolic on symbols."""
+    return _numeric_or_symbolic(x, math.sin, "sin", fn_label="sin")
+
+
+def cos(x):
+    return _numeric_or_symbolic(x, math.cos, "cos", fn_label="cos")
+
+
+def tan(x):
+    return _numeric_or_symbolic(x, math.tan, "tan", fn_label="tan")
+
+
+def asin(x):
+    return _numeric_or_symbolic(x, math.asin, "asin", fn_label="asin")
+
+
+def acos(x):
+    return _numeric_or_symbolic(x, math.acos, "acos", fn_label="acos")
+
+
+def atan(x):
+    return _numeric_or_symbolic(x, math.atan, "atan", fn_label="atan")
+
+
+def sinh(x):
+    return _numeric_or_symbolic(x, math.sinh, "sinh", fn_label="sinh")
+
+
+def cosh(x):
+    return _numeric_or_symbolic(x, math.cosh, "cosh", fn_label="cosh")
+
+
+def tanh(x):
+    return _numeric_or_symbolic(x, math.tanh, "tanh", fn_label="tanh")
+
+
+def asinh(x):
+    return _numeric_or_symbolic(x, math.asinh, "asinh", fn_label="asinh")
+
+
+def acosh(x):
+    return _numeric_or_symbolic(x, math.acosh, "acosh", fn_label="acosh")
+
+
+def atanh(x):
+    return _numeric_or_symbolic(x, math.atanh, "atanh", fn_label="atanh")
+
+
+def exp(x):
+    return _numeric_or_symbolic(x, math.exp, "exp", fn_label="exp")
+
+
+def atan2(y, x):
+    """Two-argument arctangent, unit-aware.
+
+    ``atan2(1.0 m, 2.0 m)`` is the everyday "angle from two legs"
+    computation; both legs must share a dimension, and the result is a
+    plain angle in radians.  Symbolic operands go to ``sympy.atan2``.
+    """
+    ry, sfy = _peel(y)
+    rx, sfx = _peel(x)
+    sf = min(sfy, sfx)
+    if _is_symbolic(ry) or _is_symbolic(rx):
+        import sympy
+        return sympy.atan2(ry, rx)
+    py, px = _is_physical(ry), _is_physical(rx)
+    if py != px:
+        raise TypeError("atan2(): both arguments must carry the same "
+                        f"dimension, got {ry} and {rx}")
+    if py:
+        if ry.dimensions != rx.dimensions:
+            raise TypeError("atan2(): arguments have different dimensions: "
+                            f"{ry} and {rx}")
+        ry, rx = ry.value, rx.value         # SI magnitudes, same scale
+    return Sig(math.atan2(float(ry), float(rx)), sf)
+
+
 def log10(x):
     """Base-10 logarithm.
 
@@ -2517,14 +2684,17 @@ def phasor(magnitude, angle_rad):
     """
     raw_mag, sf_mag = _peel(magnitude)
     raw_ang, sf_ang = _peel(angle_rad)
-    if hasattr(raw_mag, "_value") and hasattr(raw_mag, "_dimensions"):
+    if _is_physical(raw_mag) or type(raw_mag).__name__ == "_DisplayUnit":
         raise TypeError(
-            "phasor() cannot accept a Physical/forallpeople magnitude. "
-            "Compute the phasor with unitless numerics, then attach a "
-            "unit after abs(): V_out := abs(V_complex) * V"
+            "∠ / phasor() cannot carry a unit on the magnitude "
+            f"({raw_mag}): forallpeople's Physical has no complex "
+            "magnitude, so the unit would be silently lost.  Build the "
+            "phasor unitless and attach the unit to the real result: "
+            "Z := (5.0 ∠ 30°); R := Z.real · Ω"
         )
-    if hasattr(raw_ang, "_value") and hasattr(raw_ang, "_dimensions"):
-        raise TypeError("phasor() angle must be in unitless radians.")
+    if _is_physical(raw_ang) or type(raw_ang).__name__ == "_DisplayUnit":
+        raise TypeError("∠ / phasor() angle must be unitless radians "
+                        "(write 30° or π/6, not a Physical).")
     sf = min(sf_mag, sf_ang)
 
     # Symbolic angle path: use sympy.exp(I*angle) so that clean fractions
@@ -4946,23 +5116,118 @@ def rewrite_subscript_logs(source: str) -> str:
 
 # ---------- ≈ approximately equal ----------
 
+# Words that end an ``≈`` operand when met at bracket depth 0 — the same
+# things that would end the operand of ``==`` in Python.
+_APPROX_BOUNDARY_WORDS = frozenset({
+    "and", "or", "not", "if", "else", "elif", "for", "in", "while",
+    "return", "assert", "yield", "lambda", "with", "as", "is",
+})
+_APPROX_BOUNDARY_CHARS = frozenset(",;:=<>!#")
+
+
+def _approx_operand_bounds(source: str, pos: int):
+    """Return ``(start, end)`` of the two operands around the ``≈`` at
+    ``pos``: ``source[start:pos]`` is the LHS, ``source[pos+1:end]`` the
+    RHS.  Each operand extends until a boundary at bracket depth 0 — a
+    comma, an unmatched bracket, an assignment / comparison character,
+    a colon, a newline, a comment, or a Python keyword such as ``and``
+    / ``if`` / ``for``.  Arithmetic operators are *inside* the operand,
+    which gives ``≈`` the precedence of a comparison."""
+    n = len(source)
+
+    # ---- leftwards -----------------------------------------------------
+    depth = 0
+    i = pos - 1
+    start = 0
+    while i >= 0:
+        c = source[i]
+        if c in ")]}":
+            depth += 1
+        elif c in "([{":
+            if depth == 0:
+                start = i + 1
+                break
+            depth -= 1
+        elif depth == 0:
+            if c == "\n" or c in _APPROX_BOUNDARY_CHARS:
+                start = i + 1
+                break
+            if c.isalnum() or c == "_":
+                # Read the whole word; a keyword ends the operand.
+                j = i
+                while j >= 0 and (source[j].isalnum() or source[j] == "_"):
+                    j -= 1
+                word = source[j + 1:i + 1]
+                if word in _APPROX_BOUNDARY_WORDS:
+                    start = i + 1
+                    break
+                i = j
+                continue
+        i -= 1
+
+    # ---- rightwards ----------------------------------------------------
+    depth = 0
+    i = pos + 1
+    end = n
+    while i < n:
+        c = source[i]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            if depth == 0:
+                end = i
+                break
+            depth -= 1
+        elif depth == 0:
+            if c == "\n" or c in _APPROX_BOUNDARY_CHARS:
+                end = i
+                break
+            if c.isalpha() or c == "_":
+                j = i
+                while j < n and (source[j].isalnum() or source[j] == "_"):
+                    j += 1
+                word = source[i:j]
+                if word in _APPROX_BOUNDARY_WORDS:
+                    end = i
+                    break
+                i = j
+                continue
+        i += 1
+    return start, end
+
+
 def rewrite_approx(source: str) -> str:
     """
-    Rewrites:
-        a ≈ b            -> approx(a, b)
-        (a+b) ≈ c        -> approx((a+b), c)
-        a ≈ (b+c)        -> approx(a, (b+c))
-        f(x) ≈ g(y)      -> approx(f(x), g(y))
+    Rewrites ``a ≈ b`` → ``approx(a, b)`` with *comparison* precedence:
+
+        1 + 1 ≈ 2            -> approx(1 + 1, 2)
+        2·3 ≈ 6 and ok       -> approx(2*3, 6) and ok
+        f(x) ≈ g(y)          -> approx(f(x), g(y))
+        [v ≈ 3 for v in vs]  -> [approx(v, 3) for v in vs]
+        a ≈ b ≈ c            -> approx(approx(a, b), c)
+
+    An earlier version reused the single-operand pattern of ``±``, so
+    ``≈`` bound tighter than ``+`` and ``·`` — ``1 + 1 ≈ 2`` evaluated
+    as ``1 + (1 ≈ 2)`` == ``1``.  Operands now extend to the nearest
+    comma, bracket, assignment, colon, keyword or end of line, exactly
+    like the operands of ``==``.
     """
-    previous = None
-    while source != previous:
-        previous = source
-        source = re.sub(
-            rf'(?<![A-Za-z_]){_BINOP_RHS}\s*≈\s*{_BINOP_RHS}',
-            lambda m: _wrap_binop('approx', '≈', m.group(0)),
-            source,
-        )
-    return source
+    while True:
+        pos = source.find("≈")
+        if pos < 0:
+            return source
+        start, end = _approx_operand_bounds(source, pos)
+        lhs = source[start:pos].strip()
+        rhs = source[pos + 1:end].strip()
+        if not lhs or not rhs:
+            # Malformed (e.g. ``≈ 3`` with no LHS) — leave the glyph for
+            # Python to report as a syntax error.
+            return source
+        # Preserve the leading whitespace of the LHS slot so indentation
+        # and spacing around the call survive.
+        lead = source[start:pos][:len(source[start:pos]) - len(source[start:pos].lstrip())]
+        source = (source[:start] + lead + f"approx({lhs}, {rhs})"
+                  + source[end:])
 
 
 # ---------- list/array elementwise multiplication with units ----------
@@ -7306,6 +7571,26 @@ def transform_source(source, **_kwargs):
     new_tokens = [prev_token]
 
     for token in tokens[1:]:
+        # ``5 km/h`` and ``20 L/min`` read as speed and flow, but ``h``
+        # is Planck's constant and ``min`` is Python's builtin — the
+        # first evaluates silently to nonsense (``7.5e+36 kg⁻¹·m⁻¹·s``),
+        # the second to a TypeError.  Warn when a bare ``h`` / ``min``
+        # directly follows ``<unit>/``; the hour is ``hr`` (or ``hour``)
+        # and the minute is ``minute``.  A warning, not an error: ``J/h``
+        # (a frequency from an energy) is legitimate physics.
+        if (token.is_identifier() and str(token) in ("h", "min")
+                and str(prev_token) == "/" and len(new_tokens) >= 2
+                and new_tokens[-2].is_identifier()
+                and str(new_tokens[-2]) in _UNIT_NAMES_FOR_BINDING):
+            import warnings
+            _meant = "hr" if str(token) == "h" else "minute"
+            warnings.warn(
+                f"'{new_tokens[-2]}/{token}': '{token}' here is "
+                + ("Planck's constant" if str(token) == "h"
+                   else "the Python builtin min()")
+                + f", not a time unit — write '{new_tokens[-2]}/{_meant}' "
+                "for a rate per " + ("hour" if _meant == "hr" else "minute")
+                + ".", SyntaxWarning, stacklevel=2)
         insert_mul = (
             (
                 prev_token.is_number()

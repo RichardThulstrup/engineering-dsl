@@ -591,6 +591,9 @@ barrel  = exact(42)             * gal_us        # oil barrel = 42 US gal
 # SI base is the second; common multiples are useful for engineering.
 minute  = exact(60)             * _s
 hour    = exact(3600)           * _s
+hr      = hour                  # ``h`` is Planck's constant, ``min`` is the
+                                # Python builtin — ``hr`` is the safe short
+                                # name for an hour (``5 km/hr``).
 day     = exact(86_400)         * _s
 week    = exact(7)              * day
 year_julian = exact(365.25)     * day           # used in astronomy
@@ -612,6 +615,18 @@ yr      = year_julian                            # canonical short form (astrono
 #   calendar-accurate count — use real date arithmetic for that.
 year    = year_tropical
 month   = exact(365.2425 / 12) * day             # average Gregorian month
+
+# ---------------------------------------------------------------------------
+# Angle — dimensionless SI units
+# ---------------------------------------------------------------------------
+# forallpeople has no angle dimension, so the radian and steradian are
+# the exact number 1: ``2.5 rad`` is simply ``2.5``.  They exist so the
+# names the toolkit has always protected and bound (``_SI_UNIT_NAMES``)
+# actually resolve — previously ``1.0 rad`` was a ``NameError`` — and
+# so a formula can say what its angle is in.  Degrees are the ``°``
+# postfix (``30°`` → ``30·π/180``).
+rad = exact(1)
+sr  = exact(1)
 
 
 # ``HMS`` — a display-target sentinel for ``duration ▶ HMS``.
@@ -1032,7 +1047,8 @@ __all__ = [
     "gal_us", "gal_uk", "qt_us", "pt_us", "fl_oz_us",
     "qt_uk", "pt_uk", "fl_oz_uk", "barrel",
     # Time — derived
-    "minute", "hour", "day", "week", "year_julian", "year_tropical", "yr",
+    "minute", "hour", "hr", "day", "week", "year_julian", "year_tropical", "yr",
+    "rad", "sr",
     "year", "month", "HMS", "hms",
     # Astronomy / geology / cosmology time scales
     "kyr", "Myr", "Gyr",

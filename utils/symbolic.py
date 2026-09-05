@@ -90,10 +90,16 @@ from sympy import (
     # (``sin(0.5) * V``) the unit is lost.  For unit-bearing trig,
     # apply the function to the numeric magnitude first and reattach
     # the unit, or evaluate the symbolic form explicitly.
-    sin, cos, tan, asin, acos, atan, atan2,
-    sinh, cosh, tanh, asinh, acosh, atanh,
-    exp, log,
+    log,
     pi, E,
+)
+# The trig / hyperbolic / ``exp`` names are the toolkit's own wrappers
+# (``circuit_dsl``): numeric with sf-tracking on numbers, symbolic on
+# symbols, and an error on a dimensioned argument.  Re-exported here so
+# the historic ``from utils.symbolic import sin`` keeps working.
+from .circuit_dsl import (                       # noqa: E402
+    sin, cos, tan, asin, acos, atan, atan2,
+    sinh, cosh, tanh, asinh, acosh, atanh, exp,
 )
 # ``sqrt`` gets a small wrapper below — sympy's own ``sqrt`` refuses
 # to take a square root of a ``forallpeople.Physical`` (it tries to
@@ -147,14 +153,16 @@ def sqrt(x):
     except _SympifyError:
         return x ** 0.5
 
-# NOTE: sympy's trig/exp/log functions are polymorphic — symbolic on
-# symbols, numeric on numbers — but the numeric-side interaction with
-# ``forallpeople.Physical`` is left-handed: ``sym.sin(0.5) * V``
-# returns ``0.479`` (a plain float, units lost) instead of ``479 mV``,
-# because sympy's ``__mul__`` doesn't know how to delegate to the
-# Physical type.  For unit-bearing computations, apply the trig to a
-# scalar first: ``sin(0.5) * V``.  For purely symbolic or numeric work
-# the re-exports above are convenient and behave as expected.
+# NOTE: the trig / hyperbolic / ``exp`` names exported here are the
+# toolkit's wrappers from ``circuit_dsl`` (see ``_numeric_or_symbolic``
+# there): on a number or ``Sig`` they compute with ``math`` and keep the
+# significant-figure count (``sin(0.500)`` has 3 sf; ``exp(1.0)`` is
+# ``2.7``, not the symbol ``E``); on a symbolic expression they defer to
+# sympy; on a dimensioned ``Physical`` they raise.  Only ``log`` is still
+# sympy's own — use ``ln`` / ``log10`` / ``log2`` for the numeric,
+# sf-aware forms.  The old left-handed gotcha (``sym.sin(0.5) * V``
+# silently dropping the unit) still applies to the ``sym.``-prefixed
+# functions, which is one more reason to use the bare names.
 
 
 import datetime as _datetime
