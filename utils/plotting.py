@@ -1198,6 +1198,7 @@ def _reapply_units(value, y_unit_obj, x_unit_obj, power):
         result.value = value
         result.unit_label = label
         result.sf = float("inf")
+        result.quantity = None
         return result
 
     y_display_mag = float(y_unit_obj) or 1.0

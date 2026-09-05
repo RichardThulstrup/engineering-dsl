@@ -113,7 +113,11 @@ check("[1.0 mm..2.0 mm..0.25 mm] matches [1.0..2.0..0.25] mm",
       [repr(x) for x in a] == [repr(x) for x in b] and len(a) == 5, f"{a!r} vs {b!r}")
 a = run("[0.5 V..2.5 V..0.5 V]")
 b = run("[0.5..2.5..0.5] V")
-check("[0.5 V..2.5 V..0.5 V] matches [0.5..2.5..0.5] V (coarser prefix wins)",
+# Endpoints written as ``0.5 V`` keep their written unit, so the
+# enumerated range prints in volts — never auto-prefixed to ``500 mV``.
+check("[0.5 V..2.5 V..0.5 V] prints in the written unit",
+      [repr(x) for x in a] == ["0.5 V", "1.0 V", "1.5 V", "2.0 V", "2.5 V"], repr(a))
+check("[0.5 V..2.5 V..0.5 V] matches [0.5..2.5..0.5] V",
       [repr(x) for x in a] == [repr(x) for x in b] and len(a) == 5, f"{a!r} vs {b!r}")
 a = run("[10 V..8 V]")
 check("descending [10 V..8 V]", [repr(x) for x in a] == ["10 V", "9 V", "8 V"], repr(a))
@@ -148,7 +152,7 @@ check("[1..3] * 2 unaffected", [repr(x) for x in a] == ["2", "4", "6"], repr(a))
 a = run("[1..5]")
 check("[1..5] stays a numeric array", a.dtype != object and list(a) == [1, 2, 3, 4, 5], f"{a!r} dtype={a.dtype}")
 a = run("[0.5..2.5..0.5] V")
-check("[0.5..2.5..0.5] V keeps its precision", [repr(x) for x in a] == ["500 mV", "1.0 V", "1.5 V", "2.0 V", "2.5 V"], repr(a))
+check("[0.5..2.5..0.5] V keeps its precision and written unit", [repr(x) for x in a] == ["0.5 V", "1.0 V", "1.5 V", "2.0 V", "2.5 V"], repr(a))
 a = run("[1, 2, 3] V")
 check("[1, 2, 3] V unchanged", [repr(x) for x in a] == ["1 V", "2 V", "3 V"], repr(a))
 r = run("Σ([n for n in 1..4])")

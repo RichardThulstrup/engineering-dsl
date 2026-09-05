@@ -213,7 +213,14 @@ GN      = exact(1e9)            * N             # giganewtons
 
 lbf     = lb  * _g_n                            # pound-force = lb × g
 ozf     = lbf / exact(16)                       # ounce-force = lbf/16
-kgf     = _kg * _g_n                            # kilogram-force (legacy)
+# ``_g_n`` is a Sig, ``_kg`` a bare forallpeople Physical.  The Sig
+# MUST be the left operand: ``_kg * _g_n`` routes through
+# ``Physical.__mul__``, which float-coerces the Sig and silently drops
+# its m/s² — leaving a "force" of ``9.807 kg``.  (``lbf`` is immune
+# because ``lb`` is already a Sig.)
+kgf     = _g_n * _kg                            # kilogram-force (legacy)
+kp      = kgf                                   # kilopond — same unit, DIN spelling
+gf      = kgf / exact(1000)                     # gram-force
 dyne    = exact(1e-5)           * N             # CGS unit
 
 
@@ -447,6 +454,16 @@ class _DisplayUnit:
     def __float__(self):
         return float(self.physical)
 
+    def _sympy_(self):
+        # Same refusal ``Engineer`` installs on ``Physical``: without it
+        # sympy's ``Matrix * marker`` would sympify the marker through
+        # ``__float__`` (``[[1, 2]] mW`` → a matrix of bare ``1.0``,
+        # ``2.0``, units gone).  Raising makes sympy return
+        # ``NotImplemented`` so Python falls back to ``__rmul__`` here,
+        # which builds the unit-bearing, tagged elements.
+        from sympy.core.sympify import SympifyError
+        raise SympifyError(self)
+
     def __repr__(self):
         return self.label
 
@@ -489,6 +506,13 @@ inch = _DisplayUnit(inch, "inch")
 ft   = _DisplayUnit(ft,   "ft")
 lbf  = _DisplayUnit(lbf,  "lbf")
 ozf  = _DisplayUnit(ozf,  "ozf")
+# Metric gravitational and CGS force units get the same treatment, so
+# ``0.1 kgf m`` reads ``0.1 kgf·m`` and ``10⁷ dyne cm`` reads
+# ``dyne·cm`` — not ``0.981 J`` / ``1.000 J``.
+kgf  = _DisplayUnit(kgf,  "kgf")
+kp   = _DisplayUnit(kp,   "kp")
+gf   = _DisplayUnit(gf,   "gf")
+dyne = _DisplayUnit(dyne, "dyne")
 
 
 # ---------------------------------------------------------------------------
@@ -973,7 +997,7 @@ __all__ = [
     "tonne", "ozt",
     # Force — full prefix family
     "N", "newton", "μN", "mN", "kN", "MN", "GN", "lbf", "ozf", "kgf",
-    "dyne",
+    "kp", "gf", "dyne",
     # Charge
     "C", "coulomb", "μC", "mC", "nC", "pC", "kC",
     # Capacitance — pF, nF, mF (μF lives in calc_symbols.py)

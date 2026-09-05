@@ -23,8 +23,9 @@ not string parsing.
 
 - **Units everywhere** — powered by
   [forallpeople](https://github.com/connorferster/forallpeople): `12 V / 3 A`
-  is `4 Ω`, results auto-scale their SI prefix (`0.0082 V` displays as
-  `8.2 mV`). Value–unit binding is tight: `12 V / 3 A` parses as
+  is `4 Ω`. A literal keeps the unit it was written in (`22735 mm`
+  prints `22735 mm`); computed results with no written unit auto-scale
+  their SI prefix. Value–unit binding is tight: `12 V / 3 A` parses as
   `(12 V)/(3 A)`.
 - **Significant figures** — numeric literals carry their precision
   (`4.70 kΩ` is three sig-figs), propagated through arithmetic and honored in

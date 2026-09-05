@@ -140,7 +140,8 @@ _SI_UNITS = (
     # Voltage / current — large prefixes
     'kV', 'MV', 'kA',
     # Force
-    'newton', 'μN', 'mN', 'kN', 'MN', 'GN', 'lbf', 'ozf', 'kgf', 'dyne',
+    'newton', 'μN', 'mN', 'kN', 'MN', 'GN', 'lbf', 'ozf', 'kgf', 'kp', 'gf',
+    'dyne',
     # Charge
     'coulomb', 'μC', 'mC', 'nC', 'pC', 'kC',
     # Pressure

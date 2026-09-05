@@ -19,7 +19,7 @@ from .sigfig import (
 # to pull them in.
 __all__ = [
     "_S", "_INF", "_R", "Sig", "exact", "measured", "sigfigs_of",
-    "in_units", "radix", "register_radix",
+    "in_units", "radix", "register_radix", "_wu",
     "set_decimal_literals", "get_decimal_literals", "decimal_literals",
     "Range", "parallel", "percent", "permille", "fact", "mod",
     "plusminus", "σ", "Σ", "mean", "sqrt", "add_hook",
@@ -126,7 +126,7 @@ _UNIT_NAMES_FOR_BINDING = (
         "parsec", "ly", "au",
         "lb", "lbm", "oz", "grain", "slug", "stone",
         "ton_us", "ton_uk", "tonne", "ozt",
-        "newton", "lbf", "kgf", "dyne",
+        "newton", "lbf", "ozf", "kgf", "kp", "gf", "dyne",
         "μN", "mN", "kN", "MN", "GN",
         "hPa", "kPa", "MPa", "GPa", "bar", "mbar", "atm",
         "torr", "mmHg", "psi", "ksi", "inH2O",
@@ -165,6 +165,37 @@ _UNIT_NAME_ALT = (
              sorted(_UNIT_NAMES_FOR_BINDING, key=len, reverse=True)) +
     ")"
 )
+
+
+def _wu(unit, label: str):
+    """Written-unit marker for a ``<value> <unit>`` literal.
+
+    The transform turns ``22735 mm`` into ``(_S(22735, _INF) *
+    _wu(mm, 'mm'))``.  For a plain forallpeople unit this returns a
+    ``_DisplayUnit`` (the same marker ``Nm`` and ``inch`` are built
+    from), so the resulting ``Sig`` remembers the unit it was WRITTEN
+    in and displays as ``22735 mm`` — not forallpeople's auto-prefixed
+    ``22.735 m``.  The tag follows the existing ``_unit_pref`` rules:
+    it persists through arithmetic (left operand wins for ``+``/``-``,
+    matching tags survive ``*``/``/``), and the formatter drops it the
+    moment the value's dimensions stop matching, so it can never label
+    a number wrongly.
+
+    Anything that is not a bare Physical unit is returned untouched: a
+    ``_DisplayUnit`` already carries its canonical label (``Nm`` →
+    ``N·m``); ``_DeltaUnit`` (``ΔC``), currencies, ``HMS`` and other
+    sentinels have their own operator routing and must keep it.
+    """
+    if type(unit).__name__ == "_DisplayUnit":
+        return unit
+    inner = unit.value if isinstance(unit, Sig) else unit
+    if not (hasattr(inner, "dimensions") and hasattr(inner, "value")):
+        return unit
+    try:
+        from .extra_units import _DisplayUnit
+        return _DisplayUnit(inner, label)
+    except Exception:
+        return unit
 
 _CONSTANT_NAMES = frozenset({
     # Physical constants
@@ -1354,19 +1385,37 @@ def _range_inc_physical(start, stop, step=None):
     # ``0.5 V .. 2.5 V`` that is volts, giving 0.5, 1.0, … exactly as
     # ``[0.5..2.5..0.5] V`` does.  A zero endpoint has no prefix of its
     # own and defers to the other end.
-    ratios = []
-    for r in (raw_s, raw_e):
-        if r.value != 0:
-            ratio = abs(r.value / float(r))    # display-unit size in SI (1000 for kΩ)
-            pow10 = 10.0 ** round(math.log10(ratio))
-            if abs(ratio / pow10 - 1.0) < 1e-9:
-                ratio = pow10                  # snap 999.9999999 → 1000
-            ratios.append(ratio)
-    if not ratios:
-        return CommaArray(np.array([start], dtype=object))
-    ratio = max(ratios)
-    base = raw_s if raw_s.value != 0 else raw_e
-    unit = (base / base.value) * ratio         # one display unit, as a Physical
+    #
+    # An endpoint WRITTEN with a unit (``0.5 V``, tagged by ``_wu``)
+    # settles the question outright: enumerate in that unit and hand
+    # the tag on, so ``[0.5 V..2.5 V..0.5 V]`` prints ``0.5 V`` like
+    # ``[0.5..2.5..0.5] V`` — never auto-prefixed to ``500 mV``.
+    unit = None
+    for end in (start, stop):
+        pref = getattr(end, "_unit_pref", None)
+        if type(pref).__name__ != "_DisplayUnit":
+            continue
+        pu = getattr(pref, "physical", None)
+        pu = pu.value if isinstance(pu, Sig) else pu
+        if (_is_physical(pu) and pu.dimensions == raw_s.dimensions
+                and pu.value != 0):
+            ratio = abs(pu.value)
+            unit = pref
+            break
+    if unit is None:
+        ratios = []
+        for r in (raw_s, raw_e):
+            if r.value != 0:
+                ratio = abs(r.value / float(r))    # display-unit size in SI (1000 for kΩ)
+                pow10 = 10.0 ** round(math.log10(ratio))
+                if abs(ratio / pow10 - 1.0) < 1e-9:
+                    ratio = pow10                  # snap 999.9999999 → 1000
+                ratios.append(ratio)
+        if not ratios:
+            return CommaArray(np.array([start], dtype=object))
+        ratio = max(ratios)
+        base = raw_s if raw_s.value != 0 else raw_e
+        unit = (base / base.value) * ratio         # one display unit, as a Physical
 
     def _num(x):
         # ``1 kΩ`` is 1000.0 / 1000 = 1.0 — hand the numeric range an int
@@ -2896,6 +2945,24 @@ def normalize_source(source: str) -> str:
         # ``)`` closed a grouping paren" (insert ``*``) from "this ``)``
         # closed a function-call paren" (don't).
     }
+
+    # A middle dot BETWEEN TWO KNOWN UNIT NAMES is juxtaposition, not a
+    # bare product: ``1 N·m`` should read exactly like ``1 N m`` and
+    # display ``1 N·m``.  Translating the dot to ``*`` first (the table
+    # below) hides the right-hand unit from the tight-binding pass, so
+    # only the left one is tagged and the value renders in whatever
+    # forallpeople picks (``1 N·m`` → ``1 J``, ``0.1 kp·m`` → ``1000
+    # mJ``).  Turn ``unit·unit`` into ``unit unit`` before the table
+    # runs; the loop handles chains (``kg·m·s``).  Variables are never
+    # touched — both sides must be names from ``_UNIT_NAMES_FOR_BINDING``.
+    _unit_dot = re.compile(
+        rf'(?<![A-Za-z0-9_])({_UNIT_NAME_ALT})\s*[·⋅]\s*'
+        rf'({_UNIT_NAME_ALT})(?![A-Za-z0-9_])'
+    )
+    previous = None
+    while source != previous:
+        previous = source
+        source = _unit_dot.sub(r'\1 \2', source)
 
     for old, new in replacements.items():
         source = source.replace(old, new)
@@ -7201,6 +7268,7 @@ def transform_source(source, **_kwargs):
     # their own machinery; instead, track INSERTION POINTS as (index,
     # marker) tuples and apply them in a second pass.
     wrap_inserts = []   # list of (index_in_new_tokens, "(") or (index, ")")
+    unit_rewrites = []  # indices in new_tokens of unit tokens to tag via _wu
 
     new_tokens = [prev_token]
 
@@ -7296,8 +7364,35 @@ def transform_source(source, **_kwargs):
                 # remember we already appended ``*`` so the atom ends
                 # at index ``len(new_tokens) - 2`` (before the ``*``).
                 atom_start = _atom_start_index(new_tokens[:-1])
+                # A power binds tighter than the unit: ``10⁷ N`` reaches
+                # this pass as ``(10)**(7) N``, and the atom found above
+                # is just the exponent ``(7)``.  Wrapping that alone
+                # gives ``10**((7)*N)`` — a unit in the exponent, which
+                # dies at runtime.  Walk back over ``**`` and its base
+                # (repeatedly, for chained powers) so the whole power
+                # expression is the LHS: ``((10)**(7) * N)``.
+                while (atom_start >= 1
+                       and str(new_tokens[atom_start - 1]) == "**"):
+                    base_start = _atom_start_index(
+                        new_tokens[:atom_start - 1])
+                    if base_start >= atom_start - 1:
+                        break   # no atom before ``**`` — leave as is
+                    atom_start = base_start
                 wrap_inserts.append((atom_start, "open"))
                 wrap_inserts.append((len(new_tokens) + 1, "close"))
+                # Remember the WRITTEN unit: emit ``_wu(mm, 'mm')`` in
+                # place of the bare ``mm`` so the literal displays in
+                # the unit the author typed (see ``_wu``).  The label
+                # goes through the unit-label stash — a placeholder
+                # survives every later pass untouched and is restored
+                # to the quoted name at the end of ``transform_source``.
+                # The rewrite is deferred to after the loop (the token
+                # must still look like an identifier to the adjacency
+                # rules that follow — ``5 Ω x`` needs its second ``*``),
+                # and it edits the token's text in place rather than
+                # splicing in a bare string, so the token keeps the
+                # source position ``untokenize`` uses for spacing.
+                unit_rewrites.append(len(new_tokens))
 
         new_tokens.append(token)
 
@@ -7342,6 +7437,13 @@ def transform_source(source, **_kwargs):
     # valid as we splice into the list.  ``token_utils.untokenize``
     # accepts plain strings interleaved with ``Token`` objects, so we
     # can splice in raw ``"("`` and ``")"`` strings.
+    # Tag the written units first — this changes token TEXT only, so
+    # the indices recorded for the paren wraps below stay valid.
+    for idx in unit_rewrites:
+        tok = new_tokens[idx]
+        name = str(tok)
+        tok.string = f"_wu({name}, {_stash_unit_label(repr(name))})"
+
     if wrap_inserts:
         # Sort by index descending; for the same index, "close" comes
         # before "open" so we don't accidentally close before opening.

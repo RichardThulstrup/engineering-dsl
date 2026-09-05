@@ -145,11 +145,38 @@ def _unit_label_to_latex(label: str) -> str:
                 run += label[j]
                 j += 1
             # Escape the few LaTeX-special chars that can appear in a
-            # unit string; Greek letters etc. pass through as glyphs.
+            # unit string.  Greek glyphs become their LaTeX commands
+            # (``kΩ`` → ``k\Omega``, ``μH`` → ``\mu H``) so they typeset
+            # exactly as forallpeople's own LaTeX did; a command is
+            # followed by a space when a letter comes next, so
+            # ``\Omega`` never swallows it.
             run = run.replace("%", r"\%").replace("&", r"\&")
-            out.append(r"\mathrm{" + run + "}")
+            tex = ""
+            for k, c in enumerate(run):
+                cmd = _GREEK_GLYPH_TEX.get(c)
+                if cmd is None:
+                    tex += c
+                else:
+                    nxt = run[k + 1] if k + 1 < len(run) else ""
+                    tex += cmd + (" " if nxt.isalpha() else "")
+            out.append(r"\mathrm{" + tex + "}")
             i = j
     return "".join(out)
+
+
+# Greek letters that appear in unit labels (``Ω``, ``μ``, ``Δ``) and
+# their LaTeX commands — used by ``_unit_label_to_latex`` above.
+_GREEK_GLYPH_TEX = {
+    "α": r"\alpha", "β": r"\beta", "γ": r"\gamma", "δ": r"\delta",
+    "ε": r"\epsilon", "ζ": r"\zeta", "η": r"\eta", "θ": r"\theta",
+    "ι": r"\iota", "κ": r"\kappa", "λ": r"\lambda", "μ": r"\mu",
+    "µ": r"\mu", "ν": r"\nu", "ξ": r"\xi", "π": r"\pi", "ρ": r"\rho",
+    "σ": r"\sigma", "τ": r"\tau", "υ": r"\upsilon", "φ": r"\phi",
+    "χ": r"\chi", "ψ": r"\psi", "ω": r"\omega",
+    "Γ": r"\Gamma", "Δ": r"\Delta", "Θ": r"\Theta", "Λ": r"\Lambda",
+    "Ξ": r"\Xi", "Π": r"\Pi", "Σ": r"\Sigma", "Φ": r"\Phi",
+    "Ψ": r"\Psi", "Ω": r"\Omega",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -377,8 +404,10 @@ def _format_unit_pref(value, sf, pref):
 
     ``pref`` is a ``_DisplayUnit`` marker (``Nm`` and friends from
     ``extra_units``, soft-coupled by shape: ``.physical`` + ``.label``).
-    A torque written ``5 Nm`` stays ``5.000 N·m`` on display instead of
-    reducing to the dimensionally-identical ``5.000 J``.
+    A torque written ``5.000 Nm`` stays ``5.000 N·m`` on display instead
+    of reducing to the dimensionally-identical ``5.000 J``.  Precision
+    follows the ``Sig`` rule: a finite sf rounds, an exact literal
+    (``5 Nm``, ``22735 inch``) prints in full — ``5 N·m``, ``22735 inch``.
 
     Returns ``None`` when the preference no longer applies — the value's
     dimensions don't match the preferred unit's (a torque divided by a
@@ -398,13 +427,31 @@ def _format_unit_pref(value, sf, pref):
                 getattr(dims, f, 0)
                 for f in ("kg", "m", "s", "A", "cd", "K", "mol")):
             return None
-        mag = float(ratio)
-        # sf=∞ (exact literal) → the 4-significant-digit engineering
-        # default, matching ``_InUnits``'s display convention.
-        display_sf = sf if math.isfinite(sf) else 4
-        return f"{_format_sig(mag, display_sf)} {label}"
+        return f"{_format_in_unit(float(ratio), sf)} {label}"
     except Exception:
         return None
+
+
+def _format_in_unit(mag: float, sf) -> str:
+    """Format a magnitude that has already been expressed in a chosen
+    unit (a written-unit tag or a ``▶`` target) with the SAME precision
+    rule ``_format_sig`` applies to a Physical — so ``22735 mm``,
+    ``22735 mm ▶ mm`` and the bare SI form all agree:
+
+      * ``sf`` infinite (exact) → ``.15g``, which prints the value in
+        full and hides the float noise of the ``value / unit`` ratio
+        (``1 mm`` in ``μm`` is ``1000.0000000000001`` as a float, and
+        must read ``1000``);
+      * ``sf`` finite → ``#.{sf}g`` with the usual scientific-notation
+        expansion, so a significant trailing zero keeps its marker
+        (``10. kΩ`` stays ``10.``, exactly as the Physical form does).
+    """
+    if math.isnan(mag) or math.isinf(mag):
+        return repr(mag)
+    if math.isinf(sf):
+        return _expand_sci(format(mag, ".15g"))
+    n = max(int(sf), 1)
+    return _expand_sci(format(mag, f"#.{n}g"))
 
 
 def _is_currency(x) -> bool:
@@ -2135,18 +2182,21 @@ class _InUnits:
     rendering (which collapses derived units to base SI regardless of
     what the source code wrote).
 
-    Sf-aware: when the source quantity carries a finite ``sf``, the
-    display rounds to that many significant figures.  When ``sf`` is
-    infinite (the source was exact), falls back to a 4-significant-digit
-    engineering default.  This makes ``▶`` consistent with bare ``Sig``
-    display — what you see in ``print(v)`` and ``v ▶ unit`` honour the
-    same precision, instead of ``▶`` always showing 4 digits regardless
-    of how confidently the value was known.
+    Sf-aware: the display uses exactly the precision rule of a bare
+    ``Sig`` (``_format_sig``).  A finite ``sf`` rounds to that many
+    significant figures; an infinite ``sf`` (the source was exact —
+    integer literals, ``22735 mm``) prints the value in full, so a typed
+    ``22735 mm ▶ mm`` reads back as ``22735 mm`` and never as a rounded
+    ``22740 mm``.  What you see in ``print(v)`` and ``v ▶ unit`` honour
+    the same precision.
 
     The wrapper is transparent to numeric use: ``float()``, ``int()``,
-    ``__format__`` all return the underlying scalar, so an ``_InUnits``
-    can be plotted, compared, or fed back into further calculation.  It
-    only acts special when *displayed* (``repr`` / ``str`` / ``print``).
+    ``__format__`` all return the display-unit scalar, so an ``_InUnits``
+    can be plotted or fed to plain-number code.  Arithmetic (``+ - * /``,
+    comparisons) acts on the DIMENSIONED source quantity — see the
+    arithmetic section below — so ``(a ▶ mm) + (b ▶ m)`` is a correct
+    length, not a sum of two unrelated numbers.  It only acts special
+    when *displayed* (``repr`` / ``str`` / ``print``).
 
     >>> v = in_units(0.0003155, mm_per_s_unit, 'mm/s')   # built directly
     >>> v                                                  # repr — Mathcad-style
@@ -2157,14 +2207,20 @@ class _InUnits:
     '0.32 mm/s'
     """
 
-    __slots__ = ("value", "unit_label", "sf")
+    # ``value``      — the display number: ``quantity / target``, a float
+    #                  (or float array) in the display unit.  Plotting and
+    #                  ``float()`` read this.
+    # ``unit_label`` — the text shown after the number.
+    # ``sf``         — significant figures of the source quantity.
+    # ``quantity``   — the dimensioned source (a ``Physical``, or an array
+    #                  of them), kept so ARITHMETIC on the wrapper stays
+    #                  unit-aware.  ``None`` when there was no dimensioned
+    #                  source (symbolic / hand-built wrappers), in which
+    #                  case arithmetic falls back to ``value``.
+    __slots__ = ("value", "unit_label", "sf", "quantity")
 
-    # Default display precision when the source had no sf info (sf=∞).
-    # 4 matches typical engineering default; users who want more or
-    # fewer digits should use an explicit format spec.
-    _DEFAULT_DISPLAY_SF = 4
-
-    def __init__(self, value, unit_label: str, sf: float = _INF):
+    def __init__(self, value, unit_label: str, sf: float = _INF,
+                 quantity=None):
         # Accept either a scalar or an array-like.  The plotting code
         # routinely passes numpy arrays of Physicals through ``in_units``
         # (the ``y := [...] · M☉ ▸ M☉`` idiom for axis labelling); a
@@ -2192,6 +2248,7 @@ class _InUnits:
             self.value = float(value)
         self.unit_label = unit_label
         self.sf = sf
+        self.quantity = quantity
 
     def __repr__(self) -> str:
         # Array case — render a compact summary rather than the full
@@ -2203,19 +2260,33 @@ class _InUnits:
                 if n == 0:
                     return f"array([]) {self.unit_label}"
                 # Show first / last element with sf-aware formatting.
-                first = _format_sig(float(self.value.flat[0]),
-                                    self.sf if math.isfinite(self.sf)
-                                    else self._DEFAULT_DISPLAY_SF)
-                last = _format_sig(float(self.value.flat[-1]),
-                                   self.sf if math.isfinite(self.sf)
-                                   else self._DEFAULT_DISPLAY_SF)
+                first = self._fmt_number(float(self.value.flat[0]))
+                last = self._fmt_number(float(self.value.flat[-1]))
                 return f"array([{first}, ..., {last}], n={n}) {self.unit_label}"
         except (ImportError, AttributeError):
             pass
-        # Scalar fallback — use the same sf-aware formatter the bare
-        # ``Sig`` repr uses, so that ``▶`` output matches ``print(sig)``.
-        display_sf = self.sf if math.isfinite(self.sf) else self._DEFAULT_DISPLAY_SF
-        return f"{_format_sig(self.value, display_sf)} {self.unit_label}"
+        # Scalar fallback — same precision rule as a bare ``Sig`` holding
+        # a Physical: finite sf rounds, infinite sf prints in full.
+        return f"{self._fmt_number(self.value)} {self.unit_label}"
+
+    def _fmt_number(self, v) -> str:
+        """Format the display number with the precision rule a bare
+        ``Sig`` applies to a *Physical*: a finite ``sf`` rounds to that
+        many significant figures; an exact value (``sf`` infinite)
+        prints via ``.15g``, the same as ``_format_sig`` does for an
+        exact Physical.  ``.15g`` rather than ``repr`` matters here
+        because ``self.value`` is a computed ratio (``quantity /
+        target``) and carries float noise a Physical's own repr never
+        shows — ``1 mm ▶ μm`` is ``1000.0000000000001`` as a float, and
+        must read ``1000 μm``, not expose the noise.  Non-float values
+        (a sympy symbol on the symbolic path) fall through to
+        ``_format_sig``."""
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            try:
+                return _format_in_unit(float(v), self.sf)
+            except Exception:
+                pass
+        return _format_sig(v, self.sf)
 
     def __str__(self) -> str:
         return self.__repr__()
@@ -2239,9 +2310,7 @@ class _InUnits:
         except ImportError:
             pass
         try:
-            display_sf = (self.sf if math.isfinite(self.sf)
-                          else self._DEFAULT_DISPLAY_SF)
-            num = _sci_to_latex(_format_sig(self.value, display_sf))
+            num = _sci_to_latex(self._fmt_number(self.value))
             unit = _unit_label_to_latex(self.unit_label)
             return f"${num}\\ {unit}$"
         except Exception:
@@ -2309,6 +2378,13 @@ class _InUnits:
                     result.value = float(picked)
                 result.unit_label = self.unit_label
                 result.sf = self.sf
+                # Keep the dimensioned element too, so ``y - y₀`` stays
+                # unit-aware (see the arithmetic section below).
+                q = getattr(self, "quantity", None)
+                try:
+                    result.quantity = None if q is None else q[idx]
+                except Exception:
+                    result.quantity = None
                 return result
         except ImportError:
             pass
@@ -2336,34 +2412,50 @@ class _InUnits:
     # dimensionless Sig.  No label arithmetic, no cancellation rules, no
     # surprises.
     #
+    # IMPORTANT — what "unwrap" unwraps TO.  ``self.value`` is the
+    # display number (``quantity / target``, e.g. ``22735.0`` for
+    # ``22735 mm ▶ mm``).  Arithmetic must NOT use that: it has already
+    # lost its unit, so ``(1 m ▶ mm) + (1 m ▶ m)`` would come out as
+    # ``1000 + 1 = 1001`` and ``(22735 mm ▶ mm) + (19600 mm ▶ mm)`` as a
+    # unit-less ``42335.0``.  The wrapper therefore keeps the original
+    # dimensioned ``quantity`` and unwraps to THAT — so the sum above is
+    # ``42.335 m``, a real length, and mixed display units add correctly.
+    # Only wrappers with no dimensioned source (``quantity`` is ``None``:
+    # symbolic, free-text label, hand-built) fall back to ``value``.
+    #
     # Consequence the user must know: a display preference does not
     # propagate through a calculation.  If you write
     #     y := [...] mm ▶ μm
     #     y := y - y₀
-    # the subtraction unwraps ``y``; the result is a plain array with NO
-    # ``μm`` preference.  Re-apply the preference at the point of
-    # display: ``plot(x, y ▶ μm)`` or ``pp(result ▶ μm)``.  ``▶`` belongs
-    # at the EDGE of a computation (on the thing about to be shown), not
-    # in the middle of one.
+    # the subtraction unwraps ``y``; the result is a plain Physical array
+    # (in reduced SI) with NO ``μm`` preference.  Re-apply the preference
+    # at the point of display: ``plot(x, y ▶ μm)`` or ``pp(result ▶ μm)``.
+    # ``▶`` belongs at the EDGE of a computation (on the thing about to
+    # be shown), not in the middle of one.
     def _self_value(self):
         """The value this wrapper should expose to arithmetic.
 
-        For a scalar with a finite sf we return a ``Sig`` carrying that
-        sf — so when arithmetic unwraps ``_InUnits`` the significant-
-        figure count is NOT lost (a scale factor stays sf-tracked, and
-        ``pp`` rounds it instead of dumping 17 digits).  Arrays and
-        infinite-sf scalars pass through as their bare value (``Sig``
-        wraps scalars only; sf=∞ means "exact", nothing to track)."""
-        v = self.value
+        The dimensioned source ``quantity`` when we have one (a Physical,
+        or an array of them), re-wrapped in a ``Sig`` carrying this
+        wrapper's sf for the scalar case so significant-figure tracking
+        survives (``pp`` rounds the result instead of dumping 17
+        digits).  Arrays pass through as-is (their elements are already
+        Sigs / Physicals).  Without a dimensioned source (symbolic,
+        free-text label or hand-built wrappers) fall back to the display
+        number, sf-tagged when the sf is finite."""
+        q = getattr(self, "quantity", None)
+        v = self.value if q is None else q
         try:
             import numpy as _np
             if isinstance(v, _np.ndarray):
                 return v
         except ImportError:
             pass
+        if isinstance(v, (list, tuple)) or type(v).__name__ == "CommaArray":
+            return v
         if isinstance(v, Sig):
             return v
-        if math.isfinite(self.sf):
+        if q is not None or math.isfinite(self.sf):
             try:
                 return Sig(v, self.sf)
             except Exception:
@@ -2412,32 +2504,55 @@ class _InUnits:
         return self._unwrap_operand(other) ** self._self_value()
 
     def __neg__(self):
-        return -self.value
+        return -self._self_value()
 
     def __pos__(self):
-        return +self.value
+        return +self._self_value()
 
     def __abs__(self):
-        return abs(self.value)
+        return abs(self._self_value())
 
-    # Comparisons also unwrap — ``(x ▶ mm) < 5 mm`` compares the values.
+    # Comparisons also unwrap — ``(x ▶ mm) < 5 mm`` compares the
+    # dimensioned quantities, so the display unit plays no part.  A bare
+    # number on the other side (``(x ▶ mm) < 5``; the DSL hands it in as
+    # a dimensionless ``Sig``) has no unit to compare against, so it is
+    # read in the display unit — i.e. against ``self.value`` — which is
+    # what a reader of ``x ▶ mm`` expects.
+    def _cmp_pair(self, other):
+        bare = _unwrap(other)
+        if type(bare).__name__ == "_InUnits":
+            return self._self_value(), self._unwrap_operand(bare)
+        is_number = (isinstance(bare, (int, float))
+                     and not isinstance(bare, bool)) \
+            or type(bare).__module__ == "numpy" and not hasattr(bare, "shape") \
+            or (type(bare).__module__ == "numpy" and getattr(bare, "shape", None) == ())
+        if is_number and not hasattr(bare, "dimensions"):
+            return self.value, bare
+        return self._self_value(), self._unwrap_operand(other)
+
     def __lt__(self, other):
-        return self.value < self._unwrap_operand(other)
+        a, b = self._cmp_pair(other)
+        return a < b
 
     def __le__(self, other):
-        return self.value <= self._unwrap_operand(other)
+        a, b = self._cmp_pair(other)
+        return a <= b
 
     def __gt__(self, other):
-        return self.value > self._unwrap_operand(other)
+        a, b = self._cmp_pair(other)
+        return a > b
 
     def __ge__(self, other):
-        return self.value >= self._unwrap_operand(other)
+        a, b = self._cmp_pair(other)
+        return a >= b
 
     def __eq__(self, other):
-        return self.value == self._unwrap_operand(other)
+        a, b = self._cmp_pair(other)
+        return a == b
 
     def __ne__(self, other):
-        return self.value != self._unwrap_operand(other)
+        a, b = self._cmp_pair(other)
+        return a != b
 
     def __format__(self, spec: str) -> str:
         # ``f"{v:.6g}"`` honours the user's spec on the numeric part
@@ -2633,6 +2748,9 @@ def in_units(quantity, target, label: str | None = None) -> _InUnits:
             result.value = unwrapped
         result.unit_label = target
         result.sf = result_sf
+        # A free-text label attaches no unit; arithmetic acts on the
+        # value itself.
+        result.quantity = None
         return result
 
     # Symbolic fast-path: when ``quantity`` is a sympy Symbol or
@@ -2658,6 +2776,7 @@ def in_units(quantity, target, label: str | None = None) -> _InUnits:
         result.value = quantity
         result.unit_label = label if label is not None else repr(target)
         result.sf = result_sf
+        result.quantity = None
         return result
 
     # Unwrap Sig layers so we end up with the inner Physical or plain number.
@@ -2734,7 +2853,13 @@ def in_units(quantity, target, label: str | None = None) -> _InUnits:
         parts = target_repr.split(None, 1)
         label = parts[1] if len(parts) == 2 else (target_repr or "")
 
-    return _InUnits(ratio_val, label, sf=result_sf)
+    # Keep the dimensioned source so arithmetic on the wrapper stays
+    # unit-correct.  A ``Sig`` is kept as-is (its sf and any written-unit
+    # tag travel with it, so ``(22735 mm ▶ mm) + (19600 mm ▶ mm)`` prints
+    # ``42335 mm`` exactly like the untagged sum); anything else is the
+    # bare Physical / array, and ``_self_value`` re-attaches the sf.
+    src = quantity if isinstance(quantity, Sig) else q_inner
+    return _InUnits(ratio_val, label, sf=result_sf, quantity=src)
 
 
 # ---------------------------------------------------------------------------
