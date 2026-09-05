@@ -153,6 +153,39 @@ _UNIT_NAMES_FOR_BINDING = (
     })
 )
 
+# NFKC lookalikes.  Python normalises identifiers (PEP 3131), so
+# ``µN`` typed with the MICRO SIGN is the same name as ``μN``
+# with GREEK SMALL MU, and ``kΩ`` (OHM SIGN) the same as ``kΩ``.
+# Keyboards and symbol palettes produce both; the token-level unit
+# match above sees the raw text, so without the variants ``10⁶
+# µN·m`` was neither tightly bound nor tagged and collapsed to
+# ``1 J`` while the Greek-mu spelling printed ``μN·m``.  Mirrors
+# ``_NFKC_VARIANTS`` / ``_expand_variants`` in ``Engineer_Style.py``.
+_NFKC_VARIANTS = {
+    "Ω": ("Ω", "Ω"),   # GREEK CAPITAL OMEGA / OHM SIGN
+    "μ": ("μ", "µ"),   # GREEK SMALL MU / MICRO SIGN
+    "Å": ("Å", "Å"),   # A WITH RING ABOVE / ANGSTROM SIGN
+    "K":      ("K",      "K"),   # LATIN CAPITAL K / KELVIN SIGN
+}
+# Lookalike -> canonical, for the label a tagged literal displays with.
+_NFKC_CANONICAL = str.maketrans({
+    alt: canon for canon, forms in _NFKC_VARIANTS.items() for alt in forms[1:]
+})
+
+
+def _expand_nfkc_variants(word):
+    """All spellings of ``word`` over the NFKC lookalike codepoints."""
+    forms = [""]
+    for ch in word:
+        forms = [f + v for f in forms for v in _NFKC_VARIANTS.get(ch, (ch,))]
+    return forms
+
+
+_UNIT_NAMES_FOR_BINDING = frozenset(
+    form for name in _UNIT_NAMES_FOR_BINDING
+    for form in _expand_nfkc_variants(name)
+)
+
 # Regex character class equivalent.  ``re`` doesn't have a direct
 # "match any string from this set" facility, so we sort longest-first
 # (so ``mΩ`` matches before ``Ω``) and join with ``|`` inside a
@@ -7442,7 +7475,11 @@ def transform_source(source, **_kwargs):
     for idx in unit_rewrites:
         tok = new_tokens[idx]
         name = str(tok)
-        tok.string = f"_wu({name}, {_stash_unit_label(repr(name))})"
+        # The label is the canonical spelling: a literal typed with the
+        # MICRO SIGN displays with the same μ as one typed with the
+        # Greek letter, so the two spellings print identically.
+        label = name.translate(_NFKC_CANONICAL)
+        tok.string = f"_wu({name}, {_stash_unit_label(repr(label))})"
 
     if wrap_inserts:
         # Sort by index descending; for the same index, "close" comes
