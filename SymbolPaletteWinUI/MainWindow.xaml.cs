@@ -616,15 +616,31 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private static ScriptKind ScriptKindOf(string text)
     {
-        if (string.IsNullOrEmpty(text) || text.Length != 1)
+        // A whole run of subscripts (``₁₂``) or superscripts (``⁻¹``)
+        // classifies like a single one; a mix, or any ordinary character,
+        // is left alone so ``x²`` or ``M₁͵₂`` keys keep their real face.
+        if (string.IsNullOrEmpty(text) || text.Length > 4)
             return ScriptKind.None;
 
-        int cp = text[0];
+        ScriptKind kind = ScriptKind.None;
+        foreach (char ch in text)
+        {
+            ScriptKind k = CharScriptKind(ch);
+            if (k == ScriptKind.None || (kind != ScriptKind.None && k != kind))
+                return ScriptKind.None;
+            kind = k;
+        }
+        return kind;
+    }
+
+    private static ScriptKind CharScriptKind(char ch)
+    {
+        int cp = ch;
         if ((cp >= 0x2080 && cp <= 0x209C) || (cp >= 0x1D62 && cp <= 0x1D65) || cp == 0x2C7C)
             return ScriptKind.Subscript;
 
-        string plain = text.Normalize(System.Text.NormalizationForm.FormKC);
-        if (plain != text && plain.Length == 1 && !char.IsWhiteSpace(plain[0]))
+        string plain = ch.ToString().Normalize(System.Text.NormalizationForm.FormKC);
+        if (plain != ch.ToString() && plain.Length == 1 && !char.IsWhiteSpace(plain[0]))
             return ScriptKind.Superscript;
 
         return ScriptKind.None;
@@ -633,7 +649,8 @@ public sealed partial class MainWindow : Window
     /// <summary>The ordinary character a sub/superscript glyph stands for
     /// (``₂`` → ``2``, ``ⁿ`` → ``n``).</summary>
     private static string BaseCharacterOf(string text) =>
-        text.Normalize(System.Text.NormalizationForm.FormKC);
+        text.Normalize(System.Text.NormalizationForm.FormKC)
+            .Replace('-', '\u2212');          // a proper minus sign for ⁻¹ / ₋₁
 
     /// <summary>
     /// Paste a ready-made payload into the previously active window, via
