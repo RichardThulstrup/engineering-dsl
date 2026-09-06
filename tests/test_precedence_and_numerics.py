@@ -263,3 +263,15 @@ def test_rad_sr_exist_and_are_one():
     assert float(run("_r := 1.5 rad")) == pytest.approx(1.5)
     assert float(run("_r := 2.0 sr")) == pytest.approx(2.0)
     assert float(run("_r := sin(1.0 rad)")) == pytest.approx(0.8414709848)
+
+
+def test_typed_unit_spelling_is_displayed():
+    """``in``/``h``/``min`` display as typed, also as the second unit of a
+    product, and ``▸ N·m`` labels keep their dot."""
+    assert str(run("_r := 5 in")) == "5 in"
+    assert str(run("_r := 110 lbf·in")) == "110 lbf·in"
+    assert str(run("_r := 20 ozf·in")) == "20 ozf·in"
+    assert str(run("_r := 12. Nm ▸ lbf·in")) == "110 lbf·in"
+    assert str(run("_r := 12. Nm ▸ N·m")) == "12. N·m"
+    assert str(run("_r := 12. J ▸ kN·m")) == "0.012 kN·m"
+    assert str(run("_r := 5 inch")) == "5 inch"              # typed as inch, shown as inch

@@ -574,14 +574,14 @@ public static class SymbolRepository
                 E("▸ dyn", "dynes (CGS, 10 μN)"),
             ]),
             S("Torque (display-preserving)", [
-                // Faces show the printed form (N·m, lbf·in); the paste text is
-                // the identifier the toolkit defines (Nm, lbf_inch).
-                Labelled("▸ Nm", "▸ N·m", "newton-metres — pastes ▸ Nm; stays N·m, never J"),
-                Labelled("▸ mNm", "▸ mN·m", "millinewton-metres (small motors) — pastes ▸ mNm"),
-                Labelled("▸ kNm", "▸ kN·m", "kilonewton-metres (structural moments) — pastes ▸ kNm"),
-                Labelled("▸ lbf_ft", "▸ lbf·ft", "pound-force feet — pastes ▸ lbf_ft"),
-                Labelled("▸ lbf_inch", "▸ lbf·in", "pound-force inches (fastener specs) — pastes ▸ lbf_inch"),
-                Labelled("25 Nm", "25 N·m", "torque literal — pastes 25 Nm; keeps the written N·m form on display"),
+                // The dotted forms are real DSL syntax (unit·unit is a product
+                // and ``in`` after a unit is the inch), so paste them as-is.
+                E("▸ N·m", "newton-metres — stays N·m, never J (Nm is an alias)"),
+                E("▸ mN·m", "millinewton-metres (small motors)"),
+                E("▸ kN·m", "kilonewton-metres (structural moments)"),
+                E("▸ lbf·ft", "pound-force feet"),
+                E("▸ lbf·in", "pound-force inches (fastener specs) — in after a unit is the inch"),
+                E("25 N·m", "torque literal — keeps the written N·m form on display"),
             ]),
             S("Pressure", [
                 E("▸ Pa", "pascals"),

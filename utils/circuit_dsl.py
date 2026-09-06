@@ -230,8 +230,14 @@ _UNIT_NAME_ALT = (
 )
 
 
-def _wu(unit, label: str):
+def _wu(unit, label: str, written: bool = False):
     """Written-unit marker for a ``<value> <unit>`` literal.
+
+    ``written=True`` marks a label the user actually typed that differs
+    from the unit's identifier — the unit-position spellings ``in`` /
+    ``h`` / ``min``.  For a display unit such as ``inch`` (which carries
+    its own ``inch`` tag) the typed spelling wins, so ``110 lbf·in``
+    prints ``lbf·in`` rather than ``lbf·inch``.
 
     The transform turns ``22735 mm`` into ``(_S(22735, _INF) *
     _wu(mm, 'mm'))``.  For a plain forallpeople unit this returns a
@@ -250,6 +256,11 @@ def _wu(unit, label: str):
     sentinels have their own operator routing and must keep it.
     """
     if type(unit).__name__ == "_DisplayUnit":
+        if written and label != unit.label:
+            try:
+                return type(unit)(unit.physical, label)
+            except Exception:
+                return unit
         return unit
     inner = unit.value if isinstance(unit, Sig) else unit
     if not (hasattr(inner, "dimensions") and hasattr(inner, "value")):
@@ -5132,6 +5143,10 @@ def _prettify_unit_label(label: str) -> str:
         lambda m: m.group(1) + m.group(2).translate(_SUPERSCRIPT_DIGITS),
         out,
     )
+    # ``normalize_source`` turned ``N·m`` into ``N m`` (unit juxtaposition)
+    # before this label was captured; a single space between two names
+    # is that dot, so put it back for display.
+    out = re.sub(r'(?<=[A-Za-zµμΩ²³⁻¹0-9]) (?=[A-Za-zµμΩ])', '·', out.strip())
     return out
 
 
@@ -8287,6 +8302,13 @@ def transform_source(source, **_kwargs):
                 unit_rewrites.append(len(new_tokens))
 
         new_tokens.append(token)
+        # A unit-position spelling (``in`` → ``inch``) is tagged with the
+        # spelling the user typed even when it is the SECOND unit of a
+        # product (``110 lbf·in``), where the tight-binding branch above
+        # does not fire — otherwise the inch's own ``inch`` tag would win.
+        if (getattr(token, "_dsl_written", None)
+                and (len(new_tokens) - 1) not in unit_rewrites):
+            unit_rewrites.append(len(new_tokens) - 1)
 
         # Update paren-kind tracking AFTER the insert decision, since the
         # decision uses the *previous* state.
@@ -8337,8 +8359,10 @@ def transform_source(source, **_kwargs):
         # The label is the canonical spelling: a literal typed with the
         # MICRO SIGN displays with the same μ as one typed with the
         # Greek letter, so the two spellings print identically.
-        label = getattr(tok, "_dsl_written", name).translate(_NFKC_CANONICAL)
-        tok.string = f"_wu({name}, {_stash_unit_label(repr(label))})"
+        written = getattr(tok, "_dsl_written", None)
+        label = (written or name).translate(_NFKC_CANONICAL)
+        flag = ", True" if written else ""
+        tok.string = f"_wu({name}, {_stash_unit_label(repr(label))}{flag})"
 
     if wrap_inserts:
         # Sort by index descending; for the same index, "close" comes
