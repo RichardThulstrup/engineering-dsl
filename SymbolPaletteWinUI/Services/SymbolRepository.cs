@@ -574,12 +574,14 @@ public static class SymbolRepository
                 E("▸ dyn", "dynes (CGS, 10 μN)"),
             ]),
             S("Torque (display-preserving)", [
-                E("▸ Nm", "newton-metres — stays N·m, never J"),
-                E("▸ mNm", "millinewton-metres (small motors)"),
-                E("▸ kNm", "kilonewton-metres (structural moments)"),
-                E("▸ lbf_ft", "pound-force feet"),
-                E("▸ lbf_inch", "pound-force inches (fastener specs)"),
-                E("25 Nm", "torque literal — keeps the written N·m form on display"),
+                // Faces show the printed form (N·m, lbf·in); the paste text is
+                // the identifier the toolkit defines (Nm, lbf_inch).
+                Labelled("▸ Nm", "▸ N·m", "newton-metres — pastes ▸ Nm; stays N·m, never J"),
+                Labelled("▸ mNm", "▸ mN·m", "millinewton-metres (small motors) — pastes ▸ mNm"),
+                Labelled("▸ kNm", "▸ kN·m", "kilonewton-metres (structural moments) — pastes ▸ kNm"),
+                Labelled("▸ lbf_ft", "▸ lbf·ft", "pound-force feet — pastes ▸ lbf_ft"),
+                Labelled("▸ lbf_inch", "▸ lbf·in", "pound-force inches (fastener specs) — pastes ▸ lbf_inch"),
+                Labelled("25 Nm", "25 N·m", "torque literal — pastes 25 Nm; keeps the written N·m form on display"),
             ]),
             S("Pressure", [
                 E("▸ Pa", "pascals"),
@@ -690,8 +692,8 @@ public static class SymbolRepository
                 E("▸ mL", "millilitres"),
                 E("▸ L", "litres (also liter, litre; kL, cL, μL)"),
                 E("▸ cc", "cubic centimetres (= mL)"),
-                E("▸ gal_us", "US liquid gallons (= 3.785 L)"),
-                E("▸ gal_uk", "imperial gallons (= 4.546 L)"),
+                Labelled("▸ gal_us", "▸ gal (US)", "US liquid gallons (= 3.785 L) — pastes ▸ gal_us"),
+                Labelled("▸ gal_uk", "▸ gal (UK)", "imperial gallons (= 4.546 L) — pastes ▸ gal_uk"),
                 E("▸ m²", "square metres (mm², cm² too)"),
                 E("▸ ha", "hectares (10 000 m²)"),
                 E("▸ acre", "acres"),
