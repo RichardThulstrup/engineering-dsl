@@ -540,7 +540,7 @@ public static class SymbolRepository
                 E("▸ in", "convert to inches (1 in = 25.4 mm exactly) — in is the inch after ▸ and in unit position"),
                 E("▸ ft", "convert to feet (12 inches)"),
                 E("▸ yd", "convert to yards (3 feet; yard is an alias)"),
-                E("▸ mile", "convert to miles (5280 feet)"),
+                E("▸ mi", "convert to miles (5280 feet; mile is an alias)"),
                 E("▸ μm", "micrometres"),
                 E("▸ nm", "nanometres"),
                 E("▸ nmi", "nautical miles (= 1852 m)"),

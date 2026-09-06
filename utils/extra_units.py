@@ -46,6 +46,7 @@ inch    = exact(0.0254)         * _m            # 25.4 mm  (definition)
 ft      = exact(12)             * inch          # 0.3048 m
 yard    = exact(3)              * ft            # 0.9144 m
 mile    = exact(5280)           * ft            # 1609.344 m
+mi      = mile                                  # symbol form
 nautical_mile = exact(1852)     * _m            # international (definition)
 thou    = exact(0.001)          * inch          # = mil = 0.0254 mm
 mil     = thou                                  # alias
@@ -1189,7 +1190,7 @@ __all__ = [
     "MWh", "GWh", "mWh", "mJ", "μJ", "uJ", "nJ", "pJ",
     "VA", "kVA", "MVA", "var", "kvar", "Mvar",
     # Force / length aliases, photometry, radiation, pressure prefixes
-    "kip", "dyn", "yd", "nmi",
+    "kip", "dyn", "yd", "nmi", "mi",
     "lm", "lx", "klx",
     "Bq", "kBq", "MBq", "Ci", "Sv", "mSv", "μSv", "uSv",
     "mPa", "μPa", "uPa",

@@ -127,7 +127,7 @@ _SI_UNITS = (
     # (``u`` — the atomic mass unit — is deliberately absent: a bare
     # ``u`` is too common as a plain variable to claim as a unit.)
     # Length — imperial / astro / metric
-    'inch', 'ft', 'yard', 'mile', 'nautical_mile', 'thou', 'mil',
+    'inch', 'ft', 'yard', 'yd', 'mile', 'mi', 'nautical_mile', 'nmi', 'thou', 'mil',
     'parsec', 'pc', 'ly', 'au', 'kpc', 'Mpc', 'Gpc',
     'km', 'hm', 'dam', 'dm', 'fm', 'Å',
     # Time
