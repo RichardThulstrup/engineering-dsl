@@ -2655,6 +2655,13 @@ class _InUnits:
         return hash((self.value, self.unit_label))
 
 
+def _same_unit_spelling(a: str, b: str) -> bool:
+    """``Nm`` / ``N·m`` / ``N m`` / ``lbf_ft`` / ``lbf·ft`` are the same
+    unit spelled differently; ``in`` / ``inch`` are not."""
+    strip = str.maketrans("", "", "·⋅*_ ")
+    return a.translate(strip) == b.translate(strip)
+
+
 def in_units(quantity, target, label: str | None = None) -> _InUnits:
     """Express ``quantity`` in units of ``target``, returning a Mathcad-style
     display wrapper.
@@ -2707,7 +2714,13 @@ def in_units(quantity, target, label: str | None = None) -> _InUnits:
     # render identically.  Duck-typed by name — the same soft-coupling
     # as ``_DeltaUnit`` — so sigfig keeps no import of extra_units.
     if type(target).__name__ == "_DisplayUnit":
-        label = target.label
+        # The unit's canonical label (``N·m``) wins over the identifier
+        # the user typed (``Nm``, ``lbf_ft``) — a cosmetic difference —
+        # but a genuinely different spelling (``▶ in`` for the inch) is
+        # what the user asked to see, so it is kept.
+        canon = target.label
+        if label is None or _same_unit_spelling(label, canon):
+            label = canon
         target = target.physical
 
     # Capture the precision of both operands.  ``in_units`` is

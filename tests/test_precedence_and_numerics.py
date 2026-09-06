@@ -275,3 +275,6 @@ def test_typed_unit_spelling_is_displayed():
     assert str(run("_r := 12. Nm ▸ N·m")) == "12. N·m"
     assert str(run("_r := 12. J ▸ kN·m")) == "0.012 kN·m"
     assert str(run("_r := 5 inch")) == "5 inch"              # typed as inch, shown as inch
+    assert str(run("_r := 1.0 mm ▸ in")) == "0.039 in"       # ▸ in labels as typed
+    assert str(run("_r := 1.0 mm ▸ inch")) == "0.039 inch"
+    assert str(run("_r := 12. J ▸ Nm")) == "12. N·m"          # identifier → canonical label
