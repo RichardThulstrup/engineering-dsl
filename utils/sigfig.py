@@ -2723,6 +2723,15 @@ def in_units(quantity, target, label: str | None = None) -> _InUnits:
     t_sf = _sf_of(target)
     result_sf = min(q_sf, t_sf)
 
+    # ``45.00 DKK ▶ USD`` — a converted amount is still money.  Without
+    # this, Currency / Currency yields a bare float and the result printed
+    # as ``6.99681256316567 USD`` instead of the two-decimal money form.
+    _q_cur = _unwrap(quantity)
+    _t_cur = _unwrap(target)
+    if _is_currency(_q_cur) and _is_currency(_t_cur):
+        count = _q_cur / _t_cur                   # how many ``target`` units
+        return type(_t_cur)(float(count) * _t_cur.value, _t_cur.code)
+
     # Radix-target dispatch: ``value ▶ hex`` / ``▶ bin`` / ``▶ oct`` /
     # ``▶ dec``.  The DSL passes ``target`` as whatever the name resolves
     # to — and ``hex``/``bin``/``oct`` are Python BUILTINS, so ``target``

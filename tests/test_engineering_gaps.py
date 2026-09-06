@@ -226,3 +226,15 @@ def test_iso_duration_roundtrip_and_parse():
 def test_timedelta_in_units():
     assert str(run('td := "PT90M"ₜᵢₘₑ\n_r := td ▸ hour')) == "1.5 hour"
     assert str(run('td := "PT90M"ₜᵢₘₑ\n_r := td ▸ s')) == "5400 s"
+
+
+# --------------------------------------------------------------------------
+# Currency conversion stays money
+# --------------------------------------------------------------------------
+def test_currency_conversion_prints_as_money():
+    import re
+    out = str(run("_r := 45.00 DKK ▸ USD"))
+    assert re.fullmatch(r"\d+\.\d\d USD", out), out          # two decimals, not a raw float
+    x = run("_r := 45.00 DKK ▸ USD")
+    assert type(x).__name__ == "Currency" and x.code == "USD"
+    assert re.fullmatch(r"\d+\.\d\d USD", str(run("_r := (45.00 DKK ▸ USD) · 2")))
