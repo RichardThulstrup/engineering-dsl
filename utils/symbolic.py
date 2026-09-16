@@ -562,21 +562,31 @@ def _text_to_latex(s: str) -> str:
             return "\\" + name
         return name
 
-    # An identifier with a single trailing ``_subscript``: a base that is
-    # either ASCII letters OR a single Greek glyph, then ``_``, then an
-    # alphanumeric subscript.  The Greek glyphs are listed explicitly so
-    # the base can start with one (``ν_yellow``, ``λ_0``).
+    # Accept mixed Latin/Greek names on either side of the underscore.
+    # Boundaries prevent rendering only part of a longer identifier.
     glyphs = "".join(_greek_glyph.keys())
+    letters = "A-Za-z" + glyphs
     ident = re.compile(
-        r'(?:[A-Za-z][A-Za-z]*|[' + glyphs + r'])_[A-Za-z0-9]+'
+        r'(?<!\w)[' + letters + r'][' + letters + r'0-9]*_['
+        + letters + r'0-9]+(?!\w)'
     )
+
+    def _mixed_latex(name):
+        # Delimit each command so theta followed by JA cannot become
+        # the nonexistent LaTeX command \thetaJA.
+        return "".join(_greek_glyph[ch] + "{}" if ch in _greek_glyph
+                       else ch for ch in name)
+
     out = []
     last = 0
     for m in ident.finditer(s):
         if m.start() > last:
             out.append(r"\text{" + _esc(s[last:m.start()]) + "}")
         base, sub = m.group(0).split("_", 1)
-        out.append(f"{_base_latex(base)}_{{{sub}}}")  # math subscript
+        base_tex = _base_latex(base)
+        if base_tex == base:
+            base_tex = _mixed_latex(base)
+        out.append(f"{base_tex}_{{{_mixed_latex(sub)}}}")  # math subscript
         last = m.end()
     if last < len(s):
         out.append(r"\text{" + _esc(s[last:]) + "}")
