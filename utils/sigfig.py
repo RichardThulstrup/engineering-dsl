@@ -1014,6 +1014,15 @@ class Sig:
                 pass  # fall through to the normal Sig result
 
         result = Sig(new_value, new_sf)
+        # An absolute reading keeps its chosen display scale while the
+        # result remains a temperature. Compound quantities must not
+        # inherit an affine (offset-bearing) display scale.
+        if _is_pure_temperature(new_value):
+            left, right = (other, self) if swap else (self, other)
+            scale = (getattr(left, "_temp_scale", None)
+                     or getattr(right, "_temp_scale", None))
+            if scale:
+                result._temp_scale = scale
         # Propagate _stripped_unit through regular arithmetic too —
         # ``Sig(sympy, _stripped_unit="V") + Sig(sympy)`` (both already
         # stripped) should keep the V hint.  Conservative rule: if
@@ -3606,7 +3615,10 @@ class _DeltaTemp:
             # formatter (proper ``K``) rather than forallpeople's raw
             # ``Physical`` repr, which mislabels kelvin as ``°C``.
             sf = min(self.sf, _sf_of(o))
-            return Sig(ov + self._as_kelvin(), sf)
+            result = Sig(ov + self._as_kelvin(), sf)
+            if getattr(o, "_temp_scale", None):
+                result._temp_scale = o._temp_scale
+            return result
         # D + plain number / quantity → kelvin span plus it (tag drops).
         return self._as_kelvin() + ov if _is_physical(ov) else self.kelvin + ov
 
@@ -3629,7 +3641,10 @@ class _DeltaTemp:
         ov = _unwrap(o)
         if _is_pure_temperature(ov):
             sf = min(self.sf, _sf_of(o))
-            return Sig(ov - self._as_kelvin(), sf)
+            result = Sig(ov - self._as_kelvin(), sf)
+            if getattr(o, "_temp_scale", None):
+                result._temp_scale = o._temp_scale
+            return result
         if _is_physical(ov):
             return ov - self._as_kelvin()
         return ov - self.kelvin

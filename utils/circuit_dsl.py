@@ -3438,6 +3438,24 @@ def _rewrite_absolute_temperatures(source: str) -> str:
             # on ``before`` alone is sufficient.
             stripped = before.rstrip()  # trailing whitespace is dropped
 
+            # Keep the written thermal-resistance unit as a display hint.
+            # The Physical beneath it still uses a kelvin difference, so
+            # this never introduces an absolute-temperature offset.
+            denominator = re.match(
+                rf"\s*/\s*(?P<paren>\()?\s*(?P<unit>{_UNIT_NAME_ALT})(?!\w)"
+                r"(?(paren)\s*\))(?!\s*(?:\*\*|\^|[⁻⁺⁰¹²³⁴⁵⁶⁷⁸⁹]))",
+                source[j + len(glyph):],
+            )
+            if denominator:
+                unit = denominator.group("unit")
+                label = _stash_unit_label(repr(f"{glyph}/{unit}"))
+                multiply = bool(_num.search(stripped) or (stripped and
+                                (stripped[-1].isalnum() or stripped[-1] in ")]_")))
+                result.append(before + (" * " if multiply else " "))
+                result.append(f"_wu({_DELTA_NAME[glyph]}/{unit}, {label})")
+                pos = j + len(glyph) + denominator.end()
+                continue
+
             # --- Unit case: the glyph is used as a UNIT, not a literal.
             # When the glyph immediately follows ``/``, ``*`` or ``·``
             # (a multiplicative operator), it is a unit in an
@@ -3448,7 +3466,17 @@ def _rewrite_absolute_temperatures(source: str) -> str:
             # unit-binding pass tokenises it cleanly.  This must be
             # checked BEFORE the operand-capture cases below, because
             # those would otherwise mishandle (or skip) it.
-            if stripped and stripped[-1] in "/*·×":
+            # A following unit also makes this a compound unit:
+            # ``205.9 °C/W`` means 205.9 kelvin per watt, not an
+            # absolute 479.05 kelvin divided by watts. Require a known
+            # unit so ``25 °C / 2`` keeps ordinary absolute arithmetic.
+            # Parenthesising the temperature (``(25 °C) / W``) likewise
+            # keeps an explicit absolute value separate from the unit.
+            following_unit = re.match(
+                rf"\s*[/·⋅×*]\s*(?:\(\s*)?{_UNIT_NAME_ALT}(?!\w)",
+                source[j + len(glyph):],
+            )
+            if (stripped and stripped[-1] in "/*·⋅×") or following_unit:
                 result.append(before)
                 result.append(" " + _DELTA_NAME[glyph])
                 pos = j + len(glyph)

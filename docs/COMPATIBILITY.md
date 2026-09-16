@@ -136,3 +136,20 @@ import my_calculations
 
 The module must import the DSL runtime helpers it uses. This opt-in applies only
 to the named source module; its dependencies retain normal Python loading.
+
+## Temperature readings and thermal resistance
+
+Standalone `25 °C` is an absolute reading stored as 298.15 K. In compound
+units such as `205.9 °C/W`, the degree denotes a temperature difference:
+no Celsius offset is added. Explicit `205.9 ΔC/W` and `205.9 K/W` express
+the same thermal resistance. Fahrenheit compound units use the 5/9 scale
+factor without the absolute-temperature offset.
+
+An explicit absolute expression such as `(25 °C) / W` keeps its offset;
+`25 °C / 2` also remains ordinary arithmetic on an absolute temperature.
+Thermal resistance retains its written label (`°C/W`, for example). Absolute
+Celsius/Fahrenheit readings retain their display scale when arithmetic produces
+another temperature, including addition or subtraction of temperature differences.
+A junction calculation starting from `25 °C` therefore displays in Celsius without
+`▸ degC`; explicit conversion is still available. Displayed values respect
+significant figures; this does not round the stored calculation.
