@@ -625,14 +625,9 @@ class Sig:
     # ---- conversions to plain python values ------------------------------
 
     def __index__(self):
-        # Required so a Sig int can be used as a slice/index/range arg.
-        v = self.value
-        try:
-            return int(v)
-        except TypeError:
-            raise TypeError(
-                f"Sig wrapping {type(v).__name__} cannot be used as an index"
-            )
+        # Python indexing requires an integer, never a truncated float.
+        import operator
+        return operator.index(self.value)
 
     def __int__(self):
         return int(self.value)
@@ -645,6 +640,30 @@ class Sig:
 
     def __bool__(self):
         return bool(self.value)
+
+    @property
+    def _mpc_(self):
+        # mpmath's complex constructor probes this before its generic
+        # conversion protocol. Native complex components are binary floats.
+        if isinstance(self.value, complex) and not getattr(self, "_stripped_unit", None):
+            from mpmath import mp
+            return mp.mpc(self.value)._mpc_
+        raise AttributeError("_mpc_")
+
+    def _mpmath_(self, prec, rounding):
+        """Explicit mpmath conversion; significant-figure metadata is dropped.
+
+        Preserve native high-precision values and honor the caller's context.
+        Physical units, intervals, and currencies require explicit conversion.
+        """
+        from mpmath import mp
+        value = self.value
+        if (getattr(self, "_stripped_unit", None) or hasattr(value, "dimensions")
+                or _is_currency(value) or hasattr(value, "low")):
+            raise TypeError("mpmath requires a dimensionless scalar; convert units explicitly")
+        context = mp.clone()
+        context._prec_rounding[:] = [prec, rounding]
+        return context.convert(value)
 
     def _sympy_(self):
         """Conversion protocol used by ``sympify``.
@@ -719,7 +738,7 @@ class Sig:
         # the calling sympy operation — which is correct behaviour.
         return _sym.sympify(v)
 
-    def __array__(self, dtype=None):
+    def __array__(self, dtype=None, copy=None):
         """NumPy array protocol.
 
         Behaviour depends on what ``self.value`` is:
@@ -749,13 +768,23 @@ class Sig:
         """
         import numpy as _np
         if dtype is not None and dtype != object and not _np.dtype(dtype).hasobject:
-            return _np.asarray(self.value, dtype=dtype)
+            if copy is False:
+                if not isinstance(self.value, _np.ndarray) or self.value.dtype != _np.dtype(dtype):
+                    raise ValueError("Sig conversion requires a copy")
+                return self.value
+            result = _np.asarray(self.value, dtype=dtype)
+            return result.copy() if copy else result
         # If the wrapped value is already an array, surface it directly.
         # Detect by ``ndim > 0`` rather than ``isinstance(_, ndarray)`` so
         # this also handles array-like values that quack like ndarrays
         # (pandas Series, dask arrays, etc.).
         if hasattr(self.value, "ndim") and getattr(self.value, "ndim", 0) > 0:
-            return _np.asarray(self.value)
+            result = _np.asarray(self.value, dtype=dtype)
+            if copy is False and result is not self.value:
+                raise ValueError("Sig conversion requires a copy")
+            return result.copy() if copy else result
+        if copy is False:
+            raise ValueError("Sig scalar conversion requires a copy")
         a = _np.empty((), dtype=object)
         a[()] = self
         return a
@@ -781,10 +810,7 @@ class Sig:
         # rendering.  See the discussion of the asymmetric Physical/Sig
         # division bug for the cascade this caused.
         #
-        # Cost: sympy operations that try to sympify a ``Sig`` (e.g.
-        # ``sym.sin(Sig(0.5))``, ``sym.diff(Sig(2)*x**2, x)``) now fail
-        # because ``_sympy_`` raises ``SympifyError``.  For pure-symbolic
-        # work, unwrap first via ``float(s)`` or ``s.value``.
+        # Explicit SymPy conversions use _sympy_ and drop Sig metadata.
         # Currency step-aside.  ``Currency`` (from the soft-dependency
         # ``currencies`` module) is a money amount with a currency code —
         # ``10920 DKK``.  It is NOT a physical quantity and NOT a plain

@@ -1,0 +1,7 @@
+{
+  "VoilaConfiguration": {
+    "extension_denylist": [
+      "@jupyterlab/katex-extension"
+    ]
+  }
+}

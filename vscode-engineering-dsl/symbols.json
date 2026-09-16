@@ -1,0 +1,19 @@
+[
+  {"name":"equation", "text":"≡", "description":"Symbolic equation: a ≡ b → Eq(a, b)"},
+  {"name":"equal", "text":"≟", "description":"Equality comparison: a ≟ b → a == b"},
+  {"name":"fullwidth equal", "text":"＝", "description":"Equality comparison, an alias for =="},
+  {"name":"small equal", "text":"﹦", "description":"Equality comparison, an alias for =="},
+  {"name":"approximately", "text":"≈", "description":"Approximate comparison"},
+  {"name":"assignment", "text":"≔", "description":"Assign a value (alias for :=)"},
+  {"name":"sqrt", "text":"√", "description":"Square root"},
+  {"name":"parallel", "text":"‖", "description":"Parallel combination"},
+  {"name":"plus minus", "text":"±", "description":"Value with uncertainty"},
+  {"name":"transpose", "text":"ᵀ", "description":"Matrix transpose"},
+  {"name":"squared", "text":"²", "description":"Second power"},
+  {"name":"cubed", "text":"³", "description":"Third power"},
+  {"name":"target unit", "text":"▶", "description":"Display in the requested unit"},
+  {"name":"display format", "text":"▸", "description":"Select a display format"},
+  {"name":"ohm", "text":"Ω", "description":"Ohm"},
+  {"name":"micro", "text":"μ", "description":"Micro prefix"},
+  {"name":"pi", "text":"π", "description":"Pi"}
+]

@@ -1,0 +1,205 @@
+{
+  "scopeName": "engineering-dsl.injection",
+  "injectionSelector": "L:source.engineering-dsl -comment -string",
+  "patterns": [
+    {
+      "match": ":=|≔|←",
+      "name": "keyword.operator.engineering-dsl"
+    },
+    {
+      "match": "(\\d+)(\\.\\.)(?!\\.)",
+      "captures": {
+        "1": {
+          "name": "constant.numeric.engineering-dsl"
+        },
+        "2": {
+          "name": "keyword.operator.engineering-dsl"
+        }
+      }
+    },
+    {
+      "match": "(?<!\\.)(\\.\\.)(?!\\.)(\\s*)([+-]?)(\\d+(?:\\.\\d*)?(?:[eE][+-]?\\d+)?|\\.\\d+)",
+      "captures": {
+        "1": {
+          "name": "keyword.operator.engineering-dsl"
+        },
+        "3": {
+          "name": "keyword.operator.engineering-dsl"
+        },
+        "4": {
+          "name": "constant.numeric.engineering-dsl"
+        }
+      }
+    },
+    {
+      "match": "‥|(?<!\\.)\\.\\.(?!\\.)",
+      "name": "keyword.operator.engineering-dsl"
+    },
+    {
+      "match": "▶|▸",
+      "name": "keyword.operator.engineering-dsl"
+    },
+    {
+      "match": "→",
+      "name": "keyword.operator.word.engineering-dsl"
+    },
+    {
+      "match": "ₜᵢₘₑ|ᵣₒₘₑ",
+      "name": "keyword.operator.word.engineering-dsl"
+    },
+    {
+      "match": "‖|±|∠|≈",
+      "name": "keyword.operator.engineering-dsl"
+    },
+    {
+      "match": "∅",
+      "name": "constant.language.engineering-dsl"
+    },
+    {
+      "match": "∈|∉|∋|∌|∪|∩|∖|△|⊕|⊆|⊇|⊂|⊃",
+      "name": "keyword.operator.engineering-dsl"
+    },
+    {
+      "match": "∑|∏",
+      "name": "support.function.engineering-dsl"
+    },
+    {
+      "match": "°[CFR](?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+      "name": "support.constant.unit.engineering-dsl"
+    },
+    {
+      "match": "℃|℉",
+      "name": "support.constant.unit.engineering-dsl"
+    },
+    {
+      "match": "°|²|³|√|⌊|⌋|⌈|⌉|‰|×|÷|·|⋅|−|≤|≥|≠|﹦|＝|≟|≡|∞|↑|ᵀ|!(?!=)",
+      "name": "keyword.operator.engineering-dsl"
+    },
+    {
+      "match": "[⇥⭾↵⏎↩⮐]",
+      "name": "constant.character.escape.engineering-dsl"
+    },
+    {
+      "match": "[½⅓¼¾⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞]",
+      "name": "constant.numeric.engineering-dsl"
+    },
+    {
+      "match": "[₀₁₂₃₄₅₆₇₈₉₊₋₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓᵦᵧᵨᵩᵪ͵]+",
+      "name": "constant.numeric.index.engineering-dsl"
+    },
+    {
+      "match": "[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁽⁾˙ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ]+",
+      "name": "constant.numeric.index.engineering-dsl"
+    },
+    {
+      "match": "(?<![A-Za-z_0-9])([0-9][0-9a-fA-F]*)([₀₁₂₃₄₅₆₇₈₉]+)",
+      "captures": {
+        "1": {
+          "name": "constant.numeric.engineering-dsl"
+        },
+        "2": {
+          "name": "constant.numeric.index.engineering-dsl"
+        }
+      }
+    },
+    {
+      "match": "(?<![A-Za-z_0-9])([a-fA-F]+)(₁₆)",
+      "captures": {
+        "1": {
+          "name": "constant.numeric.engineering-dsl"
+        },
+        "2": {
+          "name": "constant.numeric.index.engineering-dsl"
+        }
+      }
+    },
+    {
+      "match": "(?<=[\\d)\\]/·⋅*])(\\s*)(h|min|in)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK(])(?!\\s*[A-Za-z_(\\[{\\d\"'])",
+      "captures": {
+        "2": {
+          "name": "support.constant.unit.engineering-dsl"
+        }
+      }
+    },
+    {
+      "match": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:R_jupiter|M_jupiter|M_earth|R_earth|M_moon|R_gas|T_sun|M_sun|R_sun|L_sun|Rᵍᵃˢ|μ_0|m_n|N_A|m_p|q_e|g_0|µ_0|g_n|k_B|m_e|ε_0|T_0|inf|R♃|R⊙|kᵦ|gₒ|L☉|µₒ|pi|qₑ|M⊕|mₙ|M☉|gₙ|mₑ|εₒ|T☉|M♃|L⊙|R⊕|Nᴬ|mₚ|oo|R☉|Tₒ|μₒ|M⊙|h|ℏ|ħ|π|c)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+      "name": "constant.other.engineering-dsl"
+    },
+    {
+      "match": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:nautical_mile|year_tropical|hp_electrical|year_julian|TeV_per_c2|MeV_per_c2|keV_per_c2|GeV_per_c2|TeV_per_c|keV_per_c|MeV_per_c|GeV_per_c|eV_per_c2|hp_metric|fl_oz_us|fl_oz_uk|prefix_G|prefix_µ|prefix_T|prefix_M|ozf_inch|prefix_μ|prefix_d|eV_per_c|prefix_m|prefix_n|prefix_c|lbf_inch|prefix_p|prefix_k|coulomb|gal_us|gal_uk|minute|deltaK|deltaF|ton_us|deltaK|barrel|parsec|newton|deltaC|lbf_ft|ton_uk|nbarn|inH2O|month|pbarn|grain|liter|qt_uk|litre|μbarn|pt_us|fbarn|stone|abarn|pt_uk|qt_us|mbarn|ubarn|µbarn|tonne|mbar|barn|hour|yard|degF|degC|week|inch|dyne|year|kcal|knot|degR|torr|thou|mmHg|mile|slug|EeV|day|kpc|cal|MNm|PeV|TeV|erg|kHz|HMS|Cal|ptm|BTU|ppm|psi|dam|µJy|μJy|lbm|Gyr|mol|mJy|MHz|ksi|uJy|GPa|hms|Nmm|kNm|amu|kyr|bar|Mpc|THz|kph|GeV|atm|Myr|GHz|MPa|mNm|lbf|ozf|hPa|keV|Gpc|nmi|ozt|rad|mph|kWh|mil|kPa|ptc|Ohm|kgf|MeV|cd|μm|Wh|kN|µH|Pa|kV|Jy|mL|ΔK|au|nC|cm|nF|µF|mW|ks|sr|mV|μF|Hz|oz|ps|μW|ΔF|GΩ|fs|ΔK|mi|km|ly|mg|hm|µg|MW|ΔC|ft|fm|Wb|μH|µA|mF|µV|µW|cc|GN|mH|Da|nV|kg|ng|Nm|hr|GJ|MJ|mA|pV|eV|kW|pC|GΩ|hp|MN|kΩ|μN|MΩ|mC|mN|kp|gf|MV|kJ|nA|µN|yd|nm|ms|µC|kC|GW|mΩ|lb|kΩ|pA|µm|kA|μA|μg|nW|ns|μV|µs|mΩ|dL|MΩ|pH|μs|yr|pm|pc|nH|mm|dm|μC|pF|Å|A|S|H|K|Ω|T|N|s|Ω|C|m|K|F|Å|V|g|J|W)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+      "name": "support.constant.unit.engineering-dsl"
+    },
+    {
+      "match": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:ο|µ|ψ|γ|ζ|η|μ|υ|Ψ|ς|χ|λ|θ|ι|Λ|Δ|Φ|κ|Ξ|δ|ω|ε|φ|Θ|α|ξ|ρ|τ|β|σ|ν)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+      "name": "variable.other.engineering-dsl"
+    },
+    {
+      "match": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:DKK|AUD|INR|CZK|GBP|PLN|SEK|USD|HKD|EUR|DKK|JPY|CHF|CZK|CNY|NOK|CAD|DKK|DKK|SEK|NOK|HKD)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+      "name": "support.constant.unit.engineering-dsl"
+    },
+    {
+      "match": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:positive_symbols|complex_symbols|integer_symbols|real_symbols|symbols)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+      "name": "keyword.declaration.engineering-dsl"
+    },
+    {
+      "match": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:update_currency_rates|set_decimal_literals|to_fahrenheit_from_K|to_fahrenheit_from_K|get_decimal_literals|clear_currency_cache|to_celsius_from_F|protect_constants|get_currency_rate|clear_protections|to_kelvin_from_F|protect_si_units|refresh_display|tolerance_unit|list_protected|launch_palette|register_radix|to_fahrenheit|rates_status|protect_all|list_themes|print_view|sigfigs_of|to_celsius|from_roman|plusminus|from_dB_p|from_degR|from_dB_v|nsimplify|unprotect|from_degF|from_degC|integrate|to_kelvin|hardcopy|measured|it_grade|lambdify|permille|simplify|to_roman|in_units|parallel|Rational|to_dB_v|display|to_dB_p|polyfit|protect|percent|linefit|approx|phasor|base10|expand|Matrix|base16|nsolve|factor|series|interp|Symbol|latex|atanh|zeros|base2|hypot|solve|log10|clamp|base8|floor|asinh|limit|shaft|exact|roman|polar|radix|atan2|cross|acosh|comb|hole|fact|cbrt|plot|sinh|mean|sqrt|atan|diff|cosh|ones|acos|rect|perm|ceil|sign|asin|norm|tanh|bode|diag|log2|gcd|tan|Sig|sin|dot|dec|fmt|eye|det|lcm|sym|fit|exp|oct|cos|mod|hex|iso|bin|log|pp|pv|Eq|pn|ln|Σ|σ|Π|Γ)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+      "name": "support.function.engineering-dsl"
+    },
+    {
+      "match": "([A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK][A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK]*)(ᵀ)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+      "captures": {
+        "2": {
+          "name": "keyword.operator.engineering-dsl"
+        }
+      }
+    },
+    {
+      "match": "([A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK][A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK]*)([ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓᵦᵧᵨᵩᵪᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ]+)",
+      "captures": {
+        "2": {
+          "name": "constant.numeric.index.engineering-dsl"
+        }
+      }
+    },
+    {
+      "match": "(?<![\\w.])\\d+\\.(?![\\d.\\w])",
+      "name": "constant.numeric.engineering-dsl"
+    },
+    {
+      "match": "(\\.\\.\\s*)('(?:[^'\\\\\\n]|\\\\.)*'|\"(?:[^\"\\\\\\n]|\\\\.)*\")",
+      "captures": {
+        "2": {
+          "name": "string.quoted.engineering-dsl"
+        }
+      }
+    },
+    {
+      "match": "[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\.\\.(?!\\.))",
+      "name": "variable.other.engineering-dsl"
+    },
+    {
+      "match": "(\\.\\.\\s*)([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "2": {
+          "name": "variable.other.engineering-dsl"
+        }
+      }
+    },
+    {
+      "match": "(?<![\\w.])(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\\d[\\d_]*\\.?[\\d_]*(?:[eE][+-]?\\d+)?[jJ]?|\\.\\d[\\d_]*(?:[eE][+-]?\\d+)?[jJ]?)",
+      "name": "constant.numeric.engineering-dsl"
+    },
+    {
+      "match": "(?<![=<>!:+\\-*/%&|^@])=(?!=)",
+      "name": "keyword.operator.engineering-dsl"
+    },
+    {
+      "match": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:and|as|assert|async|await|break|class|continue|def|del|elif|else|except|finally|for|from|global|if|import|in|is|lambda|nonlocal|not|or|pass|raise|return|try|while|with|yield)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+      "name": "keyword.control.engineering-dsl"
+    },
+    {
+      "match": "[+\\-*/%<>=!&|^~]+",
+      "name": "keyword.operator.engineering-dsl"
+    }
+  ]
+}

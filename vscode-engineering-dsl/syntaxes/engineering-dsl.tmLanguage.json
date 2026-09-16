@@ -1,0 +1,8 @@
+{
+  "scopeName": "source.engineering-dsl",
+  "patterns": [
+    {
+      "include": "source.python"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "name": "engineering-dsl",
+  "displayName": "Engineering DSL",
+  "description": "Engineering DSL notebook highlighting, glyph completions and transformed syntax checking.",
+  "version": "0.1.0",
+  "publisher": "richardthulstrup",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/RichardThulstrup/engineering-dsl" },
+  "engines": { "vscode": "^1.105.0" },
+  "categories": ["Programming Languages", "Linters", "Snippets"],
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["ms-toolsai.jupyter", "ms-python.python"],
+  "main": "./src/extension.js",
+  "activationEvents": ["onNotebook:jupyter-notebook", "onLanguage:engineering-dsl"],
+  "capabilities": {
+    "untrustedWorkspaces": { "supported": "limited", "description": "Highlighting is available; the Python checker and kernel installation require workspace trust." },
+    "virtualWorkspaces": { "supported": false }
+  },
+  "scripts": { "test": "node --test test/unit.test.js", "package": "python build_vsix.py" },
+  "contributes": {
+    "languages": [{ "id": "engineering-dsl", "aliases": ["Engineering DSL", "engineering-dsl"], "configuration": "./language-configuration.json" }],
+    "grammars": [
+      { "language": "engineering-dsl", "scopeName": "source.engineering-dsl", "path": "./syntaxes/engineering-dsl.tmLanguage.json" },
+      { "scopeName": "engineering-dsl.injection", "path": "./syntaxes/injection.tmLanguage.json", "injectTo": ["source.engineering-dsl"] }
+    ],
+    "commands": [
+      { "command": "engineeringDsl.installKernel", "title": "Engineering DSL: Install Notebook Kernel" },
+      { "command": "engineeringDsl.selectKernel", "title": "Engineering DSL: Select Notebook Kernel" },
+      { "command": "engineeringDsl.check", "title": "Engineering DSL: Check Notebook Syntax" },
+      { "command": "engineeringDsl.showPython", "title": "Engineering DSL: Show Transformed Cell" }
+    ],
+    "configuration": {
+      "title": "Engineering DSL",
+      "properties": {
+        "engineeringDsl.pythonPath": { "type": "string", "default": "", "scope": "resource", "restricted": true, "description": "Python executable with engineering-dsl and IPython installed. Empty uses the registered local DSL kernel's interpreter, then the Python extension's selection, then python on PATH." },
+        "engineeringDsl.runtimePath": { "type": "string", "default": "", "scope": "resource", "restricted": true, "description": "Optional engineering-dsl checkout root (containing utils). Automatically discovered for notebooks inside the checkout." },
+        "engineeringDsl.diagnostics": { "type": "boolean", "default": true, "scope": "resource", "description": "Check transformed DSL syntax without executing notebook cells. This is syntax checking, not Pylance type analysis." },
+        "engineeringDsl.syntaxMode": { "type": "string", "enum": ["python", "legacy"], "default": "python", "scope": "resource", "description": "Initial syntax mode used by the editor checker. Literal set_syntax_mode calls and %%dsl headers override it." }
+      }
+    }
+  }
+}

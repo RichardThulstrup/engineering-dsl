@@ -25,6 +25,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import utils.Engineer as E                                   # noqa: E402
 from utils.circuit_dsl import transform_source, Range        # noqa: E402
+from functools import partial
+transform_source = partial(transform_source, syntax_mode="legacy")
 from utils.sigfig import Sig, _unwrap                        # noqa: E402
 
 NS = {k: getattr(E, k) for k in E.__all__}

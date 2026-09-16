@@ -1,9 +1,7 @@
-using System;
-using System.IO;
-using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Web.WebView2.Core;
+using System.Text.Json;
 
 namespace SymbolPaletteWinUI.Controls
 {

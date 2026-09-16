@@ -11,6 +11,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.circuit_dsl import transform_source  # noqa: E402
+from functools import partial
+transform_source = partial(transform_source, syntax_mode="legacy")
 
 
 def _run(src):

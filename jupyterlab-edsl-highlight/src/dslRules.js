@@ -62,7 +62,7 @@ export const DSL_RULES = [
     "cls": "edsl-unit"
   },
   {
-    "pattern": "°|²|³|√|⌊|⌋|⌈|⌉|‰|×|÷|·|⋅|−|≤|≥|≠|∞|↑|ᵀ|!(?!=)",
+    "pattern": "°|²|³|√|⌊|⌋|⌈|⌉|‰|×|÷|·|⋅|−|≤|≥|≠|﹦|＝|≟|≡|∞|↑|ᵀ|!(?!=)",
     "cls": "edsl-op"
   },
   {
@@ -103,27 +103,27 @@ export const DSL_RULES = [
     ]
   },
   {
-    "pattern": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:M_jupiter|R_jupiter|M_earth|R_earth|M_moon|L_sun|R_sun|T_sun|M_sun|R_gas|Rᵍᵃˢ|m_e|T_0|μ_0|inf|g_0|µ_0|m_p|N_A|ε_0|g_n|k_B|m_n|q_e|L⊙|L☉|M☉|gₒ|qₑ|Tₒ|R☉|T☉|μₒ|mₚ|R⊙|R♃|M⊙|oo|M⊕|M♃|Nᴬ|kᵦ|mₑ|mₙ|pi|εₒ|µₒ|gₙ|R⊕|h|π|c|ħ|ℏ)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+    "pattern": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:R_jupiter|M_jupiter|M_earth|R_earth|M_moon|R_gas|T_sun|M_sun|R_sun|L_sun|Rᵍᵃˢ|μ_0|m_n|N_A|m_p|q_e|g_0|µ_0|g_n|k_B|m_e|ε_0|T_0|inf|R♃|R⊙|kᵦ|gₒ|L☉|µₒ|pi|qₑ|M⊕|mₙ|M☉|gₙ|mₑ|εₒ|T☉|M♃|L⊙|R⊕|Nᴬ|mₚ|oo|R☉|Tₒ|μₒ|M⊙|h|ℏ|ħ|π|c)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
     "cls": "edsl-physical"
   },
   {
-    "pattern": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:hp_electrical|year_tropical|nautical_mile|year_julian|MeV_per_c2|keV_per_c2|GeV_per_c2|TeV_per_c2|eV_per_c2|MeV_per_c|TeV_per_c|GeV_per_c|keV_per_c|hp_metric|fl_oz_uk|prefix_M|eV_per_c|prefix_n|prefix_G|lbf_inch|fl_oz_us|prefix_μ|prefix_d|prefix_µ|prefix_c|prefix_p|prefix_T|prefix_m|prefix_k|ozf_inch|coulomb|ton_us|lbf_ft|deltaK|deltaK|minute|ton_uk|gal_uk|parsec|deltaF|barrel|gal_us|deltaC|newton|ubarn|nbarn|μbarn|µbarn|pbarn|tonne|pt_us|qt_us|inH2O|abarn|month|litre|fbarn|mbarn|stone|liter|grain|qt_uk|pt_uk|mile|torr|yard|mmHg|year|knot|inch|week|barn|degR|kcal|mbar|degC|slug|dyne|hour|thou|degF|keV|kpc|kph|TeV|mil|kyr|MNm|µJy|PeV|day|hms|Gyr|kWh|GHz|ozf|BTU|Myr|ksi|ozt|rad|mNm|mph|Nmm|mol|nmi|uJy|ptm|μJy|amu|lbm|Gpc|GPa|psi|kgf|ppm|Ohm|dam|Mpc|bar|MeV|mJy|Cal|kPa|GeV|EeV|ptc|MPa|atm|HMS|erg|lbf|MHz|hPa|cal|kNm|kHz|THz|ns|hr|µH|ly|GW|fs|fm|MΩ|cc|ΔK|ΔC|kW|Wh|gf|Pa|nC|kV|mF|nA|dm|μC|pF|pV|μs|μH|kg|GΩ|mV|Nm|μV|kN|µs|hp|ft|MW|µW|mL|kp|ps|mg|µF|nW|kC|pm|pC|mC|sr|Da|ng|au|kA|µV|nm|nF|μF|ΔF|GN|kΩ|kΩ|Hz|pA|μg|µg|kJ|lb|Jy|ΔK|μA|nV|GJ|ks|MJ|eV|cm|MΩ|yr|µm|pc|μm|MV|oz|ms|mW|mN|mi|dL|mA|pH|yd|mH|μN|µC|mΩ|µN|Wb|µA|hm|mΩ|nH|mm|GΩ|km|MN|μW|cd|F|J|Å|W|Å|V|Ω|m|Ω|s|K|N|S|C|A|K|H|T|g)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+    "pattern": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:nautical_mile|year_tropical|hp_electrical|year_julian|TeV_per_c2|MeV_per_c2|keV_per_c2|GeV_per_c2|TeV_per_c|keV_per_c|MeV_per_c|GeV_per_c|eV_per_c2|hp_metric|fl_oz_us|fl_oz_uk|prefix_G|prefix_µ|prefix_T|prefix_M|ozf_inch|prefix_μ|prefix_d|eV_per_c|prefix_m|prefix_n|prefix_c|lbf_inch|prefix_p|prefix_k|coulomb|gal_us|gal_uk|minute|deltaK|deltaF|ton_us|deltaK|barrel|parsec|newton|deltaC|lbf_ft|ton_uk|nbarn|inH2O|month|pbarn|grain|liter|qt_uk|litre|μbarn|pt_us|fbarn|stone|abarn|pt_uk|qt_us|mbarn|ubarn|µbarn|tonne|mbar|barn|hour|yard|degF|degC|week|inch|dyne|year|kcal|knot|degR|torr|thou|mmHg|mile|slug|EeV|day|kpc|cal|MNm|PeV|TeV|erg|kHz|HMS|Cal|ptm|BTU|ppm|psi|dam|µJy|μJy|lbm|Gyr|mol|mJy|MHz|ksi|uJy|GPa|hms|Nmm|kNm|amu|kyr|bar|Mpc|THz|kph|GeV|atm|Myr|GHz|MPa|mNm|lbf|ozf|hPa|keV|Gpc|nmi|ozt|rad|mph|kWh|mil|kPa|ptc|Ohm|kgf|MeV|cd|μm|Wh|kN|µH|Pa|kV|Jy|mL|ΔK|au|nC|cm|nF|µF|mW|ks|sr|mV|μF|Hz|oz|ps|μW|ΔF|GΩ|fs|ΔK|mi|km|ly|mg|hm|µg|MW|ΔC|ft|fm|Wb|μH|µA|mF|µV|µW|cc|GN|mH|Da|nV|kg|ng|Nm|hr|GJ|MJ|mA|pV|eV|kW|pC|GΩ|hp|MN|kΩ|μN|MΩ|mC|mN|kp|gf|MV|kJ|nA|µN|yd|nm|ms|µC|kC|GW|mΩ|lb|kΩ|pA|µm|kA|μA|μg|nW|ns|μV|µs|mΩ|dL|MΩ|pH|μs|yr|pm|pc|nH|mm|dm|μC|pF|Å|A|S|H|K|Ω|T|N|s|Ω|C|m|K|F|Å|V|g|J|W)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
     "cls": "edsl-unit"
   },
   {
-    "pattern": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:δ|µ|ξ|γ|χ|ι|α|κ|λ|ψ|ρ|σ|υ|ω|Ξ|η|ν|φ|μ|Θ|Λ|Ψ|ς|ε|Φ|ζ|Δ|θ|ο|τ|β)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+    "pattern": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:ο|µ|ψ|γ|ζ|η|μ|υ|Ψ|ς|χ|λ|θ|ι|Λ|Δ|Φ|κ|Ξ|δ|ω|ε|φ|Θ|α|ξ|ρ|τ|β|σ|ν)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
     "cls": "edsl-greek"
   },
   {
-    "pattern": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:CZK|CHF|DKK|CZK|SEK|HKD|SEK|NOK|GBP|DKK|DKK|USD|DKK|HKD|CNY|NOK|JPY|INR|AUD|CAD|EUR|PLN)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+    "pattern": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:DKK|AUD|INR|CZK|GBP|PLN|SEK|USD|HKD|EUR|DKK|JPY|CHF|CZK|CNY|NOK|CAD|DKK|DKK|SEK|NOK|HKD)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
     "cls": "edsl-currency"
   },
   {
-    "pattern": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:positive_symbols|integer_symbols|complex_symbols|real_symbols|symbols)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+    "pattern": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:positive_symbols|complex_symbols|integer_symbols|real_symbols|symbols)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
     "cls": "edsl-decl"
   },
   {
-    "pattern": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:update_currency_rates|to_fahrenheit_from_K|get_decimal_literals|clear_currency_cache|set_decimal_literals|to_fahrenheit_from_K|protect_constants|to_celsius_from_F|clear_protections|get_currency_rate|to_kelvin_from_F|protect_si_units|refresh_display|launch_palette|tolerance_unit|list_protected|register_radix|to_fahrenheit|rates_status|protect_all|list_themes|to_celsius|from_roman|print_view|sigfigs_of|integrate|from_degF|nsimplify|from_degC|to_kelvin|unprotect|from_dB_p|from_dB_v|from_degR|plusminus|hardcopy|to_roman|measured|lambdify|in_units|parallel|Rational|simplify|permille|it_grade|linefit|percent|to_dB_p|polyfit|display|protect|to_dB_v|expand|base10|series|Matrix|phasor|Symbol|approx|nsolve|factor|base16|interp|acosh|log10|cross|zeros|exact|polar|base2|radix|floor|asinh|latex|solve|base8|atan2|shaft|limit|clamp|atanh|hypot|roman|fact|sign|sinh|diag|comb|log2|cbrt|atan|diff|ones|perm|sqrt|tanh|ceil|bode|plot|mean|hole|rect|asin|norm|cosh|acos|cos|tan|lcm|gcd|fit|hex|dot|Sig|oct|exp|mod|sin|fmt|iso|bin|log|det|eye|dec|sym|ln|pp|Eq|pv|pn|Σ|Π|σ|Γ)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
+    "pattern": "(?<![A-Za-z_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])(?:update_currency_rates|set_decimal_literals|to_fahrenheit_from_K|to_fahrenheit_from_K|get_decimal_literals|clear_currency_cache|to_celsius_from_F|protect_constants|get_currency_rate|clear_protections|to_kelvin_from_F|protect_si_units|refresh_display|tolerance_unit|list_protected|launch_palette|register_radix|to_fahrenheit|rates_status|protect_all|list_themes|print_view|sigfigs_of|to_celsius|from_roman|plusminus|from_dB_p|from_degR|from_dB_v|nsimplify|unprotect|from_degF|from_degC|integrate|to_kelvin|hardcopy|measured|it_grade|lambdify|permille|simplify|to_roman|in_units|parallel|Rational|to_dB_v|display|to_dB_p|polyfit|protect|percent|linefit|approx|phasor|base10|expand|Matrix|base16|nsolve|factor|series|interp|Symbol|latex|atanh|zeros|base2|hypot|solve|log10|clamp|base8|floor|asinh|limit|shaft|exact|roman|polar|radix|atan2|cross|acosh|comb|hole|fact|cbrt|plot|sinh|mean|sqrt|atan|diff|cosh|ones|acos|rect|perm|ceil|sign|asin|norm|tanh|bode|diag|log2|gcd|tan|Sig|sin|dot|dec|fmt|eye|det|lcm|sym|fit|exp|oct|cos|mod|hex|iso|bin|log|pp|pv|Eq|pn|ln|Σ|σ|Π|Γ)(?![A-Za-z0-9_πμΩεℏΓΠΣσαβγδζηθικλνξορςτυφχψωΦΘΛΨΔÅΩµÅK])",
     "cls": "edsl-helper"
   },
   {

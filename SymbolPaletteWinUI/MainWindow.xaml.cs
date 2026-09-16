@@ -295,42 +295,42 @@ public sealed partial class MainWindow : Window
     /// tab indices stay aligned with GetGroups().
     /// </summary>
     private void AppendFormulaTab()
-{
-    var editor = new Controls.FormulaEditor();
+    {
+        var editor = new Controls.FormulaEditor();
 
-    // TabContentHost is a ScrollViewer, which measures its content with
-    // unbounded height — that would collapse the editor's star-sized
-    // WebView2 row to its MinHeight. Pinning the editor's height to the
-    // viewport makes it fill the host exactly and track window resizes.
-    editor.SetBinding(FrameworkElement.HeightProperty,
-        new Microsoft.UI.Xaml.Data.Binding
-        {
-            Source = TabContentHost,
-            Path = new PropertyPath("ViewportHeight"),
-        });
+        // TabContentHost is a ScrollViewer, which measures its content with
+        // unbounded height — that would collapse the editor's star-sized
+        // WebView2 row to its MinHeight. Pinning the editor's height to the
+        // viewport makes it fill the host exactly and track window resizes.
+        editor.SetBinding(FrameworkElement.HeightProperty,
+            new Microsoft.UI.Xaml.Data.Binding
+            {
+                Source = TabContentHost,
+                Path = new PropertyPath("ViewportHeight"),
+            });
 
         editor.InsertRequested += OnFormulaInsertRequested;
         editor.FieldEntered += (_, _) => SetPaletteActive(true);
         editor.FieldExited += (_, _) => SetPaletteActive(false);
         _tabContents.Add(editor);
 
-    // Selector button, same shape as the symbol tabs'. The face reuses
-    // the existing text-face helper with a math glyph.
-    var tabButton = new ToggleButton
-    {
-        Content = MakeTabTextFace("\u2211x"),   // "∑x"
-        Tag = _tabButtons.Count,                // first index after the groups
-        MinWidth = 0,
-        Padding = new Thickness(8, 6, 8, 6),
-    };
-    tabButton.Click += TabButton_Click;
-    tabButton.PointerEntered += TabButton_PointerEntered;
-    tabButton.PointerExited += TabButton_PointerExited;
-    ToolTipService.SetToolTip(tabButton, "Formula editor");
+        // Selector button, same shape as the symbol tabs'. The face reuses
+        // the existing text-face helper with a math glyph.
+        var tabButton = new ToggleButton
+        {
+            Content = MakeTabTextFace("\u2211x"),   // "∑x"
+            Tag = _tabButtons.Count,                // first index after the groups
+            MinWidth = 0,
+            Padding = new Thickness(8, 6, 8, 6),
+        };
+        tabButton.Click += TabButton_Click;
+        tabButton.PointerEntered += TabButton_PointerEntered;
+        tabButton.PointerExited += TabButton_PointerExited;
+        ToolTipService.SetToolTip(tabButton, "Formula editor");
 
-    _tabButtons.Add(tabButton);
-    TabSelector.Children.Add(tabButton);
-}
+        _tabButtons.Add(tabButton);
+        TabSelector.Children.Add(tabButton);
+    }
     /// <summary>
     /// Build the visual shown on a tab's selector button.
     ///

@@ -1,7 +1,6 @@
-using System;
-using System.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using System.Text;
 
 namespace SymbolPaletteWinUI.Controls
 {
@@ -63,7 +62,7 @@ namespace SymbolPaletteWinUI.Controls
         private string BuildTable()
         {
             int columns = ReadCount(ColumnsBox, fallback: 3, min: 1, max: 10);
-            int rows    = ReadCount(RowsBox,    fallback: 3, min: 1, max: 30);
+            int rows = ReadCount(RowsBox, fallback: 3, min: 1, max: 30);
             string separator = AlignmentSeparator();
 
             var sb = new StringBuilder();
@@ -104,8 +103,8 @@ namespace SymbolPaletteWinUI.Controls
             return choice switch
             {
                 "Center" => ":---:",
-                "Right"  => "---:",
-                _        => "---",
+                "Right" => "---:",
+                _ => "---",
             };
         }
 

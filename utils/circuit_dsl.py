@@ -1,10 +1,11 @@
-from ideas import import_hook
+from .runtime import get_syntax_mode, set_syntax_mode, validate_syntax_mode
 import token_utils
 import re
 import ast
 import statistics
 import numpy as np
 import math
+from .numeric import as_numeric
 
 from .sigfig import (
     Sig, _S, _INF, _R, exact, measured, sigfigs_of,
@@ -23,6 +24,7 @@ __all__ = [
     "set_decimal_literals", "get_decimal_literals", "decimal_literals",
     "Range", "parallel", "percent", "permille", "fact", "mod",
     "plusminus", "σ", "Σ", "mean", "sqrt", "add_hook",
+    "get_syntax_mode", "set_syntax_mode", "as_numeric",
     # Math/engineering additions:
     "Γ", "Π", "log10", "log2", "ln", "floor", "ceil",
     "sin", "cos", "tan", "asin", "acos", "atan", "atan2",
@@ -40,7 +42,7 @@ __all__ = [
     "_CommaArray", "CommaArray", "_range_inc", "_range_ineq", "_str_range", "_as_matrix",
     # Emitted by rewrite_interval_dots — the ``a ‥ b`` closed-interval form.
     "_interval",
-    "_idx", "_idx_set",
+    "_idx", "_idx_set", "_bracket_get", "_bracket_set",
     # Emitted by rewrite_abs_bars — the |…| bars dispatch through this.
     "_abs_or_size",
 ]
@@ -381,7 +383,7 @@ _KIND_VERB = {
 }
 
 
-def _check_protected_names(source: str, filename: str = "<cell>") -> None:
+def _check_protected_names(source: str, filename: str = "<cell>", *, syntax_mode=None, tree=None) -> None:
     """Walk the AST of ``source`` and raise on any write to a protected name.
 
     No-op when ``PROTECTED_NAMES`` is empty.  Intended to run as the last
@@ -390,16 +392,17 @@ def _check_protected_names(source: str, filename: str = "<cell>") -> None:
     """
     if not PROTECTED_NAMES:
         return
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        # Let the regular compile step report the syntax problem with its
-        # own context — there's no point doubling up.
-        return
+    if tree is None:
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return
 
     violations = []
 
     def report(name, node, kind):
+        if name == "mp" and (syntax_mode or get_syntax_mode()) == "python":
+            return
         if name in PROTECTED_NAMES:
             violations.append((node.lineno, node.col_offset, name, kind))
 
@@ -1688,7 +1691,7 @@ def _as_matrix(value):
     """Wrap a 2-D rectangular numeric/symbolic list as a sympy ``Matrix``.
 
     Called (via an AST rewrite) around every list-of-lists *literal* in
-    DSL source, so ``[[1,2],[3,4]]`` becomes a real matrix supporting
+    legacy-mode DSL source, so ``[[1,2],[3,4]]`` becomes a real matrix supporting
     linear-algebra operators (``*`` product, ``.T`` / ``ᵀ`` transpose,
     ``.det()``, ``.inv()``, …) without an explicit ``Matrix(...)`` call.
 
@@ -1778,21 +1781,12 @@ def _strip_displaystyle(latex):
 
 
 def _DSLMatrix(m):
-    """Wrap a sympy ``Matrix`` ``m`` in a row-indexable subclass.
+    """Wrap a legacy matrix literal with DSL indexing and display helpers.
 
-    Auto-wrapped matrix literals must keep working with the DSL's 2-D
-    subscript notation ``M₁͵₁`` → ``M[1][1]``, which is Python nested-
-    list indexing.  A bare sympy ``Matrix`` indexes differently: ``M[1]``
-    is a FLAT scalar (element 1 in row-major order), so ``M[1][1]`` then
-    tries to subscript a scalar and fails.
-
-    This shim overrides ``__getitem__`` so a single *integer* index
-    returns that ROW (a 1×n matrix, itself integer-indexable), making
-    ``M[1][1]`` resolve to the (1,1) element — while the native sympy
-    forms ``M[1, 1]`` (tuple) and ``M[1:3]`` (slice) are passed straight
-    through.  Every other matrix operation is inherited unchanged, so
-    ``*`` / ``.T`` / ``.det()`` / ``.inv()`` and the rest behave exactly
-    as sympy's.
+    Native SymPy indexing stays unchanged for linear algebra internals.
+    Legacy DSL subscripts and brackets dispatch through ``_dsl_get`` /
+    ``_dsl_set`` instead. Explicit ``Matrix(...)`` objects keep SymPy's
+    native indexing semantics in both notation forms.
     """
     global _DSL_MATRIX_CLS
     if _DSL_MATRIX_CLS is None:
@@ -1807,8 +1801,7 @@ def _DSLMatrix(m):
             # themselves are passed through unshifted, matching plain
             # lists.  ``__getitem__`` and ``__setitem__`` stay native for
             # sympy's internal use (``det``, ``inv``, multiplication, …),
-            # and the ``M[i][j]`` row-chaining behaviour is preserved so
-            # internal and notational forms agree.
+            # independently of the DSL's row-indexing convention.
 
             @staticmethod
             def _to_int(k):
@@ -1929,6 +1922,7 @@ def _idx(obj, *indices):
 
       * a DSL matrix (has ``_dsl_get``) → 0-based access with bounds
         checking and clear errors (``M₀͵₁`` is row 0, col 1);
+      * an explicit SymPy matrix → native flat or (row, column) access;
       * anything else (list, tuple, numpy array, dict, …) → ordinary
         Python ``obj[i][j]…``.
 
@@ -1943,6 +1937,13 @@ def _idx(obj, *indices):
         if any(isinstance(i, slice) for i in indices):
             return obj[indices[0]] if len(indices) == 1 else obj[indices]
         return obj._dsl_get(*indices)
+    # SymPy matrices use tuple keys for (row, column); chaining would
+    # subscript a scalar. Do not wrap/copy the matrix or override its
+    # native indexing, which is also used by powers and inverses.
+    if getattr(obj, "is_Matrix", False):
+        from sympy.matrices import MatrixBase
+        if isinstance(obj, MatrixBase):
+            return obj[indices[0] if len(indices) == 1 else indices]
     out = obj
     for i in indices:
         out = out[i]
@@ -1965,16 +1966,36 @@ def _idx_set(obj, value, *indices):
     """Assignment companion of :func:`_idx` for ``M₀͵₁ := value``.
 
     A DSL matrix routes to ``_dsl_set`` (0-based, bounds-checked, and —
-    crucially — mutating the matrix itself rather than a row copy); any
+    crucially — mutating the matrix itself rather than a row copy).
+    Explicit SymPy matrices use native flat or tuple keys. Any
     other container uses ordinary assignment, walking to the last
     container and setting the final key.
     """
     if hasattr(obj, "_dsl_set"):
         return obj._dsl_set(value, *indices)
+    if getattr(obj, "is_Matrix", False):
+        from sympy.matrices import MatrixBase
+        if isinstance(obj, MatrixBase):
+            obj[indices[0] if len(indices) == 1 else indices] = value
+            return value
     target = obj
     for i in indices[:-1]:
         target = target[i]
     target[indices[-1]] = value
+    return value
+
+
+def _bracket_get(obj, key):
+    """Keep native tuple keys; only DSL matrices use row/column dispatch."""
+    if hasattr(obj, "_dsl_get"):
+        return obj._dsl_get(*key) if isinstance(key, tuple) else obj._dsl_get(key)
+    return obj[key]
+
+
+def _bracket_set(obj, value, key):
+    if hasattr(obj, "_dsl_set"):
+        return obj._dsl_set(value, *key) if isinstance(key, tuple) else obj._dsl_set(value, key)
+    obj[key] = value
     return value
 
 
@@ -3555,6 +3576,11 @@ def normalize_source(source: str) -> str:
         "−": "-",
         "÷": "/",
         "≠": "!=",
+        # Explicit equality glyphs: identical to Python == in both modes.
+        # Strings/comments are protected before this normalization pass.
+        "﹦": "==",          # U+FE66 SMALL EQUALS SIGN
+        "＝": "==",          # U+FF1D FULLWIDTH EQUALS SIGN
+        "≟": "==",          # U+225F QUESTIONED EQUAL TO
         "≤": "<=",
         "≥": ">=",
         "‖": "||",
@@ -5634,14 +5660,18 @@ _APPROX_BOUNDARY_WORDS = frozenset({
 _APPROX_BOUNDARY_CHARS = frozenset(",;:=<>!#")
 
 
-def _approx_operand_bounds(source: str, pos: int):
+def _approx_operand_bounds(source: str, pos: int, *, boundary_chars=None, allow_newlines=False):
     """Return ``(start, end)`` of the two operands around the ``≈`` at
     ``pos``: ``source[start:pos]`` is the LHS, ``source[pos+1:end]`` the
     RHS.  Each operand extends until a boundary at bracket depth 0 — a
     comma, an unmatched bracket, an assignment / comparison character,
     a colon, a newline, a comment, or a Python keyword such as ``and``
     / ``if`` / ``for``.  Arithmetic operators are *inside* the operand,
-    which gives ``≈`` the precedence of a comparison."""
+    which gives ``≈`` the precedence of a comparison. The symbolic-equation
+    pass supplies extra operator boundaries and allows continuation lines
+    inside parentheses/brackets."""
+    if boundary_chars is None:
+        boundary_chars = _APPROX_BOUNDARY_CHARS
     n = len(source)
 
     # ---- leftwards -----------------------------------------------------
@@ -5658,7 +5688,7 @@ def _approx_operand_bounds(source: str, pos: int):
                 break
             depth -= 1
         elif depth == 0:
-            if c == "\n" or c in _APPROX_BOUNDARY_CHARS:
+            if (c == "\n" and not allow_newlines) or c in boundary_chars:
                 start = i + 1
                 break
             if c.isalnum() or c == "_":
@@ -5688,7 +5718,7 @@ def _approx_operand_bounds(source: str, pos: int):
                 break
             depth -= 1
         elif depth == 0:
-            if c == "\n" or c in _APPROX_BOUNDARY_CHARS:
+            if (c == "\n" and not allow_newlines) or c in boundary_chars:
                 end = i
                 break
             if c.isalpha() or c == "_":
@@ -5703,6 +5733,35 @@ def _approx_operand_bounds(source: str, pos: int):
                 continue
         i += 1
     return start, end
+
+
+def rewrite_symbolic_equation(source: str) -> str:
+    """Rewrite ``lhs ≡ rhs`` to ``Eq(lhs, rhs)`` with comparison precedence.
+
+    This is an exact alias for SymPy's constructor, including its normal
+    evaluation of known equalities. String/comment contents are protected
+    upstream. Chained equations require an explicit list, not nested Eq calls.
+    """
+    boundaries = _APPROX_BOUNDARY_CHARS | {"≡", "≈", "⩵"}
+    while True:
+        pos = source.find("≡")
+        if pos < 0:
+            return source
+        # A newline can continue an operand inside a call or parenthesized
+        # expression, but must still separate independent statements.
+        prefix = source[:pos]
+        depth = sum(prefix.count(c) for c in "([{") - sum(prefix.count(c) for c in ")]}")
+        start, end = _approx_operand_bounds(
+            source, pos, boundary_chars=boundaries, allow_newlines=depth > 0)
+        lhs = source[start:pos].strip()
+        rhs = source[pos + 1:end].strip()
+        if not lhs or not rhs:
+            raise SyntaxError("≡ requires an expression on both sides: lhs ≡ rhs")
+        if (start > 0 and source[start - 1] == "≡") or (end < len(source) and source[end] == "≡"):
+            raise SyntaxError("Use a list of equations instead of chaining ≡: [a ≡ b, b ≡ c]")
+        segment = source[start:pos]
+        lead = segment[:len(segment) - len(segment.lstrip())]
+        source = source[:start] + lead + f"Eq({lhs}, {rhs})" + source[end:]
 
 
 def rewrite_approx(source: str) -> str:
@@ -6903,7 +6962,7 @@ def rewrite_symbol_declaration(source: str) -> str:
     return _SYMBOL_DECL_RE.sub(replace, source)
 
 
-def rewrite_math_assignment(source: str) -> str:
+def rewrite_math_assignment(source: str, *, legacy=True) -> str:
     """
     Assignment glyphs:
         x ≔ 5        -> x = 5
@@ -6932,6 +6991,7 @@ def rewrite_math_assignment(source: str) -> str:
     a single buffer and flushing it through ``replace_top_level_single_equals``
     whenever bracket depth returns to 0.
     """
+    rewrite_equals = replace_top_level_single_equals if legacy else (lambda text: text)
     new_lines = []
     # Buffer for accumulating lines of a multi-line non-assignment
     # statement.  We flush when bracket depth reaches zero so
@@ -6968,7 +7028,7 @@ def rewrite_math_assignment(source: str) -> str:
     def _flush_pending():
         if pending_buffer:
             combined = "".join(pending_buffer)
-            rewritten = replace_top_level_single_equals(combined)
+            rewritten = rewrite_equals(combined)
             new_lines.append(rewritten)
             pending_buffer.clear()
 
@@ -7016,7 +7076,7 @@ def rewrite_math_assignment(source: str) -> str:
                     last = end
                 prefix = "".join(pieces)        # ends with the last assignment '='
                 suffix = code[last:]            # everything to its right
-                suffix = replace_top_level_single_equals(suffix)
+                suffix = rewrite_equals(suffix)
                 code = prefix + suffix
 
                 new_lines.append(code + comment)
@@ -7031,7 +7091,7 @@ def rewrite_math_assignment(source: str) -> str:
             pending_depth = line_depth
         else:
             _flush_pending()
-            code = replace_top_level_single_equals(code)
+            code = rewrite_equals(code)
             new_lines.append(code + comment)
 
     _flush_pending()
@@ -7499,21 +7559,6 @@ def _restore_strings(source: str, bodies):
     return _PROTECT_STR_RE.sub(lambda m: bodies[int(m.group(1))], source)
 
 
-# Modules in this package that are plain Python (no DSL syntax) and
-# must NOT be transformed by the import hook.  These modules contain
-# bare ``=`` assignments that the math-assignment rewriter would turn
-# into ``==`` comparisons, breaking the module.  Listed by basename so
-# the check is path-agnostic — works whether the user installed the
-# package at ``/home/claude/utils/`` or some other location.
-_PLAIN_PYTHON_SIBLINGS = frozenset({
-    "chrono.py",
-    "symbolic.py",
-    "iso286.py",
-    "radix_formats.py",
-    # Add other plain-Python siblings here as the project grows.
-})
-
-
 def _check_bitwise_andor(source: str, filename: str = "<cell>") -> None:
     """Raise if ``and`` / ``or`` is used with a bit-pattern operand.
 
@@ -7641,37 +7686,29 @@ def _rewrite_idx_assignment(source: str) -> str:
     return "\n".join(out_lines)
 
 
-def _wrap_matrix_literals(source: str) -> str:
-    """Wrap every list-of-lists *literal* in a ``_as_matrix(...)`` call.
+def _wrap_matrix_literals(source: str, *, tree=None) -> str:
+    """Legacy-only matrix promotion and DSL-matrix bracket dispatch.
 
-    Runs as an AST pass near the end of ``transform_source`` (when the
-    source is already valid Python).  A ``List`` node whose elements are
-    ALL ``List`` nodes is a 2-D literal — the matrix shape — so we wrap
-    it; ``_as_matrix`` then decides at runtime whether it's a genuine
-    rectangular numeric/symbolic grid (→ sympy ``Matrix``) or should
-    stay a plain list (ragged, strings, etc.).
-
-    Why AST rather than regex: nested-bracket literals can't be matched
-    reliably with a regex, but the structural test "a List of Lists" is
-    trivial and exact on the parse tree.  Only LITERAL lists are touched
-    — a variable holding a list, or a comprehension, is not a ``List``
-    node and is left alone, so this changes the meaning of written
-    ``[[...]]`` literals only, nothing computed.
-
-    Falls back to the original source unchanged if the text doesn't
-    parse (a later compile step will report the real error) or if AST
-    unparsing isn't available.
+    Candidate row lists are checked by _as_matrix at runtime. Other objects
+    retain native tuple-key indexing through _bracket_get/_bracket_set. Reuse
+    a supplied AST, and retain the original source if no nodes changed.
     """
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
+    if "[" not in source:
         return source
+    if tree is None:
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return source
 
     class _MatrixWrapper(ast.NodeTransformer):
+        def __init__(self):
+            self.changed = False
+
         def visit_List(self, node):
             # Recurse first so inner lists are handled, then decide.
             self.generic_visit(node)
-            if not node.elts:
+            if not node.elts or not isinstance(node.ctx, ast.Load):
                 return node
             # A 2-D structure to promote to a matrix takes two forms:
             #   (1) a LITERAL matrix ``[[..],[..]]`` — every element is a
@@ -7693,6 +7730,7 @@ def _wrap_matrix_literals(source: str) -> str:
             row_like = (ast.List, ast.Name, ast.Call,
                         ast.Subscript, ast.Attribute)
             if all(isinstance(e, row_like) for e in node.elts):
+                self.changed = True
                 return ast.Call(
                     func=ast.Name(id="_as_matrix", ctx=ast.Load()),
                     args=[node],
@@ -7724,9 +7762,10 @@ def _wrap_matrix_literals(source: str) -> str:
                 idx_args = list(key.elts)
             else:
                 idx_args = [key]
+            self.changed = True
             call = ast.Call(
-                func=ast.Name(id="_idx_set", ctx=ast.Load()),
-                args=[tgt.value, node.value] + idx_args,
+                func=ast.Name(id="_bracket_set", ctx=ast.Load()),
+                args=[tgt.value, node.value, key],
                 keywords=[],
             )
             return ast.Expr(value=call)
@@ -7757,14 +7796,18 @@ def _wrap_matrix_literals(source: str) -> str:
                 args = [node.value] + list(key.elts)
             else:
                 args = [node.value, key]
+            self.changed = True
             return ast.Call(
-                func=ast.Name(id="_idx", ctx=ast.Load()),
-                args=args,
+                func=ast.Name(id="_bracket_get", ctx=ast.Load()),
+                args=[node.value, key],
                 keywords=[],
             )
 
     try:
-        new_tree = _MatrixWrapper().visit(tree)
+        wrapper = _MatrixWrapper()
+        new_tree = wrapper.visit(tree)
+        if not wrapper.changed:
+            return source
         ast.fix_missing_locations(new_tree)
         return ast.unparse(new_tree)
     except Exception:
@@ -7774,46 +7817,11 @@ def _wrap_matrix_literals(source: str) -> str:
 
 
 def transform_source(source, **_kwargs):
-    # SCOPE GUARD — transform interactive CELLS and the toolkit's own DSL
-    # modules, but NEVER third-party library files.  The ``ideas`` hook
-    # installs globally, so without this guard it runs the DSL rewriters
-    # over every module imported afterwards — including matplotlib and its
-    # dependency ``dateutil``, whose perfectly valid Python (e.g.
-    # ``comp = lambda dc, dtc: dc >= dtc``) the rewriters then corrupt into
-    # a SyntaxError deep inside an unrelated import.  (It only surfaced
-    # after a Jupyter/matplotlib upgrade because the new import order pulls
-    # ``dateutil`` in fresh, through the active hook, rather than from a
-    # pre-hook cache.)
-    #
-    # We must be surgical: some of the toolkit's OWN modules (e.g.
-    # ``calc_symbols.py``) are themselves written in the DSL and MUST be
-    # transformed at import.  So we key off the file path:
-    #   * no path / a ``<...>`` marker  → an interactive cell → transform.
-    #   * a path under a known third-party location (site-packages,
-    #     dist-packages, miniconda/anaconda, lib/python…) → skip.
-    #   * any other real path (the toolkit's own package dir) → transform.
-    filename = _kwargs.get("filename", "")
-    if filename:
-        import os.path
-        base = os.path.basename(filename)
-        is_cell = filename.startswith("<") or base.startswith("<")
-        if not is_cell:
-            norm = filename.replace("\\", "/").lower()
-            _THIRD_PARTY_MARKERS = (
-                "/site-packages/", "/dist-packages/",
-                "/miniconda3/", "/anaconda3/", "/miniconda/", "/anaconda/",
-                "/lib/python", "/lib64/python", "/python313/", "/python312/",
-                "/python311/", "/python310/", "/.venv/", "/venv/",
-            )
-            if any(marker in norm for marker in _THIRD_PARTY_MARKERS):
-                # A third-party library file — must NOT be DSL-transformed.
-                return source
-            # A real .py path that isn't third-party.  If it's a
-            # plain-Python sibling of this module (implementation code, not
-            # DSL), skip it; otherwise (a DSL-authored toolkit module such
-            # as ``calc_symbols.py``, or a user's own DSL .py) transform it.
-            if base in _PLAIN_PYTHON_SIBLINGS:
-                return source
+    syntax_mode = validate_syntax_mode(_kwargs.get("syntax_mode") or get_syntax_mode())
+    filename = str(_kwargs.get("filename") or "")
+    # Ordinary imports retain Python semantics; module transformation is opt-in.
+    if filename and not filename.startswith("<") and not _kwargs.get("transform_module"):
+        return source
 
     # Clear the unit-label stash so any leftovers from a previous
     # call (e.g. a transform that raised mid-pipeline) don't bleed
@@ -7917,7 +7925,7 @@ def transform_source(source, **_kwargs):
     # ▶ runs early so the captured RHS source text is the user's literal
     # spelling (``mm/s``), not anything pre-mangled by later passes.
     source = rewrite_target_unit(source)
-    source = rewrite_math_assignment(source)
+    source = rewrite_math_assignment(source, legacy=syntax_mode == "legacy")
     source = rewrite_parallel(source)
     source = rewrite_postfix_percent(source)
     source = rewrite_postfix_permille(source)
@@ -7946,6 +7954,7 @@ def transform_source(source, **_kwargs):
     source = re.sub(r'(?<=\))(_idx\()', r'*\1', source)
     source = _rewrite_idx_assignment(source)
     source = rewrite_plusminus(source)
+    source = rewrite_symbolic_equation(source)
     source = rewrite_approx(source)
     source = rewrite_math_equality(source)
     tokens = token_utils.tokenize(source)
@@ -8382,7 +8391,8 @@ def transform_source(source, **_kwargs):
     # (the placeholders aren't in strings; this order is just convention)
     # and before the AST scan so Python sees ``εₒ`` etc. as actual
     # identifiers in the parse tree.
-    source = _restore_constant_names(source, _stashed_constants)
+    source = _restore_constant_names(source, [(key, "m_p" if value == "mₚ" else value)
+                                               for key, value in _stashed_constants])
     # Restore prettified unit labels — placeholders introduced by
     # ``rewrite_target_unit`` for the ``▶`` operator are substituted
     # back with their human-readable form (``MeV/c²``, ``kg/m³``).
@@ -8390,19 +8400,26 @@ def transform_source(source, **_kwargs):
     # pure ASCII so they survive the AST scan if any remain (they
     # shouldn't, since every introduction is paired with a restore).
     source = _restore_unit_labels(source)
-    # Wrap list-of-lists literals as sympy matrices (``[[1,2],[3,4]]`` →
-    # ``_as_matrix([[1,2],[3,4]])``).  AST pass — runs now that the
-    # source is valid Python and strings/labels are restored.
-    source = _wrap_matrix_literals(source)
-    _check_protected_names(source, _kwargs.get("filename", "<cell>"))
+    # Legacy matrix promotion shares the final AST with name protection.
+    # Default Python mode preserves lists and native bracket operations.
+    tree = None
+    if syntax_mode == "legacy" and "[" in source:
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return source
+    # Validate original bindings before the matrix visitor rewrites assignments.
+    _check_protected_names(source, filename or "<cell>", syntax_mode=syntax_mode, tree=tree)
+    if tree is not None:
+        source = _wrap_matrix_literals(source, tree=tree)
     return source
 
 
-def add_hook(**_kwargs):
-    return import_hook.create_hook(
-        transform_source=transform_source,
-        hook_name="circuit_dsl",
-    )
+def add_hook(*, modules=(), syntax_mode=None):
+    """Install notebook transformation; opt in imported DSL modules by name."""
+    from .runtime import install_hook
+    return install_hook(modules=modules, syntax_mode=syntax_mode)
+
 
 
 # Register the polar-form formatter for ``_Polar`` complex values now

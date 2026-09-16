@@ -398,7 +398,7 @@ class EngineeringDSLLexer(PythonLexer):
         # ``↑`` is Knuth's power arrow, ``ᵀ`` the matrix transpose,
         # ``!`` the postfix factorial (bare only — the lookahead keeps
         # Python's ``!=`` a single operator token).
-        (r'°|²|³|√|⌊|⌋|⌈|⌉|‰|×|÷|·|⋅|−|≤|≥|≠|∞|↑|ᵀ|!(?!=)', Operator),
+        (r'°|²|³|√|⌊|⌋|⌈|⌉|‰|×|÷|·|⋅|−|≤|≥|≠|﹦|＝|≟|≡|∞|↑|ᵀ|!(?!=)', Operator),
 
         # ---- tab / newline argument glyphs ----
         # ``print("a" ⇥ "b" ↵)`` — each glyph stands for a ``"\t"`` /

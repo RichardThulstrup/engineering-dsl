@@ -21,11 +21,11 @@ Side effects performed during this import:
    with ``top_level=True``.  This injects unit names (``V``, ``Ω``, ``m``,
    ``kg``, ``Hz``, ``mV``, ``kΩ``, ...) into Python's ``builtins`` module
    so they're visible everywhere — no per-cell re-import.
-2. The ``ideas`` source-transform hook is installed via
+2. The notebook source transformer is installed via
    ``circuit_dsl.add_hook()`` so the ergonomic syntax (``:=``, ``‖``, ``°``,
    ``∠``, ``²``, ``√``, ``log₁₀(...)``, ``Γ(x)``, ``≈``,
-   ``[a..b]``, ...) is rewritten in every subsequent cell or imported
-   module.
+   ``[a..b]``, ...) is rewritten in subsequent DSL cells. Imported Python modules retain
+   native semantics; DSL modules require explicit opt-in.
 3. ``circuit_dsl`` and ``calc_symbols`` are loaded; their public names
    (helpers, runtime functions, physical constants, prefixed units) are
    re-exported through this module's ``__all__``.
@@ -218,46 +218,11 @@ if not getattr(si.Physical, "_engineer_sig_aware", False):
 
 
 # ---------------------------------------------------------------------------
-# Step 2: install the source-transform hook.  Idempotent — `ideas` itself
-# is happy to be told to re-register, but we guard anyway to avoid
-# duplicating the hook in sys.meta_path.
-#
-# Modules that aren't authored in DSL style (i.e. don't use ``:=`` for
-# assignment) need to be imported BEFORE the hook is installed.  Once
-# they're cached in ``sys.modules`` the hook won't re-run them on later
-# imports.  That's how ``circuit_dsl`` itself escapes self-rewriting,
-# and we use the same trick for ``chrono`` because it's plain Python.
+# Step 2: install the notebook input transformer. Ordinary imports retain
+# Python's native source and extension-module loading behavior.
 # ---------------------------------------------------------------------------
 from . import circuit_dsl as eng  # noqa: E402
-from . import chrono as _chrono   # noqa: E402, F401  (pre-hook seed)
-# ``extra_units`` is plain Python with bare ``=`` assignments — it must
-# be pre-loaded here so the DSL hook doesn't see its source and rewrite
-# every top-level ``=`` into ``==`` (math-style equality), which would
-# break every line of the module.  Same trick used for ``chrono`` above.
-from . import extra_units as _extra_units   # noqa: E402, F401
-# ``plotting`` is also plain Python (bare ``=`` assignments) and needs
-# the same pre-hook treatment.  It also has a soft dependency on
-# matplotlib — but the import itself is fine even without matplotlib
-# installed, since the matplotlib import only happens inside ``plot()``.
-from . import plotting as _plotting          # noqa: E402, F401
-# Two more plain-Python modules that a notebook may import later:
-# ``Engineer_Style`` (Pygments lexer/style for nbconvert) and
-# ``i_mul_fys`` (the standalone implicit-multiplication transformer).
-# Imported post-hook their bare ``=`` assignments get rewritten to
-# ``==`` and the modules break with NameErrors — so seed them here like
-# ``chrono`` above.  Each is an optional extra with its own soft
-# dependencies (pygments; ideas / token_utils), so a failing seed must
-# not block the core toolkit.
-for _plain_mod in ("Engineer_Style", "i_mul_fys", "hardcopy_helpers"):
-    try:
-        __import__(f"{__package__}.{_plain_mod}")
-    except Exception:                        # pragma: no cover - optional
-        pass
-del _plain_mod
-
-if not getattr(eng, "_engineer_hook_installed", False):
-    eng.add_hook()
-    eng._engineer_hook_installed = True
+eng.add_hook()  # idempotent per shell
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +236,7 @@ from .chrono import *           # noqa: F401, F403  (ISO 8601 date/time)
 from .symbolic import *         # noqa: F401, F403  (sympy bridge)
 from .iso286 import *           # noqa: F401, F403  (ISO 286 limits & fits)
 from .radix_formats import *    # noqa: F401, F403  (extra integer formats: roman)
-from .hardcopy_helpers import *  # noqa: F401, F403  (print_view, hardcopy — see Step 2 seed)
+from .hardcopy_helpers import *  # noqa: F401, F403  (print_view, hardcopy)
 
 # Currency markers (``DKK``, ``USD``, ``EUR`` …) and helpers.  The
 # currency module is a soft dependency — it is imported defensively
@@ -696,7 +661,14 @@ def _register_sympy_leftalign_formatter() -> bool:
             return None
         return _strip_displaystyle(lx) if isinstance(lx, str) else None
 
+    def _format_matrix(obj):
+        if getattr(obj, "_dsl_radix", None):
+            from .symbolic import _matrix_to_latex
+            return "$" + _matrix_to_latex(obj) + "$"
+        return _format_sympy(obj)
+
     latex_formatter.for_type(_sym.Basic, _format_sympy)
+    latex_formatter.for_type(_sym.MatrixBase, _format_matrix)
     return True
 
 
