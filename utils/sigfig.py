@@ -159,9 +159,28 @@ def _unit_label_to_latex(label: str) -> str:
                 else:
                     nxt = run[k + 1] if k + 1 < len(run) else ""
                     tex += cmd + (" " if nxt.isalpha() else "")
-            out.append(r"\mathrm{" + tex + "}")
+            out.append(r"\mathrm{" + _tex_unit_text(tex) + "}")
             i = j
     return "".join(out)
+
+
+def _tex_unit_text(tex: str) -> str:
+    """Make a unit run safe inside ``\\mathrm{}``: a multi-letter
+    subscript is braced (``gal_us`` → ``gal_{us}``, else LaTeX subscripts
+    only the ``u``), and a space is kept (``100 km`` would typeset as
+    ``100km``).  Only the last ``_`` part is the subscript; earlier
+    underscores are word breaks (``fl_oz_us`` → ``fl\\ oz_{us}``, where
+    ``fl_{oz}_{us}`` is a double-subscript error).  A spelled-out
+    ``_per_`` is a slash: ``MeV_per_c2`` → ``MeV/c^{2}``."""
+    tex = re.sub(r"_per_([A-Za-z]+)(\d*)",
+                 lambda m: "/" + m.group(1)
+                 + ("^{" + m.group(2) + "}" if m.group(2) else ""), tex)
+
+    def word(m):
+        *head, sub = m.group(0).split("_")
+        return " ".join(head) + "_{" + sub + "}"
+    tex = re.sub(r"[^_\s\\{}]*(?:_[^_\s\\{}]+)+", word, tex)
+    return tex.replace(" ", r"\ ")
 
 
 # Greek letters that appear in unit labels (``Ω``, ``μ``, ``Δ``) and
@@ -1470,7 +1489,7 @@ class Sig:
                     letter = unit[1:]
                     unit_tex = r"{}^{\circ}\mathrm{" + letter + "}"
                 else:
-                    unit_tex = r"\mathrm{" + unit.replace(" ", r"\ ") + "}"
+                    unit_tex = r"\mathrm{" + _tex_unit_text(unit) + "}"
                 return f"${num}\\ {unit_tex}$"
             return f"${num}$"
 

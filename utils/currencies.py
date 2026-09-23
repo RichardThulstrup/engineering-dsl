@@ -130,6 +130,15 @@ _rates_timestamp: float | None = None
 _rates_source: str = "fallback"   # "live" | "cache" | "fallback"
 
 
+def _is_physical(x) -> bool:
+    """A forallpeople ``Physical`` or a display-unit marker wrapping one
+    (``inch``, ``Nm``, a tagged ``km`` in ``10 DKK/km``) — the marker has
+    no ``.dimensions`` of its own, so without the second test it would
+    slip through to ``float()`` and silently drop the unit."""
+    return hasattr(x, "dimensions") or hasattr(
+        getattr(x, "physical", None), "dimensions")
+
+
 # ---------------------------------------------------------------------------
 # Currency type
 # ---------------------------------------------------------------------------
@@ -158,7 +167,7 @@ class Currency:
         # Refuse Physical (forallpeople) — money×length isn't a thing.
         # Detect by duck-typing on ``.dimensions`` rather than importing
         # forallpeople so this module stays a soft-dependency.
-        if hasattr(other, "dimensions"):
+        if _is_physical(other):
             raise TypeError(
                 f"cannot multiply currency ({self.code}) by a physical "
                 f"quantity ({other!r}) — money has no SI dimension"
@@ -174,7 +183,7 @@ class Currency:
         # ``5 * USD``, ``np.float64(5) * USD``, or ``Physical * USD``
         # (where Physical's ``__mul__`` stepped aside).  We re-check for
         # Physical here for the same reason as ``__mul__``.
-        if hasattr(other, "dimensions"):
+        if _is_physical(other):
             raise TypeError(
                 f"cannot multiply currency ({self.code}) by a physical "
                 f"quantity ({other!r}) — money has no SI dimension"
@@ -204,7 +213,7 @@ class Currency:
                     f"cannot express {self!r} in zero {other.code}")
             return (self.value * self_to_dkk) / (other.value * other_to_dkk)
         # Refuse Physical — same rationale as __mul__.
-        if hasattr(other, "dimensions"):
+        if _is_physical(other):
             raise TypeError(
                 f"cannot divide currency ({self.code}) by a physical "
                 f"quantity ({other!r}) — currencies are dimensionless"

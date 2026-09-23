@@ -20,7 +20,7 @@ from .sigfig import (
 # to pull them in.
 __all__ = [
     "_S", "_INF", "_R", "Sig", "exact", "measured", "sigfigs_of",
-    "in_units", "radix", "register_radix", "_wu",
+    "in_units", "radix", "register_radix", "_wu", "_per",
     "set_decimal_literals", "get_decimal_literals", "decimal_literals",
     "Range", "parallel", "percent", "permille", "fact", "mod",
     "plusminus", "σ", "Σ", "mean", "sqrt", "add_hook",
@@ -272,6 +272,49 @@ def _wu(unit, label: str, written: bool = False):
         return _DisplayUnit(inner, label)
     except Exception:
         return unit
+
+
+def _per(q):
+    """Denominator marker for a written ratio such as ``5 L/100 km``.
+
+    The transform turns ``L/100 km`` (or ``L/(100 km)``) into ``L
+    /_per(100 km)``.  A tagged quantity ``100 km`` becomes a
+    ``_DisplayUnit`` labelled ``100 km``, so the marker's
+    ``__rtruediv__`` shows ``5 L/100 km`` rather than ``50000 μm²``
+    whenever the ratio partly cancels (``5 m/100 s`` keeps its plain
+    display).  Anything else is returned untouched.
+    """
+    pref = getattr(q, "_unit_pref", None)
+    inner = q.value if isinstance(q, Sig) else q
+    if pref is None or not hasattr(inner, "dimensions"):
+        return q
+    try:
+        from .extra_units import _DisplayUnit
+        from .sigfig import _format_in_unit
+        n = float(inner / pref.physical)
+        return _DisplayUnit(inner, f"{_format_in_unit(n, _INF)} {pref.label}")
+    except Exception:
+        return q
+
+
+def _is_ratio_slash(tokens, i):
+    """``tokens[i]`` is a ``/`` written tight against both neighbours, as
+    in a unit (``L/km``, ``L/100 km``).  A spaced ``5 mAh / 2 hr`` is a
+    calculation and reduces as usual."""
+    if i < 1 or i + 1 >= len(tokens) or str(tokens[i]) != "/":
+        return False
+    a, s, b = tokens[i - 1], tokens[i], tokens[i + 1]
+    try:
+        return (a.end_row == s.start_row == b.start_row
+                and a.end_col == s.start_col and s.end_col == b.start_col)
+    except AttributeError:          # a spliced-in plain string
+        return False
+
+
+def _is_per_count(tok):
+    """A ``per 100`` count: a power of ten from 10 up (``L/100 km``,
+    ``failures/1000 h``)."""
+    return re.fullmatch(r"10+", str(tok)) is not None
 
 _CONSTANT_NAMES = frozenset({
     # Physical constants
@@ -8150,6 +8193,7 @@ def transform_source(source, **_kwargs):
     # marker) tuples and apply them in a second pass.
     wrap_inserts = []   # list of (index_in_new_tokens, "(") or (index, ")")
     unit_rewrites = []  # indices in new_tokens of unit tokens to tag via _wu
+    per_slashes = []    # ``/`` tokens before a ``100 km`` ratio denominator
 
     new_tokens = [prev_token]
 
@@ -8337,13 +8381,41 @@ def transform_source(source, **_kwargs):
                 # splicing in a bare string, so the token keeps the
                 # source position ``untokenize`` uses for spacing.
                 unit_rewrites.append(len(new_tokens))
+                # ``5 L/100 km``: a bare number-and-unit right after a
+                # tagged unit's ``/`` is the ratio's denominator.
+                if (atom_start == len(new_tokens) - 2
+                        and atom_start >= 2
+                        and new_tokens[atom_start].is_number()
+                        and _is_per_count(new_tokens[atom_start])
+                        and _is_ratio_slash(new_tokens, atom_start - 1)
+                        and (atom_start - 2) in unit_rewrites):
+                    per_slashes.append(atom_start - 1)
 
         new_tokens.append(token)
+        # ``5 L/(100 km)``: the same denominator, parenthesized.
+        if (token == ")" and len(new_tokens) >= 7
+                and _is_ratio_slash(new_tokens, len(new_tokens) - 6)
+                and str(new_tokens[-5]) == "("
+                and _is_per_count(new_tokens[-4])
+                and str(new_tokens[-3]) == "*"
+                and (len(new_tokens) - 2) in unit_rewrites
+                and (len(new_tokens) - 7) in unit_rewrites):
+            per_slashes.append(len(new_tokens) - 6)
         # A unit-position spelling (``in`` → ``inch``) is tagged with the
         # spelling the user typed even when it is the SECOND unit of a
         # product (``110 lbf·in``), where the tight-binding branch above
         # does not fire — otherwise the inch's own ``inch`` tag would win.
         if (getattr(token, "_dsl_written", None)
+                and (len(new_tokens) - 1) not in unit_rewrites):
+            unit_rewrites.append(len(new_tokens) - 1)
+        # A unit written straight after ``<value> <unit>/`` is tagged too
+        # (``17 L/km``), so the marker's ``__rtruediv__`` can keep a
+        # ratio like ``L/km`` instead of the reduced ``mm²``.
+        elif (token.is_identifier()
+                and str(token) in _UNIT_NAMES_FOR_BINDING
+                and len(new_tokens) >= 3
+                and _is_ratio_slash(new_tokens, len(new_tokens) - 2)
+                and (len(new_tokens) - 3) in unit_rewrites
                 and (len(new_tokens) - 1) not in unit_rewrites):
             unit_rewrites.append(len(new_tokens) - 1)
 
@@ -8400,6 +8472,10 @@ def transform_source(source, **_kwargs):
         label = (written or name).translate(_NFKC_CANONICAL)
         flag = ", True" if written else ""
         tok.string = f"_wu({name}, {_stash_unit_label(repr(label))}{flag})"
+    # ``/ (100 * km)`` → ``/_per (100 * km)``: a call on the group, so the
+    # ratio keeps its written ``L/100 km`` form (see ``_per``).
+    for idx in per_slashes:
+        new_tokens[idx].string = "/_per"
 
     if wrap_inserts:
         # Sort by index descending; for the same index, "close" comes

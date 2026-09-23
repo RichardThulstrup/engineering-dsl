@@ -414,6 +414,22 @@ amu           = u                               # American/older spelling
 #     its Physical and uses its canonical label.
 #   * UNIT IN AN EXPRESSION — ``τ / Nm``, ``Nm / rad`` → the plain
 #     Physical, so unit algebra works as if ``N*m`` had been written.
+_BASE_DIMS = ("kg", "m", "s", "A", "cd", "K", "mol")
+
+
+def _partly_cancels(num, den):
+    """True when ``num / den`` cancels some base dimension (both carry it
+    with the same sign) yet is not dimensionless."""
+    try:
+        dn, dd = num.dimensions, den.dimensions
+        a = [getattr(dn, f, 0) for f in _BASE_DIMS]
+        b = [getattr(dd, f, 0) for f in _BASE_DIMS]
+    except Exception:
+        return False
+    shared = any(x * y > 0 for x, y in zip(a, b))
+    return shared and a != b
+
+
 class _DisplayUnit:
     """Marker for a compound unit that keeps its written form on
     display instead of reducing to the derived SI unit (``N·m`` not
@@ -488,7 +504,25 @@ class _DisplayUnit:
         return self.physical / o
 
     def __rtruediv__(self, x):
-        return x / self.physical
+        # A tagged value over a unit whose dimensions partly CANCEL the
+        # tag's keeps the written ratio: ``17 L/km`` is a fuel figure,
+        # not the ``17 mm²`` forallpeople reduces it to, and ``2
+        # mi/gal_us`` is not ``0.85 mm⁻²``.  Ratios that cancel nothing
+        # (``30 m/s``) or everything (``3 mm/m``) keep the plain-unit
+        # display.  Same render-time dimension guard as every tag.
+        q = x / self.physical
+        npref = getattr(x, "_unit_pref", None)
+        if npref is None or not _partly_cancels(npref.physical, self.physical):
+            return q
+        den = self.label
+        if any(ch in den for ch in "·/"):
+            den = f"({den})"
+        try:
+            q._unit_pref = _DisplayUnit(npref.physical / self.physical,
+                                        f"{npref.label}/{den}")
+        except Exception:
+            pass
+        return q
 
     def __pow__(self, p):
         return self.physical ** p
