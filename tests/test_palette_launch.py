@@ -16,27 +16,30 @@ STAND_IN = sys.executable       # a file that is there; it is recorded, never ru
 
 # What the child process runs.  Only a start of the palette is recorded
 # (the program the environment names, or one called "…palette…");
-# anything else the import may start runs as usual.
+# anything else the import may start runs as usual.  The stand-in is a
+# subclass because libraries write ``subprocess.Popen[bytes]`` in their
+# annotations, which Python before 3.14 evaluates on import.
 CHILD = '''
 import json, os, subprocess, sys
 
-started, really = [], subprocess.Popen
+started = []
 
 
-class Recorded:
+class Recording(subprocess.Popen):
+    def __init__(self, args, *more, **named):
+        program = str(args[0] if isinstance(args, (list, tuple)) else args)
+        self.noted = ("palette" in os.path.basename(program).lower()
+                      or program == os.environ.get("SYMBOL_PALETTE_EXE"))
+        if self.noted:
+            started.append(program)
+        else:
+            super().__init__(args, *more, **named)
+
     def poll(self):
-        return None
+        return None if self.noted else super().poll()
 
 
-def popen(args, *more, **named):
-    program = str(args[0] if isinstance(args, (list, tuple)) else args)
-    if "palette" in os.path.basename(program).lower() or program == os.environ.get("SYMBOL_PALETTE_EXE"):
-        started.append(program)
-        return Recorded()
-    return really(args, *more, **named)
-
-
-subprocess.Popen = popen
+subprocess.Popen = Recording
 import utils.Engineer as engineer
 
 if "call" in sys.argv:
