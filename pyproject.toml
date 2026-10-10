@@ -7,6 +7,9 @@ name = "engineering-dsl"
 version = "0.1.0"
 description = "Engineering math in plain notation: a Jupyter DSL with units, significant figures, symbolic math, and Unicode engineering syntax"
 readme = "README.md"
+# 3.12 is the oldest Python the test suite has been run on (it is
+# developed on 3.14, and passes on 3.12 to 3.15).
+requires-python = ">=3.12"
 license = { file = "LICENSE" }
 authors = [{ name = "Richard Thulstrup" }]
 keywords = [
@@ -19,6 +22,10 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
@@ -34,9 +41,19 @@ dependencies = [
 
 [project.optional-dependencies]
 notebook = ["ipykernel>=6,<8"]
+# JupyterLab itself, for working in notebooks (the bundled highlighting
+# extension is built for JupyterLab 4).
+lab = ["jupyterlab>=4,<5"]
 # The Mathcad-style worksheet front end (`python -m utils.worksheet`):
 # a local web server, a kernel of its own, and notebooks on disk.
 worksheet = ["ipykernel>=6,<8", "jupyter_client>=7", "tornado>=6.1", "nbformat>=5,<6"]
+# Everything, for a new user: JupyterLab, the worksheet and PDF
+# hardcopies (the `lab`, `worksheet` and `hardcopy` extras together).
+all = [
+    "jupyterlab>=4,<5",
+    "ipykernel>=6,<8", "jupyter_client>=7", "tornado>=6.1", "nbformat>=5,<6",
+    "nbconvert[webpdf]",
+]
 test = ["pytest>=8,<10", "mpmath>=1.3,<2", "pyzmq>=25", "scipy", "pandas", "nbclient>=0.10,<1", "nbformat>=5,<6", "ipykernel>=6,<8", "tornado>=6.1"]
 # PDF hardcopies via Chromium (`hardcopy()` in a notebook, or
 # `python hardcopy.py`).  After installing, run once:
@@ -53,7 +70,7 @@ edsl_pdf = "utils.print_exporter:EDSLPDFExporter"
 
 [project.scripts]
 # Same as `python -m utils.worksheet`.
-edsl-worksheet = "utils.worksheet.server:main"
+edsl-worksheet = "utils.worksheet:main"
 
 [project.urls]
 Homepage = "https://github.com/RichardThulstrup/engineering-dsl"

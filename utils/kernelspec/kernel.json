@@ -1,0 +1,8 @@
+{
+  "argv": ["python", "-m", "utils.vscode_kernel", "-f", "{connection_file}"],
+  "display_name": "Engineering DSL",
+  "language": "engineering-dsl",
+  "env": {
+    "MPLBACKEND": "module://matplotlib_inline.backend_inline"
+  }
+}

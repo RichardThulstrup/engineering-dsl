@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hmac
-import importlib.util
 import json
 import os
 import secrets
@@ -486,13 +485,6 @@ def main(argv=None):
         root, opened = target.parent, target.name
         if not root.is_dir():
             parser.error(f"folder not found: {root}")
-
-    # Neither is imported by the server before it is up (one is slow, the
-    # other is the kernel's), so say now if they are not there at all.
-    missing = [name for name in ("nbformat", "ipykernel") if importlib.util.find_spec(name) is None]
-    if missing:
-        parser.error("the worksheet needs " + " and ".join(missing)
-                     + ': pip install "engineering-dsl[worksheet]"')
 
     port = _free_port(args.port)
     config = Config(root, port, args.token or secrets.token_urlsafe(24),

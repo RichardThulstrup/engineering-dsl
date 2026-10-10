@@ -465,3 +465,23 @@ def test_the_app_window_prefers_an_installed_browser_to_one_on_the_path(tmp_path
     assert worksheet._app_window("http://127.0.0.1:1/") and started[-1][0] == str(on_path)
     on_path.unlink()                                # no such browser at all: the caller opens a tab
     assert not worksheet._app_window("http://127.0.0.1:1/") and len(started) == 2
+
+
+# ---------------------------------------------------------------------------
+# starting without the packages the worksheet needs
+# ---------------------------------------------------------------------------
+
+def test_a_missing_package_is_named_instead_of_a_traceback(monkeypatch):
+    import importlib.util
+    from utils import worksheet
+    from utils.worksheet import server
+
+    real = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec",
+                        lambda name, *more: None if name == "tornado" else real(name, *more))
+    monkeypatch.setattr(server, "main", lambda argv=None: pytest.fail("the server was started all the same"))
+    with pytest.raises(SystemExit) as stopped:
+        worksheet.main(["--no-browser"])
+    said, how = str(stopped.value).split("Install with:")
+    assert "needs tornado:" in said                         # what is missing, and only that
+    assert all(name in how for name in worksheet.NEEDS)     # and a command that brings all of it

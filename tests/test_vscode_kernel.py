@@ -22,6 +22,24 @@ def test_registration_uses_selected_python(tmp_path):
     assert EngineeringDSLKernel.language_info["name"] == "engineering-dsl"
 
 
+def test_the_kernel_shipped_with_the_package_is_the_one_registration_writes(tmp_path):
+    # utils/kernelspec/kernel.json is what a plain install puts where Jupyter
+    # finds it; Jupyter starts its "python" as the interpreter it runs on itself.
+    shipped = json.loads((ROOT / "utils/kernelspec/kernel.json").read_text(encoding="utf-8"))
+    written = json.loads((Path(install(user=False, prefix=str(tmp_path))) / "kernel.json").read_text(encoding="utf-8"))
+    assert shipped.pop("argv") == ["python", "-m", "utils.vscode_kernel", "-f", "{connection_file}"]
+    assert written.pop("argv") and shipped == written
+
+    notebook = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell(source)
+                                               for source in ("from utils.Engineer import *", "x := 2 V")])
+    manager = AsyncKernelManager(kernel_name="python3")
+    manager.kernel_spec.argv = [sys.executable, "-B", "-m", "utils.vscode_kernel", "-f", "{connection_file}"]
+    env = dict(os.environ, SYMBOL_PALETTE_EXE=os.devnull, PYTHONDONTWRITEBYTECODE="1", PYTHONPATH=str(ROOT),
+               MPLCONFIGDIR=str(tmp_path / "matplotlib"), IPYTHONDIR=str(tmp_path / "ipython"))
+    NotebookClient(notebook, km=manager, timeout=60).execute(cwd=str(tmp_path), env=env, cleanup_kc=True)
+    assert notebook.metadata.language_info.name == "engineering-dsl"
+
+
 def test_kernel_executes_equations_matrices_and_plots(tmp_path):
     sources = ["from utils.Engineer import *", """
 symbols: x
