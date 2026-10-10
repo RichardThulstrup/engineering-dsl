@@ -380,3 +380,98 @@ def test_roots_arrows_and_braces_end_at_their_box_while_a_page_is_printed(page_a
     assert page.evaluate(LONG_DRAWINGS) == drawn                 # and afterwards they are KaTeX's again
 
 
+BOXES = """() => [...document.querySelectorAll('.region')].map((r) => {
+    const box = r.getBoundingClientRect();
+    return {left: parseFloat(r.style.left), top: parseFloat(r.style.top), width: box.width, height: box.height};
+})"""
+TOOLS = "() => [...document.querySelectorAll('#arrange [data-cmd]')].filter((b) => !b.disabled).map((b) => b.dataset.cmd)"
+
+
+def test_a_selection_is_aligned_and_spaced_out_from_the_bar_and_the_menu(page_and_folder):
+    page, _ = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    paper = page.locator("#content").bounding_box()
+    for (x, y), line in (((40, 40), "k_one := 1"), ((300, 130), "k_two := 22.5/3"), ((170, 250), "k_three := 333.25 + k_one")):
+        page.mouse.click(paper["x"] + x, paper["y"] + y)
+        keys.type(line)
+        keys.press("Enter")
+        keys.press("Escape")
+    settled(page)
+    typed = page.evaluate(BOXES)
+    lefts = lambda: [box["left"] for box in page.evaluate(BOXES)]       # noqa: E731
+    tops = lambda: [box["top"] for box in page.evaluate(BOXES)]         # noqa: E731
+    assert len({box["left"] for box in typed}) == 3 and len({box["top"] for box in typed}) == 3
+
+    # The tools are there for as many regions as they need: none, three, one.
+    assert page.evaluate(TOOLS) == []
+    keys.press("Control+a")
+    assert len(page.evaluate(TOOLS)) == 8
+    page.click("#arrange [data-cmd='align-left']")
+    assert lefts() == [typed[0]["left"]] * 3 and tops() == [box["top"] for box in typed]
+    assert page.evaluate("!document.querySelector('#doc-dirty').hidden")
+    keys.press("Control+z")                                             # one step back, and all of it
+    assert page.evaluate(BOXES) == typed
+
+    keys.press("Control+a")
+    page.click("#arrange [data-cmd='align-right']")
+    rights = [box["left"] + box["width"] for box in page.evaluate(BOXES)]
+    assert max(rights) - min(rights) < 1 and abs(rights[0] - max(b["left"] + b["width"] for b in typed)) < 1
+    keys.press("Control+z")
+
+    # From the menu: evenly down.  The outer two stay; the one between has as
+    # much room above as below.
+    keys.press("Control+a")
+    page.click("#arrange-menu .menu-button")
+    page.click("#arrange-menu [data-cmd='spread-down']")
+    spread = page.evaluate(BOXES)
+    assert (spread[0]["top"], spread[2]["top"]) == (typed[0]["top"], typed[2]["top"])
+    above = spread[1]["top"] - (spread[0]["top"] + spread[0]["height"])
+    below = spread[2]["top"] - (spread[1]["top"] + spread[1]["height"])
+    assert abs(above - below) <= 1 and spread[1]["top"] != typed[1]["top"]
+    keys.press("Control+z")
+
+    # On one line: the tops agree, and a region that would lie on its
+    # neighbour has moved to the right of it.
+    keys.press("Control+a")
+    page.click("#arrange [data-cmd='align-top']")
+    row = sorted(page.evaluate(BOXES), key=lambda box: box["left"])
+    assert {box["top"] for box in row} == {typed[0]["top"]}
+    assert all(b["left"] >= a["left"] + a["width"] + 8 for a, b in zip(row, row[1:]))
+    keys.press("Control+z")
+
+    # One region alone is aligned on the page (680 wide), and only sideways.
+    page.locator(".region .grip").first.click()
+    assert page.evaluate(TOOLS) == ["align-left", "align-centre", "align-right"]
+    page.click("#arrange [data-cmd='align-centre']")
+    centred = page.evaluate(BOXES)[0]
+    assert abs(centred["left"] + centred["width"] / 2 - 340) <= 1 and centred["top"] == typed[0]["top"]
+    keys.press("Control+z")
+
+    # Across: the outer two stay, the middle one has as much room on its left as on its right.
+    keys.press("Control+a")
+    page.click("#arrange [data-cmd='align-top']")
+    page.click("#arrange [data-cmd='spread-across']")
+    across = sorted(page.evaluate(BOXES), key=lambda box: box["left"])
+    gaps = [b["left"] - (a["left"] + a["width"]) for a, b in zip(across, across[1:])]
+    assert abs(gaps[0] - gaps[1]) <= 1 and {box["top"] for box in across} == {typed[0]["top"]}
+
+
+def test_text_without_a_width_of_its_own_keeps_its_width_when_it_is_arranged(page_and_folder):
+    # Such a text region reaches to the edge of the page from wherever it
+    # starts: centred with others, it must not grow as it moves to the left.
+    page, folder = page_and_folder
+    cell = nbformat.v4.new_markdown_cell("A note", metadata={"edsl": {"x": 100, "y": 96}})        # no "w"
+    place = nbformat.v4.new_code_cell("k_one := 1", metadata={"edsl": {"x": 0, "y": 16}})
+    notebook = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell("from utils.Engineer import *"), place, cell])
+    notebook.metadata["edsl_worksheet"] = {"version": 1}
+    nbformat.write(notebook, str(folder / "placed.ipynb"))
+    page.goto(page.url.split("?")[0] + "?open=placed.ipynb")
+    page.click("#banner button:has-text('Calculate')")
+    settled(page)
+    text = page.evaluate(BOXES)[1]
+    assert (text["left"], round(text["width"])) == (100, 580)
+    page.keyboard.press("Control+a")
+    page.click("#arrange [data-cmd='align-centre']")
+    moved = page.evaluate(BOXES)[1]
+    assert (moved["left"], round(moved["width"])) == (50, 580)                 # centred between 0 and 680

@@ -12,6 +12,7 @@
 // places something (`freeze()`).
 
 import { $, clamp, el, snap, uid } from "./util.js";
+import { aligned, distributed, NEEDED } from "./arrange.js";
 import { SourceEditor } from "./editor.js";
 import { renderMarkdown } from "./markdown.js";
 import { notebookOutputs, outputsNode, renderItems, renderSource } from "./mathview.js";
@@ -51,6 +52,7 @@ export class Sheet {
   /**
    * @param {object} hooks
    *   changed({calc})          the document was modified
+   *   selection(count)         so many regions are selected now
    *   preview(region, source)  typeset this source (reply via setTypeset)
    *   highlight                (text, caret) => html
    *   settings()               {showResults, grid}
@@ -88,6 +90,7 @@ export class Sheet {
     this.regions = (doc.regions || []).map((data) => new Region(data));
     this.flow = this.regions.some((r) => r.y === null || r.x === null);
     this.selected.clear();
+    this.selectionChanged();
     this.history = [];
     this.future = [];
     for (const region of this.regions) this.mount(region);
@@ -165,6 +168,7 @@ export class Sheet {
     this.regions = next;
     this.flow = next.some((r) => r.y === null || r.x === null);
     this.selected.clear();
+    this.selectionChanged();
     this.layout();
     this.hooks.changed({ calc: true });
   }
@@ -435,13 +439,18 @@ export class Sheet {
       this.selected.add(region);
       region.el.classList.add("selected");
     }
-    this.crossEl.hidden = this.selected.size > 0;
+    this.selectionChanged();
   }
 
   toggle(region) {
     if (this.selected.delete(region)) region.el.classList.remove("selected");
     else { this.selected.add(region); region.el.classList.add("selected"); }
+    this.selectionChanged();
+  }
+
+  selectionChanged() {
     this.crossEl.hidden = this.selected.size > 0;
+    this.hooks.selection?.(this.selected.size);
   }
 
   // ====================================================================
@@ -687,7 +696,7 @@ export class Sheet {
   remove(region) {
     region.el.remove();
     this.regions = this.regions.filter((r) => r !== region);
-    this.selected.delete(region);
+    if (this.selected.delete(region)) this.selectionChanged();
   }
 
   // ====================================================================
@@ -744,23 +753,30 @@ export class Sheet {
     this.hooks.changed({ calc: false });
   }
 
-  align(axis) {
-    if (this.selected.size < 2) return;
+  /**
+   * Arrange the selection: align it by a side or by its middles ("left",
+   * "centre", "right", "top", "middle", "bottom"), or spread it out with
+   * equal space between the regions ("across", "down").  One region alone
+   * is aligned left, centre or right on the page.
+   */
+  arrange(how) {
+    const spread = how === "across" || how === "down";
+    if (this.selected.size < NEEDED[how]) return;
     this.checkpoint();
     this.move(() => {
       const group = this.order().filter((r) => this.selected.has(r));
-      if (axis === "row") {
-        const y = Math.min(...group.map((r) => r.dy));
-        let x = Math.min(...group.map((r) => r.dx));
-        for (const region of group.sort((a, b) => a.dx - b.dx)) {
-          region.y = y;
-          region.x = Math.max(region.dx, x);
-          x = snap(region.x + region.wpx + 2 * GAP + GRID / 2, GRID);
-        }
-      } else {
-        const x = Math.min(...group.map((r) => r.dx));
-        for (const region of group) { region.x = x; region.y = region.dy; }
-      }
+      const boxes = group.map((r) => ({ x: r.dx, y: r.dy, w: r.wpx, h: r.h }));
+      // (One pixel more than regions must keep between them: places are
+      // whole pixels, heights are not.)
+      const places = spread ? distributed(boxes, how === "across" ? "x" : "y", { gap: GAP + 1 })
+        : aligned(boxes, how, { pageWidth: CONTENT_W, gap: GAP });
+      group.forEach((region, i) => {
+        // A text region without a width of its own reaches to the edge of
+        // the page; moved sideways it keeps the width it is seen with.
+        if (region.kind === "text" && region.w == null && places[i].x !== boxes[i].x) region.w = Math.round(boxes[i].w);
+        region.x = clamp(places[i].x, 0, CONTENT_W - GRID);
+        region.y = Math.max(0, places[i].y);
+      });
     });
   }
 

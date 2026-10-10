@@ -34,8 +34,24 @@
       <hr>
       <button type="button" data-cmd="insert-space">Insert line at cursor<kbd>Ctrl+Enter</kbd></button>
       <button type="button" data-cmd="remove-space">Remove line at cursor<kbd>Ctrl+Backspace</kbd></button>
-      <button type="button" data-cmd="align-rows">Align selection in a row</button>
-      <button type="button" data-cmd="align-column">Align selection in a column</button>
+    </div>
+  </div>
+  <div class="menu" id="arrange-menu">
+    <button class="menu-button" type="button" aria-haspopup="true">Arrange</button>
+    <div class="menu-list" hidden>
+      <div class="menu-label">Align the selection by its</div>
+      <button type="button" data-cmd="align-left">Left edges</button>
+      <button type="button" data-cmd="align-centre">Centres</button>
+      <button type="button" data-cmd="align-right">Right edges</button>
+      <hr>
+      <button type="button" data-cmd="align-top">Tops</button>
+      <button type="button" data-cmd="align-middle">Middles</button>
+      <button type="button" data-cmd="align-bottom">Bottoms</button>
+      <hr>
+      <div class="menu-label">Space it out evenly</div>
+      <button type="button" data-cmd="spread-across">Across</button>
+      <button type="button" data-cmd="spread-down">Down</button>
+      <hr>
       <button type="button" data-cmd="split">Split region into statements</button>
     </div>
   </div>
@@ -93,6 +109,33 @@
   <button class="tool" type="button" data-cmd="toggle-palette" title="Symbols, functions and units (F2) — Ctrl+E searches them">
     <span class="glyph">Ω</span><span>Symbols</span>
   </button>
+  <div class="sep"></div>
+  <div id="arrange" role="group" aria-label="Arrange the selected regions">
+    <button class="tool icon" type="button" data-cmd="align-left" title="Align left edges — one region: to the left of the page" disabled>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1" width="1" height="14"/><rect x="4" y="3.5" width="9.5" height="3.5"/><rect x="4" y="9" width="6" height="3.5"/></svg>
+    </button>
+    <button class="tool icon" type="button" data-cmd="align-centre" title="Align centres — one region: centre it on the page" disabled>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="7.5" y="1" width="1" height="14"/><rect x="2.5" y="3.5" width="11" height="3.5"/><rect x="4.5" y="9" width="7" height="3.5"/></svg>
+    </button>
+    <button class="tool icon" type="button" data-cmd="align-right" title="Align right edges — one region: to the right of the page" disabled>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="13.5" y="1" width="1" height="14"/><rect x="2.5" y="3.5" width="9.5" height="3.5"/><rect x="6" y="9" width="6" height="3.5"/></svg>
+    </button>
+    <button class="tool icon" type="button" data-cmd="align-top" title="Align tops" disabled>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1.5" width="14" height="1"/><rect x="3.5" y="4" width="3.5" height="9.5"/><rect x="9" y="4" width="3.5" height="6"/></svg>
+    </button>
+    <button class="tool icon" type="button" data-cmd="align-middle" title="Align middles" disabled>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="7.5" width="14" height="1"/><rect x="3.5" y="2.5" width="3.5" height="11"/><rect x="9" y="4.5" width="3.5" height="7"/></svg>
+    </button>
+    <button class="tool icon" type="button" data-cmd="align-bottom" title="Align bottoms" disabled>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="13.5" width="14" height="1"/><rect x="3.5" y="2.5" width="3.5" height="9.5"/><rect x="9" y="6" width="3.5" height="6"/></svg>
+    </button>
+    <button class="tool icon" type="button" data-cmd="spread-across" title="Space out evenly across (three regions or more)" disabled>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="1" height="14"/><rect x="14" y="1" width="1" height="14"/><rect x="4" y="4" width="3" height="8"/><rect x="9" y="4" width="3" height="8"/></svg>
+    </button>
+    <button class="tool icon" type="button" data-cmd="spread-down" title="Space out evenly down (three regions or more)" disabled>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="14" height="1"/><rect x="1" y="14" width="14" height="1"/><rect x="4" y="4" width="8" height="3"/><rect x="4" y="9" width="8" height="3"/></svg>
+    </button>
+  </div>
 
   <div class="grow"></div>
   <div id="doc-title" title=""><span id="doc-name">Untitled</span><span id="doc-dirty" hidden> •</span></div>

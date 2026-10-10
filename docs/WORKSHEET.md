@@ -71,9 +71,28 @@ The white area is an A4 page. A red cross marks the cursor.
 
 A region that grows pushes the regions under it down rather than
 overlap them, and a region that fits on a page is never split across
-two (the dashed lines are the page breaks). *Edit → Align selection* lines regions up
-in a row or a column; *Edit → Split region into statements* turns a
-many-line region (a notebook cell, say) into one region per statement.
+two (the dashed lines are the page breaks). *Arrange → Split region
+into statements* turns a many-line region (a notebook cell, say) into
+one region per statement.
+
+### Arranging
+
+Select regions — drag across empty paper, or Ctrl+A for all — and
+line them up from the **Arrange** menu or the eight buttons in the bar
+(they light up when enough is selected):
+
+| Command | What it does |
+|---|---|
+| **Left edges**, **Centres**, **Right edges** | puts the selection on one vertical line: that of its own outline. Nothing moves up or down |
+| **Tops**, **Middles**, **Bottoms** | puts it on one horizontal line. Regions that would then lie on each other move to the right, clear of their neighbour |
+| **Space out evenly: Across**, **Down** | three regions or more: the outer two stay, the others get equal space between them (if there is too little room for that, the regions take the room they need) |
+
+With a single region selected, *Left edges*, *Centres* and *Right
+edges* align it on the page instead — *Centres* centres a plot or a
+heading. Ctrl+Z takes an arrangement back in one step. Regions are
+calculated in the order they are read, so arranging can change that
+order; the sheet then recalculates.
+
 
 A notebook that was never laid out — any existing notebook — opens with
 its cells one under the other and keeps flowing like that, growing and

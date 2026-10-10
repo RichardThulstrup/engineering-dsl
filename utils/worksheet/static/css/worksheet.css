@@ -59,6 +59,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tool.check { cursor: pointer; }
 .tool.check input { margin: 0; accent-color: var(--accent); }
 .tool.on { background: var(--accent-soft); }
+#arrange { display: flex; }
+.tool.icon { padding: 0 5px; }
+.tool.icon svg { width: 16px; height: 16px; }
 .menu-list {
   position: absolute; top: 31px; left: 0; z-index: 60; min-width: 250px; padding: 5px;
   background: #fff; border: 1px solid var(--line); border-radius: 7px;
@@ -70,6 +73,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: none; text-align: left; cursor: pointer; position: relative;
 }
 .menu-list button:hover { background: var(--accent-soft); }
+.menu-list button:disabled { color: #a9afb6; background: none; cursor: default; }
 .menu-list button[aria-checked="true"]::before {
   content: "✓"; position: absolute; left: 8px; color: var(--accent);
 }
@@ -94,10 +98,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* In a narrow window (half a screen, say) the tools give up their
    labels — their tooltips still name them — so the sheet's name stays
    readable. */
-@media (max-width: 1150px) {
+@media (max-width: 1400px) {
   .tool[data-cmd="insert-math"] span:not(.glyph),
   .tool[data-cmd="insert-text"] span:not(.glyph),
   .tool[data-cmd="toggle-palette"] span:not(.glyph) { display: none; }
+}
+@media (max-width: 1080px) {
+  #arrange, .sep:has(+ #arrange) { display: none; }     /* the Arrange menu has them too */
 }
 @media (max-width: 900px) {
   .tool[data-cmd="calc"] span, .tool[data-cmd="stop"] span { display: none; }

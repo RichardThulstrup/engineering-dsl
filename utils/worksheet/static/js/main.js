@@ -8,6 +8,7 @@ import { loadLibrary } from "./library.js";
 import { buildPanel } from "./panel.js";
 import { ask, browse, info } from "./dialogs.js";
 import { fitStrokes, restoreStrokes } from "./strokes.js";
+import { NEEDED } from "./arrange.js";
 
 const DEFAULTS = { showResults: "auto", grid: true };
 
@@ -39,6 +40,12 @@ const sheet = new Sheet({
   changed: ({ calc }) => {
     setDirty(true);
     if (calc) scheduleCalc();
+  },
+  selection: (count) => {
+    // Each arranging command is there once enough regions are selected.
+    for (const [how, needed] of Object.entries(NEEDED)) {
+      for (const button of document.querySelectorAll(`[data-cmd$="-${how}"]`)) button.disabled = count < needed;
+    }
   },
   preview: (region, source) => requestPreview(region, source),
 });
@@ -481,8 +488,7 @@ const COMMANDS = {
   delete: () => sheet.deleteSelected(),
   "insert-space": () => sheet.shiftBelow(24),
   "remove-space": () => sheet.shiftBelow(-24),
-  "align-rows": () => sheet.align("row"),
-  "align-column": () => sheet.align("column"),
+  ...Object.fromEntries(Object.keys(NEEDED).map((how) => [(NEEDED[how] < 3 ? "align-" : "spread-") + how, () => { sheet.arrange(how); sheet.focus(); }])),
   split: () => { if (!sheet.split()) toast("Select a calculated region with several statements."); },
   // F9 brings the sheet up to date (statements whose inputs are unchanged
   // are not run again); Ctrl+F9 forgets every earlier result first.
@@ -521,6 +527,7 @@ const HELP = [
     ["click a region", "edit it"],
     ["drag a region", "move it (or its blue grip while editing)"],
     ["drag over empty paper", "select regions; arrows nudge, Del deletes"],
+    ["Arrange menu", "line the selection up by its edges or middles, or space it out evenly"],
     ["Ctrl+Enter / Ctrl+Backspace", "open / close a line of space at the cursor"],
     ["Tab / Shift+Tab", "edit the next / previous region"],
   ]],

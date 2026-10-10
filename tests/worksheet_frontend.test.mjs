@@ -262,6 +262,34 @@ assert.deepEqual(blockPadding("Some text", ""), { lead: "\n\n", tail: "" });
 assert.deepEqual(blockPadding("Some text\n", "more"), { lead: "\n", tail: "\n\n" });
 assert.deepEqual(blockPadding("Some text\n\n", "\n\nmore"), { lead: "", tail: "" });
 
+// ---- arranging a selection --------------------------------------------------
+const { aligned, distributed, NEEDED } = await import(js("arrange.js"));
+const BOXES = [{ x: 40, y: 10, w: 100, h: 20 }, { x: 200, y: 50, w: 60, h: 40 }, { x: 120, y: 120, w: 30, h: 10 }];
+const xs = (places) => places.map((p) => p.x), ys = (places) => places.map((p) => p.y);
+// By a side or by the middle, on the selection's own outline (40 to 260 across, 10 to 130 down).
+assert.deepEqual(xs(aligned(BOXES, "left")), [40, 40, 40]);
+assert.deepEqual(xs(aligned(BOXES, "centre")), [100, 120, 135]);
+assert.deepEqual(xs(aligned(BOXES, "right")), [160, 200, 230]);
+assert.deepEqual(ys(aligned(BOXES, "right")), [10, 50, 120]);                    // and nothing moves up or down
+assert.deepEqual(ys(aligned(BOXES, "top")), [10, 10, 10]);
+assert.deepEqual(ys(aligned(BOXES, "middle")), [60, 50, 65]);
+assert.deepEqual(ys(aligned(BOXES, "bottom")), [110, 90, 120]);
+// On one line, a region that would lie on its neighbour moves right, clear of it.
+assert.deepEqual(xs(aligned(BOXES, "top", { gap: 8 })), [40, 200, 148]);
+assert.deepEqual(xs(aligned([BOXES[0], { ...BOXES[1], x: 150 }, BOXES[2]], "top", { gap: 8 })), [40, 186, 148]);
+// A region alone is aligned on the page.
+const ALONE = [{ x: 50, y: 5, w: 100, h: 20 }];
+assert.deepEqual(["left", "centre", "right"].map((how) => aligned(ALONE, how, { pageWidth: 680 })[0].x), [0, 290, 580]);
+assert.equal(aligned(ALONE, "centre", { pageWidth: 680 })[0].y, 5);
+// Spread out: the outer two stay, the space between neighbours is equal.
+assert.deepEqual(ys(distributed(BOXES, "y")), [10, 55, 120]);                    // 25 between each
+assert.deepEqual(xs(distributed(BOXES, "y")), [40, 200, 120]);
+assert.deepEqual(xs(distributed(BOXES, "x")), [40, 200, 155]);                   // 15 between each, in order from the left
+// Too little room for that: the regions take what they need, `gap` apart.
+const STACK = [{ x: 0, y: 0, w: 10, h: 30 }, { x: 0, y: 10, w: 10, h: 30 }, { x: 0, y: 20, w: 10, h: 30 }];
+assert.deepEqual(ys(distributed(STACK, "y", { gap: 9 })), [0, 39, 78]);
+assert.deepEqual(NEEDED, { left: 1, centre: 1, right: 1, top: 2, middle: 2, bottom: 2, across: 3, down: 3 });
+
 // ---- printing: KaTeX's long strokes, shortened ------------------------------
 // The real KaTeX draws roots, arrows and braces 400em long; shortened to
 // their box, each must be the same drawing at the end it is fastened by.
