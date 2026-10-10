@@ -10,7 +10,7 @@ import { ask, browse, info } from "./dialogs.js";
 import { fitStrokes, restoreStrokes } from "./strokes.js";
 import { NEEDED } from "./arrange.js";
 
-const DEFAULTS = { showResults: "auto", grid: true };
+const DEFAULTS = { showResults: "auto" };          // of a sheet: saved with it
 
 const state = {
   path: null,               // relative to the server's folder; null = never saved
@@ -19,6 +19,9 @@ const state = {
   trusted: true,            // false: a sheet not calculated on this machine yet
   preamble: null,
   settings: { ...DEFAULTS },
+  // How the user likes the page: kept by the server for this computer,
+  // not in the sheet (and not in the browser, whose storage goes by port).
+  prefs: { grid: false, symbols: false },
   dirty: false,
   kernel: "none",
   online: false,
@@ -355,6 +358,7 @@ function adopt(doc) {
   state.trusted = doc.trusted !== false;
   state.preamble = doc.preamble || null;
   state.settings = { ...DEFAULTS, ...(doc.settings || {}) };
+  delete state.settings.grid;           // sheets saved before the grid became a preference carry it
   state.calc = null;
   state.renders.clear();
   sheet.calculated = state.trusted;
@@ -445,11 +449,18 @@ async function save(as = false) {
 // ---------------------------------------------------------------------------
 
 function applySettings() {
-  $("#paper").classList.toggle("grid", Boolean(state.settings.grid));
+  $("#paper").classList.toggle("grid", state.prefs.grid);
   for (const mode of ["auto", "all", "explicit"]) {
     $(`[data-cmd="results-${mode}"]`).setAttribute("aria-checked", String(state.settings.showResults === mode));
   }
-  $('.menu-list [data-cmd="toggle-grid"]').setAttribute("aria-checked", String(Boolean(state.settings.grid)));
+  $('.menu-list [data-cmd="toggle-grid"]').setAttribute("aria-checked", String(state.prefs.grid));
+}
+
+/** A choice about the page itself: applied, and remembered for this computer. */
+function setPref(name, value) {
+  state.prefs[name] = value;
+  applySettings();
+  api("PUT", "/api/prefs", { [name]: value });
 }
 
 function setResults(mode) {
@@ -467,10 +478,10 @@ function searchSymbols() {
   palette.focusSearch();
 }
 
-function togglePalette() {
+function togglePalette({ remember = true } = {}) {
   const panel = $("#palette");
   panel.hidden = !panel.hidden;
-  localStorage.setItem("edsl-palette", panel.hidden ? "" : "1");
+  if (remember) setPref("symbols", !panel.hidden);
   if (panel.hidden) sheet.refocus();        // its search field may have had the keyboard
   $('.tool[data-cmd="toggle-palette"]').classList.toggle("on", !panel.hidden);
   $('.menu-list [data-cmd="toggle-palette"]').setAttribute("aria-checked", String(!panel.hidden));
@@ -498,9 +509,9 @@ const COMMANDS = {
   "stop-menu": () => conn.send({ op: "interrupt" }),
   "insert-math": () => sheet.create("math"),
   "insert-text": () => sheet.create("text"),
-  "toggle-palette": togglePalette,
+  "toggle-palette": () => togglePalette(),
   "search-symbols": searchSymbols,
-  "toggle-grid": () => { state.settings.grid = !state.settings.grid; applySettings(); setDirty(true); },
+  "toggle-grid": () => setPref("grid", !state.prefs.grid),
   "results-auto": () => setResults("auto"),
   "results-all": () => setResults("all"),
   "results-explicit": () => setResults("explicit"),
@@ -621,7 +632,6 @@ function bindChrome() {
   // The library (the palette's tabs of functions, units and templates)
   // comes separately: the keys work at once, and without it.
   loadLibrary().then(() => palette.refresh(), () => {});
-  if (localStorage.getItem("edsl-palette")) togglePalette();
 
   document.addEventListener("keydown", (event) => {
     if (!$("#overlay").hidden) return;
@@ -680,6 +690,12 @@ async function start() {
   }
   conn.connect();
   sheet.focus();
+  const chosen = await api("GET", "/api/prefs");
+  if (chosen.ok) {
+    Object.assign(state.prefs, chosen.data);
+    applySettings();
+    if (state.prefs.symbols && $("#palette").hidden) togglePalette({ remember: false });
+  }
 }
 
 start();

@@ -93,6 +93,10 @@ heading. Ctrl+Z takes an arrangement back in one step. Regions are
 calculated in the order they are read, so arranging can change that
 order; the sheet then recalculates.
 
+*View → Grid* shows a dotted grid to place regions by (it is never
+printed). Whether it is shown, and whether the symbol panel is open,
+is remembered on this computer for every sheet — it is your way of
+working, not part of a worksheet.
 
 A notebook that was never laid out — any existing notebook — opens with
 its cells one under the other and keeps flowing like that, growing and
@@ -317,6 +321,7 @@ the folder the server was started in.
 | `utils/worksheet/fingerprint.py` | "same value as last time?" for the reuse rules |
 | `utils/worksheet/mathrender.py` | transformed-Python AST → LaTeX |
 | `utils/worksheet/document.py` | `.ipynb` ⇄ worksheet document, trust |
+| `utils/worksheet/prefs.py` | what the user chose for the page (grid, symbol panel): a file in Jupyter's data folder, because a browser keeps its own storage per port |
 | `utils/worksheet/static/` | the front end: plain ES modules, no build step |
 | `utils/worksheet/make_library.py` | writes `static/data/library.json` — the symbol panel's library — from the Windows palette's list |
 

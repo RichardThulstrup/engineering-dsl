@@ -55,7 +55,7 @@ export class Sheet {
    *   selection(count)         so many regions are selected now
    *   preview(region, source)  typeset this source (reply via setTypeset)
    *   highlight                (text, caret) => html
-   *   settings()               {showResults, grid}
+   *   settings()               {showResults}
    */
   constructor(hooks) {
     this.hooks = hooks;

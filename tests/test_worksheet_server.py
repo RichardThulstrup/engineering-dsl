@@ -485,3 +485,27 @@ def test_a_missing_package_is_named_instead_of_a_traceback(monkeypatch):
     said, how = str(stopped.value).split("Install with:")
     assert "needs tornado:" in said                         # what is missing, and only that
     assert all(name in how for name in worksheet.NEEDS)     # and a command that brings all of it
+
+
+# ---------------------------------------------------------------------------
+# how the page is set up: kept on this computer, not in the sheet
+# ---------------------------------------------------------------------------
+
+def test_what_was_chosen_for_the_page_is_kept_for_the_next_server(server):
+    assert fetch(server, "/api/prefs", cookie=False)[0] == 403
+    assert fetch(server, "/api/prefs", cookie=False, method="PUT", body={"grid": True})[0] == 403
+    status, _, text = fetch(server, "/api/prefs")
+    assert status == 200 and json.loads(text) == {"grid": False, "symbols": False}        # no grid until asked for
+    # A choice is taken over; what is not a preference, or not of its kind, is not.
+    status, _, text = fetch(server, "/api/prefs", method="PUT", body={"grid": True, "theme": "dark", "symbols": "yes"})
+    assert status == 200 and json.loads(text) == {"grid": True, "symbols": False}
+    assert fetch(server, "/api/prefs", method="PUT", body=["grid"])[0] == 400
+    try:
+        # Another server on the same computer -- on another port, as a second
+        # window of the app is -- finds it.
+        with launch(server.folder) as other:
+            assert other.port != server.port
+            assert json.loads(fetch(other, "/api/prefs")[2]) == {"grid": True, "symbols": False}
+    finally:
+        fetch(server, "/api/prefs", method="PUT", body={"grid": False})
+    assert json.loads(fetch(server, "/api/prefs")[2])["grid"] is False

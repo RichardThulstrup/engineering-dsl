@@ -30,7 +30,7 @@ import tornado.httpserver
 import tornado.web
 import tornado.websocket
 
-from . import document
+from . import document, prefs
 from .session import KernelSession
 
 __all__ = ["main", "make_app", "Config"]
@@ -181,6 +181,24 @@ class _Info(_Base):
         self.require_auth()
         config = self.config
         self.json({"root": str(config.root), "name": config.root.name})
+
+
+class _Prefs(_Base):
+    """How the page is set up on this computer (see ``prefs``)."""
+
+    def get(self):
+        self.require_auth()
+        self.json(prefs.load())
+
+    def put(self):
+        self.require_auth()
+        try:
+            changes = json.loads(self.request.body.decode("utf-8"))
+        except ValueError:
+            changes = None
+        if not isinstance(changes, dict):
+            raise tornado.web.HTTPError(400, "a JSON object of preferences is expected")
+        self.json(prefs.save(changes))
 
 
 class _List(_Base):
@@ -377,6 +395,7 @@ def make_app(config: Config) -> tornado.web.Application:
     return tornado.web.Application([
         (r"/", _Index),
         (r"/api/info", _Info),
+        (r"/api/prefs", _Prefs),
         (r"/api/list", _List),
         (r"/api/doc", _Doc),
         (r"/api/trust", _Trust),

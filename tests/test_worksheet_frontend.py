@@ -457,6 +457,31 @@ def test_a_selection_is_aligned_and_spaced_out_from_the_bar_and_the_menu(page_an
     assert abs(gaps[0] - gaps[1]) <= 1 and {box["top"] for box in across} == {typed[0]["top"]}
 
 
+def test_the_grid_and_the_symbol_panel_are_as_the_user_left_them(page_and_folder):
+    # How the page is set up is the user's, not the sheet's: off until asked
+    # for, kept for the next time, and no change to the document.
+    page, _ = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    grid = "document.querySelector('#paper').classList.contains('grid')"
+    panel = "!document.querySelector('#palette').hidden"
+    assert not page.evaluate(grid) and not page.evaluate(panel)
+    page.click("#view-menu .menu-button")
+    page.click("#view-menu [data-cmd='toggle-grid']")
+    page.keyboard.press("F2")
+    assert page.evaluate(grid) and page.evaluate(panel)
+    assert page.evaluate("document.querySelector('#doc-dirty').hidden")
+    page.reload()
+    page.wait_for_function(f"{grid} && {panel}", timeout=30_000)        # as they were left
+    assert page.evaluate("document.querySelector('#view-menu [data-cmd=\"toggle-grid\"]').getAttribute('aria-checked')") == "true"
+    page.keyboard.press("F2")
+    page.click("#view-menu .menu-button")
+    page.click("#view-menu [data-cmd='toggle-grid']")
+    page.reload()
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    page.wait_for_timeout(300)
+    assert not page.evaluate(grid) and not page.evaluate(panel)
+
+
 def test_text_without_a_width_of_its_own_keeps_its_width_when_it_is_arranged(page_and_folder):
     # Such a text region reaches to the edge of the page from wherever it
     # starts: centred with others, it must not grow as it moves to the left.
