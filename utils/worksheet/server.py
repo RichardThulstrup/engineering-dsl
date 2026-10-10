@@ -440,13 +440,19 @@ def _free_port(preferred: int) -> int:
 
 
 def _app_window(url: str) -> bool:
-    """Open ``url`` in a chromeless browser window, if Edge or Chrome is found."""
-    candidates = [shutil.which(n) for n in ("msedge", "chrome", "google-chrome", "chromium")]
+    """Open ``url`` in a chromeless browser window, if Edge or Chrome is found.
+
+    A browser installed in the usual place comes first.  One that is merely
+    on the PATH is the last resort: on a developer's machine that is often
+    a build kept for automated tests (Chrome for Testing), years old.
+    """
+    candidates = []
     for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"),
                  os.environ.get("LocalAppData")):
         if base:
             candidates += [os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"),
                            os.path.join(base, "Google", "Chrome", "Application", "chrome.exe")]
+    candidates += [shutil.which(n) for n in ("msedge", "chrome", "google-chrome", "chromium")]
     for exe in candidates:
         if exe and os.path.isfile(exe):
             subprocess.Popen([exe, f"--app={url}"])

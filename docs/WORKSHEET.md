@@ -33,6 +33,20 @@ present wherever JupyterLab is installed; otherwise
 with pip (again, for an existing editable install: `pip install -e .`)
 also adds `edsl-worksheet`, which is the same command.
 
+### As an app (Windows)
+
+`--app` gives the sheet a window of its own, without the browser's tabs
+and address bar — in Edge, or in Chrome where Edge is not installed.
+For an icon to double-click, make a shortcut (right-click the desktop →
+New → Shortcut) with this as its location, the path being the one
+`where python` prints:
+
+    "C:\path\to\python.exe" -m utils.worksheet --app
+
+Then, in the shortcut's Properties, set *Start in* to the folder your
+sheets live in and *Run* to *Minimized*. The console window that stays
+minimized is the worksheet server: close it when you are done.
+
 ## The page
 
 The white area is an A4 page. A red cross marks the cursor.

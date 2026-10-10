@@ -437,3 +437,31 @@ def test_the_server_leaves_the_symbol_palette_alone_unless_started_with_its_opti
     assert not worksheet.Config(tmp_path, server.port, TOKEN).palette      # nor one set up in code
     with launch(tmp_path, "--palette") as with_palette:
         assert shown(socket_session(with_palette, asked)) == "'not set'"
+
+
+# ---------------------------------------------------------------------------
+# --app: the sheet in a window of its own
+# ---------------------------------------------------------------------------
+
+def test_the_app_window_prefers_an_installed_browser_to_one_on_the_path(tmp_path, monkeypatch):
+    # "chrome" on a developer's PATH may be a years-old build kept for automated tests.
+    from utils.worksheet import server as worksheet
+
+    installed = tmp_path / "Program Files" / "Google" / "Chrome" / "Application" / "chrome.exe"
+    on_path = tmp_path / "tools" / "chrome.exe"
+    for browser in (installed, on_path):
+        browser.parent.mkdir(parents=True)
+        browser.write_bytes(b"")
+    for name in ("ProgramFiles(x86)", "LocalAppData"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
+    monkeypatch.setattr(worksheet.shutil, "which", lambda name: str(on_path) if name == "chrome" else None)
+    started = []
+    monkeypatch.setattr(worksheet.subprocess, "Popen", started.append)      # recorded, not carried out
+
+    assert worksheet._app_window("http://127.0.0.1:1/?token=t")
+    assert started == [[str(installed), "--app=http://127.0.0.1:1/?token=t"]]
+    installed.unlink()                              # none installed: the one on the PATH will do
+    assert worksheet._app_window("http://127.0.0.1:1/") and started[-1][0] == str(on_path)
+    on_path.unlink()                                # no such browser at all: the caller opens a tab
+    assert not worksheet._app_window("http://127.0.0.1:1/") and len(started) == 2
