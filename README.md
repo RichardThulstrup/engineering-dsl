@@ -62,32 +62,69 @@ loaders and source semantics.
   page, formulas drawn built-up with their results beside them, and
   recalculation whenever something changes. See [Worksheet](#worksheet).
 
-## Quick start
+## Install
 
-Requires Python 3.x with Jupyter (developed and tested on Python 3.14).
+Nothing has to be on the machine beforehand — no Python, git or Jupyter.
+The steps are written for Windows, where the toolkit is developed; for
+other systems see [macOS and Linux](#macos-and-linux).
+
+**1. Python 3.14.** In a terminal (Start → type *Terminal*):
 
 ```bash
-git clone https://github.com/RichardThulstrup/engineering-dsl.git
-cd engineering-dsl
-pip install -e .
+winget install Python.Python.3.14
 ```
 
-(For a non-development install on a fresh machine, see
-[Installing on a fresh machine](#installing-on-a-fresh-machine) — a
-plain `pip install` also sets up the print/PDF exporters and the
-JupyterLab editor highlighting automatically.)
+or run the *Windows installer (64-bit)* from
+[python.org/downloads](https://www.python.org/downloads/) and tick
+*Add python.exe to PATH*. Then close the terminal and open a new one.
+Python 3.12 and 3.13 are fine too. Python 3.15 runs the toolkit, but in
+October 2026 JupyterLab could not yet be installed on it on Windows (one
+of its dependencies, `pywinpty`, had no build for 3.15): take 3.14.
 
-Then in a notebook started from the repo root (or any environment where the
-package is installed):
+**2. The toolkit.** On the
+[repository page](https://github.com/RichardThulstrup/engineering-dsl)
+choose **Code → Download ZIP** and unpack it — or, with git,
+`git clone https://github.com/RichardThulstrup/engineering-dsl.git`.
+The folder holds the toolkit with its manuals and examples.
+
+**3. Install it.** Open a terminal in that folder (in Explorer:
+right-click the folder → *Open in Terminal*) and run
+
+```bash
+python -m pip install ".[all]"
+```
+
+This takes a few minutes: it downloads JupyterLab and everything else
+the toolkit and its worksheet use. If `python` is not found, write `py`
+in its place.
+
+**4. Use it.** In the same terminal,
+
+```bash
+python -m jupyterlab
+```
+
+opens JupyterLab in the browser: open
+[DSL_Examples.ipynb](DSL_Examples.ipynb) there and run its cells. Or
+start the same toolkit as a [worksheet](#worksheet):
+
+```bash
+python -m utils.worksheet Worksheet_Example.ipynb
+```
+
+[More about installing](#more-about-installing) lists what step 3 set
+up, the optional parts (PDF output, the symbol palette, VS Code), how to
+update, and the set-up for development.
+
+A notebook of your own starts with one line in its first cell:
 
 ```python
 from utils.Engineer import *
 ```
 
 That one import activates the unit environment, installs the notebook transformer,
-and loads the physical constants. The bundled example notebooks use the older
-notation: add `set_syntax_mode("legacy")` to their setup cell when running them
-with this version. See it in action:
+and loads the physical constants; the notation works from the next cell on.
+See it in action:
 
 - **[DSL_Examples.ipynb](DSL_Examples.ipynb)** — a gallery of one-cell
   examples (electrical, mechanical, fluids, plotting, matrices, radix, …).
@@ -281,14 +318,16 @@ ships two replacements that work out of the box:
   next to it (`hardcopy('DSL_Manual.ipynb')` to pick another). It warns
   when the saved file has no outputs; `hardcopy(execute=True)` runs the
   notebook fresh during export instead of relying on what was saved.
-  PDF output needs a one-time install:
+  PDF output needs a browser to print with, fetched once:
 
   ```bash
-  pip install "engineering-dsl[hardcopy]"     # or: pip install "nbconvert[webpdf]"
-  playwright install chromium
+  python -m playwright install chromium
   ```
 
-  Without it, `hardcopy()` falls back to a standalone `.html`.
+  (Playwright itself came with step 3 of [Install](#install); where
+  the toolkit was installed without the `all` extra, first run
+  `python -m pip install "nbconvert[webpdf]"`.) Without it, `hardcopy()`
+  falls back to a standalone `.html`.
 
 For batch exports of all the manuals (HTML + GitHub-renderable Markdown
 + PDF in one go, executed once per notebook), use
@@ -321,8 +360,9 @@ live syntax checks against the actual transformer. Use its **Engineering DSL**
 Jupyter kernel so Pylance does not try to parse DSL symbols as ordinary Python.
 Normal Python files and notebooks retain Pylance.
 
+With the toolkit [installed](#install), in its folder:
+
 ```sh
-pip install -e ".[notebook]"
 python -m utils.vscode_kernel --install --user
 python vscode-engineering-dsl/build_vsix.py
 code --install-extension vscode-engineering-dsl/dist/engineering-dsl-0.1.0.vsix
@@ -348,63 +388,129 @@ After changing the setting, restart the **JupyterLab server**, then reopen
 **Render with Voilà**. See [the Voilà guide](docs/VOILA.md) for configuration
 outside the project directory and troubleshooting.
 
-## Installing on a fresh machine
+## More about installing
 
-Everything a new user needs, end to end:
+### What step 3 sets up
+
+| Piece | Check |
+|---|---|
+| DSL + units + sig-figs + sympy bridge | `from utils.Engineer import *` runs |
+| JupyterLab, with live editor highlighting (a prebuilt extension, bundled) | `python -m jupyter labextension list` shows `jupyterlab-edsl-highlight … enabled ok` |
+| The *Engineering DSL* notebook kernel beside the ordinary *Python 3* one. Either runs the DSL; some of the bundled notebooks were saved with the first | `python -m jupyter kernelspec list` shows `engineering-dsl` |
+| `edsl_print` / `edsl_pdf` exporters | *File → Save and Export Notebook As* shows *Edsl_print* |
+| Worksheet front end | `python -m utils.worksheet` opens a sheet in the browser |
+
+Not part of step 3, being large or for Windows only:
+
+| Piece | How | Check |
+|---|---|---|
+| `hardcopy()` PDF output | `python -m playwright install chromium` (about 700 MB on disk) — see [Printing and PDFs](#printing-and-pdfs) | `hardcopy()` produces a `.pdf`, not `.html` |
+| Symbol palette (Windows) | see [Symbol palette app](#symbol-palette-app) | the palette opens when a notebook imports the toolkit |
+| VS Code support | see [Editor support (VS Code)](#editor-support-vs-code) | the *Engineering DSL* kernel is offered for notebooks |
+
+### Without the folder
 
 ```bash
-# 1. The toolkit — also registers the edsl_print / edsl_pdf exporters
-#    (entry points) and installs the JupyterLab highlighting extension
-#    (prebuilt, bundled in the package):
-pip install git+https://github.com/RichardThulstrup/engineering-dsl.git
-
-# 2. PDF hardcopies (optional — print_view()'s browser printing works
-#    without it; hardcopy() falls back to HTML):
-pip install "engineering-dsl[hardcopy]"
-playwright install chromium
+python -m pip install "engineering-dsl[all] @ https://github.com/RichardThulstrup/engineering-dsl/archive/refs/heads/main.zip"
 ```
 
-Then start JupyterLab and put `from utils.Engineer import *` in the
-first cell. Checklist of what each piece gives you:
+installs the same as step 3 straight from GitHub, without the manuals
+and examples. The extras are `lab` (JupyterLab), `worksheet`,
+`hardcopy` and `all` (the three together); with none of them only the
+toolkit itself is installed. The project is not on PyPI, so give pip
+the folder or this address: `pip install engineering-dsl` finds nothing.
 
-| Piece | Installed by | Check |
-|---|---|---|
-| DSL + units + sig-figs + sympy bridge | step 1 | `from utils.Engineer import *` runs |
-| `edsl_print` / `edsl_pdf` exporters | step 1 (entry points) | `jupyter nbconvert --list-exporters` lists them; *File → Save and Export Notebook As* shows *Edsl_print* |
-| Live editor highlighting | step 1 (bundled labextension) | `jupyter labextension list` shows `jupyterlab-edsl-highlight` |
-| `hardcopy()` PDF output | step 2 | `hardcopy()` produces a `.pdf`, not `.html` |
-| Worksheet front end | step 1, plus `pip install "engineering-dsl[worksheet]"` where Jupyter is not already installed | `python -m utils.worksheet` opens a sheet in the browser |
-| Symbol palette (optional, Windows) | download from [Releases](https://github.com/RichardThulstrup/engineering-dsl/releases), place per [Symbol palette app](#symbol-palette-app) | palette auto-launches on import |
+### Updating
 
-Two caveats worth knowing:
+Download the ZIP again (or `git pull`) and repeat step 3 in the new
+folder. Restart JupyterLab and any worksheet afterwards.
 
-- **Editable installs** (`pip install -e .`) do *not* install the
-  bundled labextension (pip skips `data_files` for editables). For a
-  development setup, copy it once into a Jupyter data path — see
-  [jupyterlab-edsl-highlight/README.md](jupyterlab-edsl-highlight/README.md).
-- The exporters and highlighting install **per Python environment**;
-  if JupyterLab runs from a different environment than the one you
-  installed into, install there instead.
+### macOS and Linux
+
+The toolkit is developed and tested on Windows, and the symbol palette
+exists only there. Elsewhere the steps are the same with `python3`
+(3.12 or newer) — and with a virtual environment, since most systems do
+not let pip install into the Python they come with:
+
+```bash
+python3 -m venv ~/edsl
+source ~/edsl/bin/activate
+python -m pip install ".[all]"      # in the unpacked folder
+```
+
+Activate the environment again in every new terminal before
+`python -m jupyterlab` or `python -m utils.worksheet`.
+
+### For development
+
+```bash
+python -m pip install -e ".[all,test]"
+```
+
+makes the folder itself the installed package, so that edits take
+effect at once. An editable install leaves out the two things step 3
+places outside the package (pip skips `data_files` for editables):
+
+- the JupyterLab highlighting extension — copy it once into a Jupyter
+  data path, see
+  [jupyterlab-edsl-highlight/README.md](jupyterlab-edsl-highlight/README.md);
+- the *Engineering DSL* kernel — register it with
+  `python -m utils.vscode_kernel --install --user`.
+
+### Good to know
+
+- Everything installs **per Python environment**; if JupyterLab runs
+  from a different environment than the one you installed into, install
+  there instead.
+- The package is called `utils`. A file or folder of that name beside a
+  notebook of your own hides it, and the import then fails with
+  `No module named 'utils.Engineer'`.
 
 ## Symbol palette app
 
 `SymbolPaletteWinUI/` contains a WinUI 3 (Windows App SDK) floating symbol
 keyboard — see its [README](SymbolPaletteWinUI/README.md) for build
-instructions. If a built binary is placed at `utils/bin/SymbolPaletteWinUI.exe`
-it is auto-launched on import; otherwise the import stays silent.
-
-Set `ENGINEER_HEADLESS=1` in the environment to import the toolkit without
-starting the palette. Batch exports (`hardcopy`) and the
-[worksheet](docs/WORKSHEET.md) do this for the kernels they start — the
-worksheet has the palette's library in its own symbol panel; start it with
-`--palette` to have the palette as well. `launch_palette()` starts it by hand.
+instructions. It is optional, and the worksheet does not use it: the
+worksheet has the palette's library in its own symbol panel.
 
 A prebuilt Windows x64 build is attached to the
 [latest release](https://github.com/RichardThulstrup/engineering-dsl/releases/latest)
-as `SymbolPaletteWinUI-win-x64.tar.xz` — extract it (`tar -xf …`, built into
-Windows 10+) and move the extracted folder's contents into `utils/bin/`. It vendors
-[MathLive](https://cortexjs.io/mathlive/) (MIT) and the KaTeX fonts (MIT) for
-its formula editor.
+as `SymbolPaletteWinUI-win-x64.tar.xz`. To use it:
+
+1. It runs on two Microsoft runtimes that not every Windows has —
+   .NET 8 and the Windows App Runtime 1.8:
+
+   ```bash
+   winget install Microsoft.DotNet.Runtime.8
+   winget install Microsoft.WindowsAppRuntime.1.8
+   ```
+
+2. Download the archive and unpack it (`tar -xf SymbolPaletteWinUI-win-x64.tar.xz`;
+   `tar` is part of Windows 10 and later). Put the `SymbolPaletteWinUI`
+   folder that comes out of it where it can stay.
+
+3. Tell the toolkit where it is, with the folder's own path:
+
+   ```bash
+   setx SYMBOL_PALETTE_EXE "C:\path\to\SymbolPaletteWinUI\SymbolPaletteWinUI.exe"
+   ```
+
+   and start JupyterLab from a new terminal. From then on the palette
+   opens whenever a notebook imports the toolkit.
+
+In a [development set-up](#for-development) the palette can instead go
+inside the folder: a binary at `utils/bin/SymbolPaletteWinUI.exe` is
+found without the variable. If neither is there, the import stays
+silent.
+
+Set `ENGINEER_HEADLESS=1` in the environment to import the toolkit without
+starting the palette. Batch exports (`hardcopy`) and the
+[worksheet](docs/WORKSHEET.md) do this for the kernels they start; start
+the worksheet with `--palette` to have the palette as well.
+`launch_palette()` starts it by hand.
+
+The palette vendors [MathLive](https://cortexjs.io/mathlive/) (MIT) and
+the KaTeX fonts (MIT) for its formula editor.
 
 ## Running the tests
 

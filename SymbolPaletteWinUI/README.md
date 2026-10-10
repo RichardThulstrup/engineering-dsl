@@ -11,6 +11,17 @@ A WinUI 3 / Windows App SDK conversion of the Python Symbol Palette.
 
 The project is configured as an unpackaged desktop EXE using Windows App SDK 1.8.260416003.
 
+## Running a build
+
+The build is framework-dependent: the machine it runs on needs the
+.NET 8 runtime and the Windows App Runtime 1.8, which are not part of
+every Windows installation:
+
+```
+winget install Microsoft.DotNet.Runtime.8
+winget install Microsoft.WindowsAppRuntime.1.8
+```
+
 ## Current behavior
 
 This polished version removes the debugging insertion toggles from the UI.

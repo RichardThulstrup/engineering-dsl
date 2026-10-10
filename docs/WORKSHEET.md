@@ -27,11 +27,13 @@ busy), `--no-browser`, `--app` (a chromeless Edge/Chrome window instead
 of a tab), `--palette` (also start the Windows symbol palette, which a
 sheet does not need: see *The library*).
 
-It needs `ipykernel`, `jupyter_client`, `tornado` and `nbformat` — all
-present wherever JupyterLab is installed; otherwise
-`pip install "engineering-dsl[worksheet]"`. Installing this version
-with pip (again, for an existing editable install: `pip install -e .`)
-also adds `edsl-worksheet`, which is the same command.
+The worksheet is installed with the toolkit's `all` extra — see
+[Install](../README.md#install) in the README. It needs `tornado`,
+`jupyter_client`, `nbformat` and `ipykernel`, all present wherever
+JupyterLab is installed; if one is missing, the command says which and
+how to add it. `edsl-worksheet` is the same command as
+`python -m utils.worksheet` (an editable install made before the
+worksheet existed gets it by running `pip install -e .` again).
 
 ### As an app (Windows)
 
