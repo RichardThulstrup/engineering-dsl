@@ -92,7 +92,7 @@ def default_notebooks() -> list[pathlib.Path]:
 def child_env() -> dict[str, str]:
     env = dict(os.environ)
     env["SYMBOL_PALETTE_EXE"] = ""        # falsy → no palette via env var
-    env["ENGINEER_HEADLESS"] = "1"        # honored by Engineer.py when it grows the guard
+    env["ENGINEER_HEADLESS"] = "1"        # Engineer.py: no automatic palette launch
     env["PYTHONIOENCODING"] = "utf-8"     # Unicode-heavy tracebacks on Windows consoles
     return env
 

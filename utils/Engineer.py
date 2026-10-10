@@ -60,6 +60,13 @@ Or call ``launch_palette('/path/to/binary')`` to bypass both lookups.
 If no binary can be found, the import is silent — no error, no log
 spam, just no palette.
 
+To import the toolkit *without* the palette even though a binary is
+there — a batch run, a test, a front end with a symbol panel of its own
+— set ``ENGINEER_HEADLESS=1`` in the environment before importing.
+``hardcopy`` and the worksheet (``utils.worksheet``) do this for the
+kernels they start.  Only the automatic launch is switched off:
+``launch_palette()`` still starts the palette when you call it.
+
 Re-importing
 ------------
 ``from utils.Engineer import *`` is idempotent within a session — running
@@ -331,7 +338,20 @@ __all__ = sorted(set(getattr(_cd, "__all__", []))
 # ---------------------------------------------------------------------------
 
 _PALETTE_ENV_VAR = "SYMBOL_PALETTE_EXE"
+_HEADLESS_ENV_VAR = "ENGINEER_HEADLESS"
 _palette_proc = None  # holds the Popen handle so the GC doesn't reap it
+
+
+def _headless() -> bool:
+    """True when the environment asks for an import that opens no window.
+
+    That is ``ENGINEER_HEADLESS`` set to anything but an empty string,
+    ``0``, ``false``, ``no`` or ``off``.  Whoever starts a kernel that
+    nobody will type into from the palette sets it: a batch export, a
+    test run, the worksheet front end (which has its own symbol panel).
+    """
+    value = _os.environ.get(_HEADLESS_ENV_VAR, "")
+    return value.strip().lower() not in ("", "0", "false", "no", "off")
 
 
 def _autodetect_palette_path() -> "str | None":
@@ -425,7 +445,9 @@ def launch_palette(exe_path: str = None) -> "subprocess.Popen | None":
 # binary is available, which is the right default for the headless or
 # CI case.  Set ``SYMBOL_PALETTE_EXE`` to override the auto-detected
 # location, or call ``launch_palette(path)`` explicitly to bypass both.
-if (_os.environ.get(_PALETTE_ENV_VAR) or _autodetect_palette_path()):
+# ``ENGINEER_HEADLESS=1`` switches this automatic launch off (and only
+# this: an explicit ``launch_palette()`` call is still carried out).
+if not _headless() and (_os.environ.get(_PALETTE_ENV_VAR) or _autodetect_palette_path()):
     launch_palette()
 
 
