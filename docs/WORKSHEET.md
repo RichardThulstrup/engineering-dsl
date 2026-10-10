@@ -261,6 +261,12 @@ margins, no grid or controls. Choose "Save as PDF" in the browser's
 dialog for a PDF. For the linear notebook rendering instead, the
 existing `print_view()` / `hardcopy()` work on the same file.
 
+While a page is printed, the bar of every root sign (and the shaft of
+every stretchy arrow and brace) is drawn only as long as its box.
+KaTeX draws them 400em long and hides the rest, which a screen and a
+PDF do faithfully; on paper such a bar has been seen running to the
+left of its root sign.
+
 ## Security
 
 The server executes code, so it is closed to everything but its own

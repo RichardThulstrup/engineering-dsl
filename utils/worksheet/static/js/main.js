@@ -7,6 +7,7 @@ import { makeHighlighter } from "./highlight.js";
 import { loadLibrary } from "./library.js";
 import { buildPanel } from "./panel.js";
 import { ask, browse, info } from "./dialogs.js";
+import { fitStrokes, restoreStrokes } from "./strokes.js";
 
 const DEFAULTS = { showResults: "auto", grid: true };
 
@@ -643,7 +644,8 @@ function bindChrome() {
   window.addEventListener("beforeunload", (event) => {
     if (state.dirty) { event.preventDefault(); event.returnValue = ""; }
   });
-  window.addEventListener("beforeprint", () => { sheet.commitEdit(); sheet.select([]); });
+  window.addEventListener("beforeprint", () => { sheet.commitEdit(); sheet.select([]); fitStrokes(); });
+  window.addEventListener("afterprint", restoreStrokes);
   document.fonts?.ready.then(() => sheet.layout());
 }
 

@@ -338,3 +338,44 @@ def test_text_regions_get_a_table_and_formulas_from_the_panel(page_and_folder):
     keys.press("Escape")
     page.wait_for_selector(".region.text .katex-display")
     assert page.evaluate("document.querySelectorAll('.region.text .katex-error').length") == 0
+
+
+LONG_DRAWINGS = r"""() => [...document.querySelectorAll('.katex svg')]
+    .filter((svg) => (svg.getAttribute('preserveAspectRatio') || '').endsWith('slice')).map((svg) => {
+        const box = svg.parentElement.getBoundingClientRect();
+        const height = Number(svg.getAttribute('viewBox').split(/\s+/)[3]);
+        const numbers = [...svg.querySelectorAll('path')].flatMap((p) => p.getAttribute('d').match(/\d+(?:\.\d+)?/g).map(Number));
+        return {width: svg.getAttribute('width'), span: Number(svg.getAttribute('viewBox').split(/\s+/)[2]),
+                box: Math.ceil(box.width * height / box.height), reach: Math.max(...numbers)};
+    })"""
+
+
+def test_roots_arrows_and_braces_end_at_their_box_while_a_page_is_printed(page_and_folder):
+    # KaTeX draws them 400em long and lets their box hide the rest.  On paper
+    # the bar of a root has been seen running to the left of its sign instead:
+    # at 600 dpi the stroke is longer than a 16-bit printer driver can count.
+    page, folder = page_and_folder
+    text = (r"Arrows $\overrightarrow{AB}$ and $\xleftrightarrow{abc}$, a brace $\overbrace{a+b+c}^{n}$, "
+            r"roots $\sqrt[3]{x^2+1}$ and $$\sqrt{1+\left(\frac{f}{f_c}\right)^2}$$")
+    nbformat.write(nbformat.v4.new_notebook(cells=[
+        nbformat.v4.new_code_cell("from utils.Engineer import *"), nbformat.v4.new_markdown_cell(text),
+        nbformat.v4.new_code_cell("g := 12.0/√(1 + (3.0/2)²)")]), str(folder / "strokes.ipynb"))
+    page.goto(page.url.split("?")[0] + "?open=strokes.ipynb")
+    page.click("#banner button:has-text('Calculate')")           # a sheet new to this computer
+    settled(page)
+
+    drawn = page.evaluate(LONG_DRAWINGS)
+    assert len(drawn) >= 8 and all(d["width"] == "400em" and d["reach"] >= 199_000 for d in drawn)
+
+    # Making a PDF is printing: the page hears "beforeprint", then "afterprint".
+    page.evaluate("(state) => window.addEventListener('beforeprint', () => { window.printed = eval(state)(); })",
+                  LONG_DRAWINGS)
+    page.pdf()
+    printed = page.evaluate("window.printed")
+    assert len(printed) == len(drawn)
+    # Each is drawn half an em (500 units) longer than its box is wide, whatever the zoom,
+    # and nothing reaches further.
+    assert all(p["span"] == p["box"] + 500 and p["reach"] <= p["span"] for p in printed), printed
+    assert page.evaluate(LONG_DRAWINGS) == drawn                 # and afterwards they are KaTeX's again
+
+

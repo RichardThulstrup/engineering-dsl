@@ -48,7 +48,7 @@ class Element {
   }
 }
 
-globalThis.document = { createElement: (tag) => new Element(tag), querySelector: () => null };
+globalThis.document = { createElement: (tag) => new Element(tag), querySelector: () => null, compatMode: "CSS1Compat" };
 globalThis.window = { katex: { render: (source, node) => { node.textContent = `[math:${source}]`; } } };
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -261,5 +261,67 @@ assert.deepEqual(blockPadding("", ""), { lead: "", tail: "" });
 assert.deepEqual(blockPadding("Some text", ""), { lead: "\n\n", tail: "" });
 assert.deepEqual(blockPadding("Some text\n", "more"), { lead: "\n", tail: "\n\n" });
 assert.deepEqual(blockPadding("Some text\n\n", "\n\nmore"), { lead: "", tail: "" });
+
+// ---- printing: KaTeX's long strokes, shortened ------------------------------
+// The real KaTeX draws roots, arrows and braces 400em long; shortened to
+// their box, each must be the same drawing at the end it is fastened by.
+const { createRequire } = await import("node:module");
+const katex = createRequire(import.meta.url)(path.join(here, "..", "utils", "worksheet", "static", "vendor", "katex", "katex.min.js"));
+const { shortenStroke } = await import(js("strokes.js"));
+
+/** The points a path visits, as [x, y] (control points included), from its `d`. */
+function visited(d) {
+  const points = [];
+  let x = 0, y = 0, start = [0, 0];
+  for (const [, command, rest] of d.matchAll(/([A-Za-z])([^A-Za-z]*)/g)) {
+    const n = (rest.match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi) || []).map(Number);
+    const relative = command === command.toLowerCase();
+    const step = { m: 2, l: 2, t: 2, h: 1, v: 1, c: 6, s: 4, q: 4, z: 0 }[command.toLowerCase()];
+    assert.ok(step !== undefined, `path command ${command}`);
+    if (step === 0) { [x, y] = start; continue; }
+    for (let i = 0; i + step <= n.length; i += step) {
+      const group = n.slice(i, i + step);
+      if (step === 1) {
+        if (command.toLowerCase() === "h") x = relative ? x + group[0] : group[0];
+        else y = relative ? y + group[0] : group[0];
+        points.push([x, y]);
+        continue;
+      }
+      for (let k = 0; k < step; k += 2) points.push(relative ? [x + group[k], y + group[k + 1]] : [group[k], group[k + 1]]);
+      [x, y] = points[points.length - 1];
+      if (command.toLowerCase() === "m" && i === 0) start = [x, y];
+    }
+  }
+  return points;
+}
+
+const FORMULAS = ["\\sqrt{x}", "\\sqrt[3]{x^2+1}", "\\sqrt{\\frac{a}{b}}", "\\sqrt{1+\\left(\\frac{f}{f_c}\\right)^2}",
+                  "\\sqrt{\\begin{matrix}a\\\\b\\\\c\\\\d\\end{matrix}}", "\\overrightarrow{AB}", "\\overleftarrow{AB}",
+                  "\\overleftrightarrow{AB}", "\\xrightarrow{abc}", "\\xleftarrow{abc}", "\\xleftrightarrow{abc}",
+                  "\\xRightarrow{abc}", "\\xhookrightarrow{abc}", "\\xtwoheadrightarrow{abc}", "\\xrightleftharpoons{abc}",
+                  "\\overbrace{a+b+c}", "\\underbrace{a+b+c}", "\\overgroup{AB}", "\\undergroup{AB}", "\\xlongequal{abc}"];
+const TO = 6000;            // units: a box six em wide
+let drawings = 0;
+for (const formula of FORMULAS) {
+  const html = katex.renderToString(formula, { output: "html", throwOnError: true });
+  for (const [, align, body] of html.matchAll(/<svg[^>]*width="400em"[^>]*preserveAspectRatio="(x\w+)YMin slice"[^>]*>([\s\S]*?)<\/svg>/g)) {
+    for (const [, d] of body.matchAll(/ d="([^"]*)"/g)) {
+      drawings += 1;
+      const before = visited(d), after = visited(shortenStroke(d, TO));
+      assert.equal(after.length, before.length, formula);
+      const reach = Math.max(...after.map(([x]) => Math.abs(x)));
+      assert.ok(reach <= TO + 1100, `${formula}: still reaches ${reach}`);     // (a bar is measured from its root sign, an em in)
+      // Seen from where the drawing is fastened -- its left end, its middle
+      // or its right end -- nothing within two em has moved.
+      const from = { xMin: [0, 0], xMid: [200000, TO / 2], xMax: [400000, TO] }[align];
+      const milli = (value) => Math.round(value * 1000) / 1000;
+      const near = (points, origin) => points.map(([x, y]) => [milli(x - origin), milli(y)]).filter(([x]) => Math.abs(x) < 2000);
+      assert.deepEqual(near(after, from[1]), near(before, from[0]), `${formula} (${align})`);
+      assert.ok(near(before, from[0]).length > 2, formula);
+    }
+  }
+}
+assert.ok(drawings >= 30, `only ${drawings} long drawings were checked`);
+assert.equal(shortenStroke("M95,702c-2.7,0,-7.17,-2.7,-13.5,-8H400000v40H845z", 400000), "M95,702c-2.7,0,-7.17,-2.7,-13.5,-8H400000v40H845z");
 
 console.log("FRONTEND_OK");
