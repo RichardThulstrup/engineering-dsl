@@ -130,7 +130,8 @@ function banner(kind, text, actions = []) {
   const message = text.includes("\n") ? el("pre", { text }) : el("span", { class: "msg", text });
   box.replaceChildren(message, ...actions.map((action) => {
     const button = el("button", { class: "btn" + (action.primary ? " primary" : ""), type: "button", text: action.label });
-    button.addEventListener("click", action.run);
+    // (The button goes with the banner: the keyboard returns to the sheet.)
+    button.addEventListener("click", () => { action.run(); sheet.focus(); });
     return button;
   }));
   box.hidden = false;

@@ -362,6 +362,7 @@ def test_roots_arrows_and_braces_end_at_their_box_while_a_page_is_printed(page_a
         nbformat.v4.new_code_cell("g := 12.0/√(1 + (3.0/2)²)")]), str(folder / "strokes.ipynb"))
     page.goto(page.url.split("?")[0] + "?open=strokes.ipynb")
     page.click("#banner button:has-text('Calculate')")           # a sheet new to this computer
+    assert page.evaluate("document.activeElement.id") == "sink"         # the keyboard is back on the sheet at once
     settled(page)
 
     drawn = page.evaluate(LONG_DRAWINGS)
