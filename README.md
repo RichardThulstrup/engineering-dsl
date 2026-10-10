@@ -58,6 +58,9 @@ loaders and source semantics.
 - **Symbol palette** — an optional native Windows app
   ([`SymbolPaletteWinUI/`](SymbolPaletteWinUI/)) that types `Ω ≈ ∠ √ μ ₀ ͵ …`
   into whatever has focus. The DSL works fine without it.
+- **Worksheet** — a Mathcad-style front end: regions placed freely on a
+  page, formulas drawn built-up with their results beside them, and
+  recalculation whenever something changes. See [Worksheet](#worksheet).
 
 ## Quick start
 
@@ -91,6 +94,41 @@ with this version. See it in action:
 - **[DSL_Manual.ipynb](DSL_Manual.ipynb)** — the full reference.
 - **[A_Practical_Manual_for_the_Engineering_DSL.ipynb](A_Practical_Manual_for_the_Engineering_DSL.ipynb)**
   — a task-oriented walkthrough.
+
+## Worksheet
+
+```bash
+python -m utils.worksheet                     # a new sheet
+python -m utils.worksheet DSL_Examples.ipynb  # any notebook, as a worksheet
+```
+
+![A worksheet: an RC low-pass filter](docs/worksheet.png)
+
+A page in the browser, used the way Mathcad is: click anywhere and
+type, and the line becomes a typeset formula with its value beside it.
+
+- **Free placement** — math and text regions sit where you put them, side
+  by side if you like; they are calculated top to bottom, left to right.
+- **Built-up notation, drawn from the code that runs** — fraction bars,
+  roots, real subscripts, upright units. `12 V / 3 A` shows as one
+  quantity over another because that is how it was understood.
+- **Live** — change a value and everything that depends on it follows;
+  what does not depend on it (a plot further down, say) is not run again.
+- **Results in place** — a calculated definition shows `= value` after
+  it; `x ▸ mV` shows a value in the unit you ask for; errors are flagged
+  on the statement that failed without stopping the rest.
+- **Still a notebook** — a worksheet is saved as `.ipynb` (positions in
+  cell metadata), so JupyterLab, VS Code, `hardcopy()` and GitHub all
+  read it, and every existing notebook opens as a worksheet.
+  [`Worksheet_Example.ipynb`](Worksheet_Example.ipynb) is the page above.
+
+In a math region `\ohm`, `\mu`, `\sqrt`, `\pm` … type their glyphs and
+`^2` types a power; F1 lists the keys. The symbol panel (F2) carries
+the symbol palette's whole library — functions, units, templates, each
+with a line of explanation — and Ctrl+E searches it; its Formula and
+Table tabs write formulas and tables into text regions. The guide —
+[docs/WORKSHEET.md](docs/WORKSHEET.md) — covers the calculation rules,
+printing, the file format and how the local server is kept private.
 
 ## Python compatibility and migration
 
@@ -335,6 +373,7 @@ first cell. Checklist of what each piece gives you:
 | `edsl_print` / `edsl_pdf` exporters | step 1 (entry points) | `jupyter nbconvert --list-exporters` lists them; *File → Save and Export Notebook As* shows *Edsl_print* |
 | Live editor highlighting | step 1 (bundled labextension) | `jupyter labextension list` shows `jupyterlab-edsl-highlight` |
 | `hardcopy()` PDF output | step 2 | `hardcopy()` produces a `.pdf`, not `.html` |
+| Worksheet front end | step 1, plus `pip install "engineering-dsl[worksheet]"` where Jupyter is not already installed | `python -m utils.worksheet` opens a sheet in the browser |
 | Symbol palette (optional, Windows) | download from [Releases](https://github.com/RichardThulstrup/engineering-dsl/releases), place per [Symbol palette app](#symbol-palette-app) | palette auto-launches on import |
 
 Two caveats worth knowing:
@@ -353,6 +392,12 @@ Two caveats worth knowing:
 keyboard — see its [README](SymbolPaletteWinUI/README.md) for build
 instructions. If a built binary is placed at `utils/bin/SymbolPaletteWinUI.exe`
 it is auto-launched on import; otherwise the import stays silent.
+
+Set `ENGINEER_HEADLESS=1` in the environment to import the toolkit without
+starting the palette. Batch exports (`hardcopy`) and the
+[worksheet](docs/WORKSHEET.md) do this for the kernels they start — the
+worksheet has the palette's library in its own symbol panel; start it with
+`--palette` to have the palette as well. `launch_palette()` starts it by hand.
 
 A prebuilt Windows x64 build is attached to the
 [latest release](https://github.com/RichardThulstrup/engineering-dsl/releases/latest)

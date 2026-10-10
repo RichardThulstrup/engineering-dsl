@@ -34,7 +34,10 @@ dependencies = [
 
 [project.optional-dependencies]
 notebook = ["ipykernel>=6,<8"]
-test = ["pytest>=8,<10", "mpmath>=1.3,<2", "pyzmq>=25", "scipy", "pandas", "nbclient>=0.10,<1", "nbformat>=5,<6", "ipykernel>=6,<8"]
+# The Mathcad-style worksheet front end (`python -m utils.worksheet`):
+# a local web server, a kernel of its own, and notebooks on disk.
+worksheet = ["ipykernel>=6,<8", "jupyter_client>=7", "tornado>=6.1", "nbformat>=5,<6"]
+test = ["pytest>=8,<10", "mpmath>=1.3,<2", "pyzmq>=25", "scipy", "pandas", "nbclient>=0.10,<1", "nbformat>=5,<6", "ipykernel>=6,<8", "tornado>=6.1"]
 # PDF hardcopies via Chromium (`hardcopy()` in a notebook, or
 # `python hardcopy.py`).  After installing, run once:
 #     playwright install chromium
@@ -48,12 +51,22 @@ hardcopy = ["nbconvert[webpdf]"]
 edsl_print = "utils.print_exporter:EDSLPrintExporter"
 edsl_pdf = "utils.print_exporter:EDSLPDFExporter"
 
+[project.scripts]
+# Same as `python -m utils.worksheet`.
+edsl-worksheet = "utils.worksheet.server:main"
+
 [project.urls]
 Homepage = "https://github.com/RichardThulstrup/engineering-dsl"
 Issues = "https://github.com/RichardThulstrup/engineering-dsl/issues"
 
 [tool.setuptools]
-packages = ["utils"]
+packages = ["utils", "utils.worksheet"]
 
 [tool.setuptools.package-data]
 utils = ["templates/edsl-print/*"]
+# The worksheet's front end, including the vendored KaTeX and MathLive
+# (both MIT; their licences travel with them in static/vendor/).
+"utils.worksheet" = [
+    "static/*", "static/css/*", "static/js/*", "static/data/*",
+    "static/vendor/katex/*", "static/vendor/katex/fonts/*", "static/vendor/mathlive/*",
+]

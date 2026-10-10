@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Worksheet</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231f3a93'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-style='italic' font-size='20' fill='white' text-anchor='middle'%3Ex%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="/static/css/worksheet.css">
+</head>
+<body>
+
+<header id="bar">
+  <div class="menu" id="file-menu">
+    <button class="menu-button" type="button" aria-haspopup="true">File</button>
+    <div class="menu-list" hidden>
+      <button type="button" data-cmd="new">New<kbd>Alt+N</kbd></button>
+      <button type="button" data-cmd="open">Open…<kbd>Ctrl+O</kbd></button>
+      <hr>
+      <button type="button" data-cmd="save">Save<kbd>Ctrl+S</kbd></button>
+      <button type="button" data-cmd="save-as">Save as…<kbd>Ctrl+Shift+S</kbd></button>
+      <hr>
+      <button type="button" data-cmd="print">Print…<kbd>Ctrl+P</kbd></button>
+    </div>
+  </div>
+  <div class="menu" id="edit-menu">
+    <button class="menu-button" type="button" aria-haspopup="true">Edit</button>
+    <div class="menu-list" hidden>
+      <button type="button" data-cmd="undo">Undo<kbd>Ctrl+Z</kbd></button>
+      <button type="button" data-cmd="redo">Redo<kbd>Ctrl+Y</kbd></button>
+      <hr>
+      <button type="button" data-cmd="select-all">Select all<kbd>Ctrl+A</kbd></button>
+      <button type="button" data-cmd="delete">Delete selection<kbd>Del</kbd></button>
+      <hr>
+      <button type="button" data-cmd="insert-space">Insert line at cursor<kbd>Ctrl+Enter</kbd></button>
+      <button type="button" data-cmd="remove-space">Remove line at cursor<kbd>Ctrl+Backspace</kbd></button>
+      <button type="button" data-cmd="align-rows">Align selection in a row</button>
+      <button type="button" data-cmd="align-column">Align selection in a column</button>
+      <button type="button" data-cmd="split">Split region into statements</button>
+    </div>
+  </div>
+  <div class="menu" id="view-menu">
+    <button class="menu-button" type="button" aria-haspopup="true">View</button>
+    <div class="menu-list" hidden>
+      <div class="menu-label">Show results</div>
+      <button type="button" data-cmd="results-auto" role="menuitemradio">Calculated values</button>
+      <button type="button" data-cmd="results-all" role="menuitemradio">Every definition</button>
+      <button type="button" data-cmd="results-explicit" role="menuitemradio">Only where asked</button>
+      <hr>
+      <button type="button" data-cmd="toggle-grid" role="menuitemcheckbox">Grid</button>
+      <button type="button" data-cmd="toggle-palette" role="menuitemcheckbox">Symbols<kbd>F2</kbd></button>
+      <button type="button" data-cmd="search-symbols">Search symbols and functions<kbd>Ctrl+E</kbd></button>
+      <hr>
+      <button type="button" data-cmd="zoom-in">Zoom in<kbd>Ctrl +</kbd></button>
+      <button type="button" data-cmd="zoom-out">Zoom out<kbd>Ctrl −</kbd></button>
+      <button type="button" data-cmd="zoom-reset">Actual size<kbd>Ctrl+0</kbd></button>
+    </div>
+  </div>
+  <div class="menu" id="calc-menu">
+    <button class="menu-button" type="button" aria-haspopup="true">Calculate</button>
+    <div class="menu-list" hidden>
+      <button type="button" data-cmd="calc">Calculate<kbd>F9</kbd></button>
+      <button type="button" data-cmd="calc-all">Recalculate everything<kbd>Ctrl+F9</kbd></button>
+      <button type="button" data-cmd="stop-menu">Stop<kbd>Esc</kbd></button>
+      <hr>
+      <button type="button" data-cmd="restart">Restart the kernel</button>
+    </div>
+  </div>
+  <div class="menu" id="help-menu">
+    <button class="menu-button" type="button" aria-haspopup="true">Help</button>
+    <div class="menu-list" hidden>
+      <button type="button" data-cmd="help">Keys and notation<kbd>F1</kbd></button>
+    </div>
+  </div>
+
+  <div class="sep"></div>
+  <button class="tool" type="button" data-cmd="calc" title="Calculate what is out of date (F9) — Ctrl+F9 recalculates everything">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg><span>Calculate</span>
+  </button>
+  <button class="tool" type="button" data-cmd="stop" title="Stop the calculation (Esc)" disabled>
+    <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1"/></svg><span>Stop</span>
+  </button>
+  <label class="tool check" title="Recalculate whenever something changes">
+    <input type="checkbox" id="auto-calc" checked><span>Automatic</span>
+  </label>
+  <div class="sep"></div>
+  <button class="tool" type="button" data-cmd="insert-math" title="New math region at the cursor — or just start typing">
+    <span class="glyph">x=</span><span>Math</span>
+  </button>
+  <button class="tool" type="button" data-cmd="insert-text" title='New text region at the cursor (")'>
+    <span class="glyph">T</span><span>Text</span>
+  </button>
+  <button class="tool" type="button" data-cmd="toggle-palette" title="Symbols, functions and units (F2) — Ctrl+E searches them">
+    <span class="glyph">Ω</span><span>Symbols</span>
+  </button>
+
+  <div class="grow"></div>
+  <div id="doc-title" title=""><span id="doc-name">Untitled</span><span id="doc-dirty" hidden> •</span></div>
+  <div class="grow"></div>
+  <div id="status" title=""><span id="status-dot"></span><span id="status-text">Starting…</span></div>
+</header>
+
+<div id="banner" hidden></div>
+
+<div id="work">
+  <main id="desk" tabindex="-1">
+    <div id="paper">
+      <div id="content">
+        <div id="cross" hidden></div>
+        <div id="band" hidden></div>
+        <textarea id="sink" aria-label="Worksheet input" autocomplete="off" autocapitalize="off"
+                  spellcheck="false" rows="1"></textarea>
+      </div>
+    </div>
+  </main>
+  <aside id="palette" hidden aria-label="Symbols"></aside>
+</div>
+
+<div id="overlay" hidden></div>
+<div id="toast" hidden></div>
+
+<script src="/static/vendor/katex/katex.min.js"></script>
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

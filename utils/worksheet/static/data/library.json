@@ -1,0 +1,824 @@
+{
+ "source": "SymbolPaletteWinUI/Services/SymbolRepository.cs",
+ "tabs": [
+  {"name": "Math", "sections": [
+   {"heading": "Constants & basic operators", "entries": [
+    {"text": "π", "desc": "pi (sympy.pi); ratio of circumference to diameter"},
+    {"text": "∞", "desc": "infinity"},
+    {"text": "·", "desc": "multiplication dot — same as * in DSL"},
+    {"text": "×", "desc": "multiplication cross — same as * in DSL"},
+    {"text": "÷", "desc": "division — same as /"},
+    {"text": "±", "desc": "plus-minus; in DSL produces ±-tolerance objects"},
+    {"text": "−", "desc": "Unicode minus (U+2212), wider than ASCII -"},
+    {"text": "≡", "desc": "symbolic equation — Eq(lhs, rhs); solve(x² ≡ 4, x)"},
+    {"text": "≟", "desc": "equality comparison — same as == in DSL (U+225F)"},
+    {"text": "＝", "desc": "fullwidth equals — same as == in DSL (U+FF1D)"},
+    {"text": "≈", "desc": "approximately equal — used for tolerant comparison"},
+    {"text": "≠", "desc": "not equal"},
+    {"text": "≤", "desc": "less than or equal"},
+    {"text": "≥", "desc": "greater than or equal"},
+    {"text": "=", "desc": "assignment in default DSL mode; use ≟, ＝ or == to compare, and ≡ or Eq(...) for symbolic equations"}
+   ]},
+   {"heading": "Logic", "entries": [
+    {"text": "∧", "desc": "logical and — DSL rewrites to Python 'and'"},
+    {"text": "∨", "desc": "logical or — rewrites to 'or'"},
+    {"text": "¬", "desc": "logical not — rewrites to 'not'"}
+   ]},
+   {"heading": "Powers, roots, exponents", "entries": [
+    {"text": "↑", "desc": "power arrow — math-textbook notation for exponent; 2 ↑ 10 = 1024 (rewrites to **)"},
+    {"text": "²", "desc": "superscript 2 — postfix square in DSL: x² = x**2"},
+    {"text": "³", "desc": "superscript 3 — postfix cube: x³ = x**3"},
+    {"text": "⁻¹", "desc": "inverse — x⁻¹ = 1/x"},
+    {"text": "⁻²", "desc": "x⁻² = 1/x²"},
+    {"text": "√", "desc": "square root glyph (use as prefix: √2)"},
+    {"text": "³√", "desc": "cube root (prefix: ³√27 = 3)"},
+    {"text": "∛", "desc": "cube root glyph — same as ³√: ∛27 = 3"},
+    {"text": "∜", "desc": "fourth root glyph — same as ⁴√: ∜16 = 2"},
+    {"text": "sin⁻¹()", "desc": "inverse function via superscript — sin⁻¹(x) is asin(x); works for cos, tan, sinh, cosh, tanh too"}
+   ]},
+   {"heading": "Common math functions", "entries": [
+    {"text": "sin()", "desc": "sine — radians by default; sympy-aware"},
+    {"text": "cos()", "desc": "cosine"},
+    {"text": "tan()", "desc": "tangent"},
+    {"text": "asin()", "desc": "arcsine — inverse sin"},
+    {"text": "acos()", "desc": "arccosine"},
+    {"text": "atan()", "desc": "arctangent"},
+    {"text": "atan2(, )", "desc": "two-argument atan; atan2(y, x)"},
+    {"text": "exp()", "desc": "e^x"},
+    {"text": "ln()", "desc": "natural logarithm — base e"},
+    {"text": "log₂()", "desc": "logarithm base 2"},
+    {"text": "log₁₀()", "desc": "logarithm base 10"},
+    {"text": "log(, )", "desc": "general-base log — log(value, base)"},
+    {"text": "Γ()", "desc": "gamma function — Γ(n+1) = n!"},
+    {"text": "sinh()", "desc": "hyperbolic sine — also cosh(), tanh(), asinh(), acosh(), atanh()"},
+    {"text": "hypot(, )", "desc": "√(a² + b² + …) — unit-aware: hypot(3.0 m, 4.0 m) = 5.0 m"},
+    {"text": "cbrt()", "desc": "cube root — unit-aware: cbrt(8.0 m³) = 2.0 m"},
+    {"text": "sign()", "desc": "signum: −1, 0 or 1"},
+    {"text": "clamp(, , )", "desc": "clip into [lo, hi] — clamp(x, lo, hi), units allowed"},
+    {"text": "round(, )", "desc": "round(x, n) — works on DSL values and keeps the unit"}
+   ]},
+   {"heading": "Calculus", "entries": [
+    {"text": "∂(, )", "desc": "partial derivative — ∂(f, x) is diff(f, x)"},
+    {"text": "∫(, )", "desc": "indefinite integral — ∫(f, x) is integrate(f, x)"},
+    {"text": "∫(, (, , ))", "desc": "definite integral — ∫(f, (x, a, b))"},
+    {"text": "∑", "desc": "summation — Σ(iterable), also Σ(k² for 1 ≤ k ≤ n)"},
+    {"text": "∏", "desc": "product — Π(iterable)"}
+   ]},
+   {"heading": "Fractions", "entries": [
+    {"text": "½", "desc": "one half"},
+    {"text": "⅓", "desc": "one third"},
+    {"text": "¼", "desc": "one quarter"},
+    {"text": "¾", "desc": "three quarters"},
+    {"text": "⅔", "desc": "two thirds"},
+    {"text": "⅛", "desc": "one eighth"},
+    {"text": "⅜", "desc": "three eighths"}
+   ]}
+  ]},
+  {"name": "Greek", "sections": [
+   {"heading": "Greek letters", "entries": [
+    {"text": "α", "desc": "alpha"},
+    {"text": "β", "desc": "beta"},
+    {"text": "γ", "desc": "gamma"},
+    {"text": "δ", "desc": "delta"},
+    {"text": "ε", "desc": "epsilon"},
+    {"text": "ζ", "desc": "zeta"},
+    {"text": "η", "desc": "eta"},
+    {"text": "θ", "desc": "theta"},
+    {"text": "ι", "desc": "iota"},
+    {"text": "κ", "desc": "kappa"},
+    {"text": "λ", "desc": "lambda"},
+    {"text": "μ", "desc": "mu"},
+    {"text": "ν", "desc": "nu"},
+    {"text": "ξ", "desc": "xi"},
+    {"text": "ο", "desc": "omicron"},
+    {"text": "π", "desc": "pi"},
+    {"text": "ρ", "desc": "rho"},
+    {"text": "σ", "desc": "sigma"},
+    {"text": "τ", "desc": "tau"},
+    {"text": "υ", "desc": "upsilon"},
+    {"text": "φ", "desc": "phi"},
+    {"text": "χ", "desc": "chi"},
+    {"text": "ψ", "desc": "psi"},
+    {"text": "ω", "desc": "omega"},
+    {"text": "Γ", "desc": "uppercase gamma — also gamma function in DSL"},
+    {"text": "Δ", "desc": "uppercase delta — common as a difference"},
+    {"text": "Θ", "desc": "uppercase theta"},
+    {"text": "Λ", "desc": "uppercase lambda"},
+    {"text": "Ξ", "desc": "uppercase xi"},
+    {"text": "Π", "desc": "uppercase pi — also product in DSL"},
+    {"text": "Σ", "desc": "uppercase sigma — also sum in DSL"},
+    {"text": "Φ", "desc": "uppercase phi"},
+    {"text": "Ψ", "desc": "uppercase psi"},
+    {"text": "Ω", "desc": "uppercase omega — also resistance unit (ohm)"}
+   ]}
+  ]},
+  {"name": "Sub/Sup", "sections": [
+   {"heading": "Subscript digits & operators", "entries": [
+    {"text": "₀"},
+    {"text": "₁"},
+    {"text": "₂"},
+    {"text": "₃"},
+    {"text": "₄"},
+    {"text": "₅"},
+    {"text": "₆"},
+    {"text": "₇"},
+    {"text": "₈"},
+    {"text": "₉"},
+    {"text": "₊", "desc": "subscript plus"},
+    {"text": "₋", "desc": "subscript minus"},
+    {"text": "₍", "desc": "subscript open-paren"},
+    {"text": "₎", "desc": "subscript close-paren"},
+    {"text": "ₐ", "desc": "subscript a"},
+    {"text": "ₑ", "desc": "subscript e"},
+    {"text": "ₕ", "desc": "subscript h"}
+   ]},
+   {"heading": "Subscript letters (indices)", "entries": [
+    {"text": "ᵢ", "desc": "subscript i — common index"},
+    {"text": "ⱼ", "desc": "subscript j — common index"},
+    {"text": "ₖ", "desc": "subscript k — common index"},
+    {"text": "ₗ", "desc": "subscript l"},
+    {"text": "ₘ", "desc": "subscript m"},
+    {"text": "ₙ", "desc": "subscript n — common index"},
+    {"text": "ₒ", "desc": "subscript o"},
+    {"text": "ₚ", "desc": "subscript p"},
+    {"text": "ᵣ", "desc": "subscript r"},
+    {"text": "ₛ", "desc": "subscript s"},
+    {"text": "ₜ", "desc": "subscript t"},
+    {"text": "ᵤ", "desc": "subscript u"},
+    {"text": "ᵥ", "desc": "subscript v"},
+    {"text": "ₓ", "desc": "subscript x"}
+   ]},
+   {"heading": "Superscript digits & operators", "entries": [
+    {"text": "⁰"},
+    {"text": "¹"},
+    {"text": "²"},
+    {"text": "³"},
+    {"text": "⁴"},
+    {"text": "⁵"},
+    {"text": "⁶"},
+    {"text": "⁷"},
+    {"text": "⁸"},
+    {"text": "⁹"},
+    {"text": "⁺", "desc": "superscript plus"},
+    {"text": "⁻", "desc": "superscript minus"},
+    {"text": "⁽", "desc": "superscript open-paren"},
+    {"text": "⁾", "desc": "superscript close-paren"}
+   ]},
+   {"heading": "Superscript letters", "entries": [
+    {"text": "ᵃ"},
+    {"text": "ᵇ"},
+    {"text": "ᶜ"},
+    {"text": "ᵈ"},
+    {"text": "ᵉ"},
+    {"text": "ᶠ"},
+    {"text": "ᵍ"},
+    {"text": "ʰ"},
+    {"text": "ⁱ"},
+    {"text": "ʲ"},
+    {"text": "ᵏ"},
+    {"text": "ˡ"},
+    {"text": "ᵐ"},
+    {"text": "ⁿ", "desc": "superscript n — typical exponent index"},
+    {"text": "ᵒ"},
+    {"text": "ᵖ"},
+    {"text": "ʳ"},
+    {"text": "ˢ"},
+    {"text": "ᵗ"},
+    {"text": "ᵘ"},
+    {"text": "ᵛ"},
+    {"text": "ʷ"},
+    {"text": "ˣ"},
+    {"text": "ʸ"},
+    {"text": "ᶻ"}
+   ]}
+  ]},
+  {"name": "Engineering", "sections": [
+   {"heading": "Operators & assignment", "entries": [
+    {"text": "‖", "desc": "parallel — DSL operator for parallel resistance: R1 ‖ R2"},
+    {"text": "∠", "desc": "angle / phase — DSL phasor operator: 5 ∠ 30°"},
+    {"text": "±", "desc": "plus-minus — produces a ±-tolerance Range"},
+    {"text": ":=", "desc": "math-style assignment — DSL rewrites to = (canonical form)"},
+    {"text": "←", "desc": "alternative assignment glyph — also rewrites to ="},
+    {"text": "→", "desc": "lambda / def return-type arrow"},
+    {"text": "▸", "desc": "display-preference operator — value ▸ target. Inert under arithmetic; sets how a value is shown (unit, integer base, or axis label). Apply on output, at the edge of an expression."},
+    {"text": "⌊", "desc": "left floor bracket"},
+    {"text": "⌋", "desc": "right floor bracket"},
+    {"text": "⌈", "desc": "left ceiling bracket"},
+    {"text": "⌉", "desc": "right ceiling bracket"},
+    {"text": "∑", "desc": "summation — n-ary sum operator (= Σ; both forms work in DSL)"},
+    {"text": "∏", "desc": "product — n-ary product operator (= Π; both forms work in DSL)"},
+    {"text": "Γ", "desc": "gamma function"},
+    {"text": "·", "desc": "multiplication dot"},
+    {"text": "×", "desc": "multiplication cross"},
+    {"text": "∥", "desc": "parallel (U+2225) — accepted as an alias of ‖"},
+    {"text": "≔", "desc": "assignment glyph (U+2254) — same as :="}
+   ]},
+   {"heading": "Intervals (±) and phasors (∠)", "entries": [
+    {"text": "100 Ω ± 5%", "desc": "a % (or ‰) tolerance is RELATIVE to the centre — (95 Ω ‥ 105 Ω)"},
+    {"text": "‥", "desc": "closed interval from its ends — (95 ‥ 105) is what ± prints; pasteable"},
+    {"text": "▸ plusminus", "desc": "show an interval as centre ± half-width: 100 Ω ± 5 Ω"},
+    {"text": "▸ percent", "desc": "show an interval as centre ± tolerance in %: 100 Ω ± 5.00%"},
+    {"text": "▸ permille", "desc": "show an interval as centre ± tolerance in ‰"},
+    {"text": "approx(, , sf=True)", "desc": "≈ to the stated precision — equal when both round to the smaller sig-fig count"},
+    {"text": "5.0 ∠ 30°", "desc": "phasor literal — prints back as 5.0 ∠ 30°"},
+    {"text": "polar()", "desc": "display a complex value in polar form (magnitude ∠ angle°)"},
+    {"text": "rect()", "desc": "display a complex value in rectangular a+bj form"},
+    {"text": "▸ deg", "desc": "read an angle (radians) back in degrees: asin(0.5) ▸ deg = 30 deg"}
+   ]},
+   {"heading": "Vectors and tables", "entries": [
+    {"text": "‖‖", "desc": "norm — put the vector between the bars: ‖v‖ (unit-aware)"},
+    {"text": "norm()", "desc": "Euclidean norm of a list, [] N array or sympy vector"},
+    {"text": "dot(, )", "desc": "dot product, unit-aware: dot([1,2,3] N, [4,5,6] m) = 32 J"},
+    {"text": "cross(, )", "desc": "cross product of two 3-vectors, unit-aware"},
+    {"text": "interp(, , )", "desc": "table lookup — interp(x, xs, ys), linear, unit-aware; extrapolate=True continues the ends"}
+   ]},
+   {"heading": "Prefixes & common glyphs", "entries": [
+    {"text": "Ω", "desc": "ohm — electrical resistance unit"},
+    {"text": "μ", "desc": "micro prefix (= 1e-6)"},
+    {"text": "ℏ", "desc": "reduced Planck constant (h-bar)"},
+    {"text": "ε", "desc": "small quantity / permittivity"}
+   ]},
+   {"heading": "Temperature — absolute scales", "entries": [
+    {"text": "°", "desc": "degree — postfix angle operator: 30° → radians. A BARE ° is an angle; °C/°F/°R are temperatures."},
+    {"text": "°C", "desc": "degree Celsius — absolute. 22 °C is stored as 295.15 K (offset applied)."},
+    {"text": "°F", "desc": "degree Fahrenheit — absolute. 72 °F is stored as 295.37 K."},
+    {"text": "°R", "desc": "degree Rankine — absolute. Rankine's zero is absolute zero, so °R = K × 5/9 (no offset)."}
+   ]},
+   {"heading": "Temperature — delta (difference) units", "entries": [
+    {"text": "ΔK", "desc": "delta-kelvin — a temperature DIFFERENCE of 1 K (no offset)."},
+    {"text": "ΔC", "desc": "delta-Celsius — a temperature DIFFERENCE; 1 ΔC = 1 K. Use for changes, e.g. ΔT := 60 ΔC."},
+    {"text": "ΔF", "desc": "delta-Fahrenheit — a temperature DIFFERENCE; 1 ΔF = 5/9 K."},
+    {"text": "ppm/°C", "desc": "per-degree coefficient — °C used as a unit (after /) is a delta. e.g. 100 ppm/°C · ΔT."}
+   ]}
+  ]},
+  {"name": "Sets", "sections": [
+   {"heading": "Membership", "entries": [
+    {"text": "∅", "desc": "empty set — translates to set() (NOT {}, which is an empty dict in Python)"},
+    {"text": "∈", "desc": "element of — A ∈ B becomes A in B"},
+    {"text": "∉", "desc": "not element of — A ∉ B becomes A not in B"},
+    {"text": "∋", "desc": "contains — A ∋ x becomes x in A (operands swapped)"},
+    {"text": "∌", "desc": "does not contain — A ∌ x becomes x not in A (swapped)"}
+   ]},
+   {"heading": "Operations", "entries": [
+    {"text": "∩", "desc": "intersection — A ∩ B becomes A & B"},
+    {"text": "∪", "desc": "union — A ∪ B becomes A | B"},
+    {"text": "∖", "desc": "set difference (U+2216 SET MINUS, not backslash) — A ∖ B becomes A - B"},
+    {"text": "△", "desc": "symmetric difference — A △ B becomes A ^ B"},
+    {"text": "⊕", "desc": "alternate symmetric-difference glyph — same as △"},
+    {"text": "|{1, 2, 3}|", "desc": "cardinality — |S| gives the number of elements. The |…| bars are abs() for a number, len() for a set."}
+   ]},
+   {"heading": "Subset / superset", "entries": [
+    {"text": "⊆", "desc": "subset or equal — A ⊆ B becomes A <= B"},
+    {"text": "⊇", "desc": "superset or equal — A ⊇ B becomes A >= B"},
+    {"text": "⊂", "desc": "proper subset (strict) — A ⊂ B becomes A < B"},
+    {"text": "⊃", "desc": "proper superset (strict) — A ⊃ B becomes A > B"}
+   ]},
+   {"heading": "Constructors", "entries": [
+    {"text": "set()", "desc": "empty set — same as ∅"},
+    {"text": "set([])", "desc": "set from iterable"},
+    {"text": "frozenset()", "desc": "immutable set"},
+    {"text": "{1, 2, 3}", "desc": "set literal — at least one element required"},
+    {"text": "{x for x ∈ S}", "desc": "set comprehension"},
+    {"text": "{x for x ∈ S if }", "desc": "set comprehension with filter"}
+   ]}
+  ]},
+  {"name": "Constants", "sections": [
+   {"heading": "Mathematical", "entries": [
+    {"text": "π", "desc": "pi ≈ 3.141 592 653 5 — circumference / diameter"},
+    {"text": "e", "desc": "Euler's number ≈ 2.718 281 8 — base of natural log"},
+    {"text": "i", "desc": "imaginary unit, √(−1)"},
+    {"text": "∞", "desc": "infinity"},
+    {"text": "nan", "desc": "not-a-number (float('nan'))"}
+   ]},
+   {"heading": "Fundamental physics", "entries": [
+    {"text": "c", "desc": "speed of light in vacuum = 299 792 458 m/s (exact)"},
+    {"text": "h", "desc": "Planck constant = 6.626 070 15 × 10⁻³⁴ J·s (exact)"},
+    {"text": "ℏ", "desc": "reduced Planck constant = h/(2π) ≈ 1.055 × 10⁻³⁴ J·s"},
+    {"text": "G", "desc": "gravitational constant ≈ 6.674 30 × 10⁻¹¹ m³/(kg·s²)"},
+    {"text": "k_B", "desc": "Boltzmann constant = 1.380 649 × 10⁻²³ J/K (exact)"},
+    {"text": "kᵦ", "desc": "Boltzmann constant (subscript form — same as k_B)"},
+    {"text": "N_A", "desc": "Avogadro number = 6.022 140 76 × 10²³ /mol (exact)"},
+    {"text": "Nᴬ", "desc": "Avogadro (superscript form — same as N_A)"},
+    {"text": "R_gas", "desc": "gas constant = N_A · k_B ≈ 8.314 J/(mol·K)"},
+    {"text": "Rᵍᵃˢ", "desc": "gas constant (superscript-gas form — same as R_gas)"},
+    {"text": "σ_SB", "desc": "Stefan-Boltzmann constant ≈ 5.670 × 10⁻⁸ W/(m²·K⁴)"},
+    {"text": "ε_0", "desc": "vacuum permittivity ≈ 8.854 × 10⁻¹² F/m"},
+    {"text": "εₒ", "desc": "vacuum permittivity (subscript-o form — same as ε_0)"},
+    {"text": "μ_0", "desc": "vacuum permeability ≈ 1.257 × 10⁻⁶ N/A²"},
+    {"text": "μₒ", "desc": "vacuum permeability (subscript-o form — same as μ_0)"},
+    {"text": "q_e", "desc": "elementary charge = 1.602 176 634 × 10⁻¹⁹ C (exact)"},
+    {"text": "qₑ", "desc": "elementary charge (subscript-e form — same as q_e)"},
+    {"text": "m_e", "desc": "electron mass ≈ 9.109 × 10⁻³¹ kg"},
+    {"text": "mₑ", "desc": "electron mass (subscript form — same as m_e)"},
+    {"text": "m_p", "desc": "proton mass ≈ 1.673 × 10⁻²⁷ kg"},
+    {"text": "mₚ", "desc": "proton mass (subscript form — same as m_p)"},
+    {"text": "m_n", "desc": "neutron mass ≈ 1.675 × 10⁻²⁷ kg"},
+    {"text": "Faraday", "desc": "Faraday constant = N_A · q_e ≈ 96 485 C/mol (F is the farad; F_c is an alias)"},
+    {"text": "α_fs", "desc": "fine-structure constant ≈ 7.297 × 10⁻³ (dimensionless; alpha_fs is an alias)"},
+    {"text": "a_0", "desc": "Bohr radius ≈ 52.92 pm"},
+    {"text": "μ_B", "desc": "Bohr magneton ≈ 9.274 × 10⁻²⁴ J/T"},
+    {"text": "Z_0", "desc": "impedance of free space ≈ 376.73 Ω (= μ_0·c)"},
+    {"text": "R_∞", "desc": "Rydberg constant ≈ 1.097 × 10⁷ /m (R_inf in Python)"},
+    {"text": "b_wien", "desc": "Wien displacement constant ≈ 2.898 × 10⁻³ m·K"}
+   ]},
+   {"heading": "Astronomical / astrophysical", "entries": [
+    {"text": "au", "desc": "astronomical unit ≈ 1.496 × 10¹¹ m — mean Sun-Earth distance"},
+    {"text": "ly", "desc": "light-year ≈ 9.461 × 10¹⁵ m"},
+    {"text": "parsec", "desc": "parsec ≈ 3.086 × 10¹⁶ m — distance at which 1 au subtends 1″"},
+    {"text": "M_sun", "desc": "solar mass ≈ 1.988 × 10³⁰ kg"},
+    {"text": "M_earth", "desc": "Earth mass ≈ 5.972 × 10²⁴ kg"},
+    {"text": "M_jupiter", "desc": "Jupiter mass ≈ 1.898 × 10²⁷ kg"},
+    {"text": "R_sun", "desc": "solar radius ≈ 6.957 × 10⁸ m"},
+    {"text": "R_earth", "desc": "Earth equatorial radius ≈ 6.371 × 10⁶ m"}
+   ]},
+   {"heading": "Engineering reference values", "entries": [
+    {"text": "g_0", "desc": "standard gravity = 9.806 65 m/s² (exact, by CGPM 1901 definition; defined in extra_units)"},
+    {"text": "g_n", "desc": "alternate spelling for g_0 (older physics-textbook convention)"},
+    {"text": "gₙ", "desc": "standard gravity (subscript-n form — same as g_n)"},
+    {"text": "T_0", "desc": "ice point = 273.15 K (defined)"},
+    {"text": "Tₒ", "desc": "ice point (subscript-o form — same as T_0)"},
+    {"text": "p_0", "desc": "standard atmosphere = 101 325 Pa (exact)"},
+    {"text": "20 °C", "desc": "room temperature as an absolute-temperature literal (293.15 K)"}
+   ]}
+  ]},
+  {"name": "Symbolic", "sections": [
+   {"heading": "Declarations", "entries": [
+    {"text": "symbols: ", "desc": "declare sympy symbols — symbols: x, y, R1..R4 (ranges expand; R₁ registers a subscripted name)"},
+    {"text": "positive_symbols: ", "desc": "declare symbols assumed positive"},
+    {"text": "real_symbols: ", "desc": "declare symbols assumed real"},
+    {"text": "integer_symbols: ", "desc": "declare symbols assumed integer"}
+   ]},
+   {"heading": "Symbolic algebra", "entries": [
+    {"text": "simplify()", "desc": "simplify a symbolic expression"},
+    {"text": "expand()", "desc": "expand products and powers; opposite of factor"},
+    {"text": "factor()", "desc": "factor a polynomial expression"},
+    {"text": "solve(, )", "desc": "solve an equation or system — solve(x² ≡ 4, x)"},
+    {"text": "solve([ ≡ ,  ≡ ], [, ])", "desc": "solve a system — solve([x + y ≡ 3, x − y ≡ 1], [x, y])"},
+    {"text": "nsolve(, , )", "desc": "numeric root — nsolve(expr, var, guess); DSL numbers accepted as the guess"},
+    {"text": "diff()", "desc": "symbolic derivative; diff(expr, variable) — or ∂(expr, x)"},
+    {"text": "integrate()", "desc": "symbolic integral; (expr, var) or (expr, (var, a, b)) — or ∫(expr, x)"},
+    {"text": "series()", "desc": "Taylor / Laurent series; series(expr, var, point, order)"},
+    {"text": "limit()", "desc": "symbolic limit; limit(expr, var, point)"},
+    {"text": ".subs(, )", "desc": "substitute symbols; expr.subs(x, value)"},
+    {"text": "lambdify(, )", "desc": "turn an expression into a fast numeric function — lambdify(x, expr)"},
+    {"text": "latex()", "desc": "LaTeX source of an expression"},
+    {"text": "nsimplify()", "desc": "recover exact forms from floats (0.5 → 1/2)"},
+    {"text": "Eq()", "desc": "symbolic equation — Eq(lhs, rhs), also written lhs ≡ rhs"},
+    {"text": "sym.collect(, )", "desc": "collect terms by powers of a variable (sym. prefix — not re-exported)"},
+    {"text": "sym.trigsimp()", "desc": "simplify trigonometric expressions (sym. prefix)"},
+    {"text": "sym.expand_trig()", "desc": "expand trig functions of sums (sym. prefix)"},
+    {"text": "Symbol()", "desc": "declare a single sympy symbol; x = Symbol('x') (prefer symbols: x)"},
+    {"text": "Rational()", "desc": "exact rational; Rational(1, 3) is 1/3 exactly"}
+   ]}
+  ]},
+  {"name": "Matrix", "sections": [
+   {"heading": "Construction", "entries": [
+    {"text": "[[1,2],[3,4]]", "desc": "a 2×2 matrix literal — list-of-lists is a real matrix"},
+    {"text": "[[1,2,3],[4,5,6]]", "desc": "a 2×3 matrix; rows must be equal length"},
+    {"text": "[[1],[2],[3]]", "desc": "a column vector (3×1)"}
+   ]},
+   {"heading": "Operations", "entries": [
+    {"text": "ᵀ", "desc": "transpose — append to a matrix: Mᵀ"},
+    {"text": ".det()", "desc": "determinant — M.det()"},
+    {"text": ".inv()", "desc": "inverse — M.inv()"},
+    {"text": ".T", "desc": "transpose (function form); same as the ᵀ superscript"},
+    {"text": ".eigenvals()", "desc": "eigenvalues as {value: multiplicity}"},
+    {"text": ".rank()", "desc": "rank of the matrix"},
+    {"text": ".trace()", "desc": "sum of the diagonal"},
+    {"text": "M⁻¹", "desc": "inverse via the superscript — M⁻¹ is M.inv(); M² is M·M"},
+    {"text": "|M|", "desc": "determinant via bars — |M| is M.det() (norm for a row/column vector)"},
+    {"text": "det()", "desc": "determinant, function form"},
+    {"text": "eye()", "desc": "identity matrix — eye(3)"},
+    {"text": "zeros(, )", "desc": "zero matrix — zeros(rows, cols); also ones(, ), diag(, , )"}
+   ]},
+   {"heading": "Indexing (2-D)", "entries": [
+    {"text": "M₁͵₂", "desc": "element at row 1, column 2 (zero-based) — the ͵ separates indices"},
+    {"text": "͵", "desc": "index separator (U+0375) — place between two subscripts: M₀͵₀"}
+   ]},
+   {"heading": "Display", "entries": [
+    {"text": "pp()", "desc": "typeset a matrix as a bracketed matrix in the notebook"},
+    {"text": "▸ hex", "desc": "show each cell in hex (display only; operations stay numeric)"}
+   ]}
+  ]},
+  {"name": "Plotting", "sections": [
+   {"heading": "Plot", "entries": [
+    {"text": "plot(, )", "desc": "plot paired data: plot(x, y). Unit-aware — axis labels follow the data."},
+    {"text": "plot()", "desc": "plot y-only — x defaults to the index 0, 1, 2, …"},
+    {"text": "plot(, , (, ))", "desc": "plot a symbolic expression swept over a range: plot(expr, var, (xmin, xmax))."},
+    {"text": "plot(, , fit=1)", "desc": "overlay a linear fit on the first paired-data series (fit=2 quadratic, etc.)."},
+    {"text": "plot(, , theme=\"darkgrid\")", "desc": "per-plot style — applied locally, does not affect later plots."},
+    {"text": ", (\"label\", \"o\")", "desc": "series label + matplotlib style string — 'o' markers, '--' dashed, …"},
+    {"text": "return_ax=True", "desc": "make plot() return the matplotlib Axes for further customisation."},
+    {"text": "plot(, [ ± ,  ± ] )", "desc": "a series of ± values draws error bars: plot(x, [1.0 ± 0.1, 2.1 ± 0.2] V)"}
+   ]},
+   {"heading": "Axes options", "entries": [
+    {"text": "logx=True", "desc": "logarithmic x axis"},
+    {"text": "logy=True", "desc": "logarithmic y axis"},
+    {"text": "loglog=True", "desc": "both axes logarithmic"},
+    {"text": "grid=True", "desc": "draw a grid (minor lines too on a log axis)"},
+    {"text": "xlim=(, )", "desc": "x-axis limits — unit-carrying ends are fine: xlim=(1 Hz, 100 kHz)"},
+    {"text": "ylim=(, )", "desc": "y-axis limits"},
+    {"text": "figsize=(, )", "desc": "figure size in inches — figsize=(6, 3)"},
+    {"text": "save=\"\"", "desc": "also save the figure to a file — save=\"plot.png\""}
+   ]},
+   {"heading": "Bode", "entries": [
+    {"text": "bode(, , (, ))", "desc": "Bode plot — bode(H, p, (f_min, f_max)); p is the Laplace variable, replaced by j·2π·f (s is the second, use p)"},
+    {"text": "bode(, , (, ), s=False)", "desc": "sweep the variable itself as ω (for an expression written with an explicit i·ω)"}
+   ]},
+   {"heading": "Fitting", "entries": [
+    {"text": "linefit(, )", "desc": "unit-aware linear fit — returns (slope, intercept) as dimensioned quantities."},
+    {"text": "polyfit(, , )", "desc": "unit-aware polynomial fit — polyfit(x, y, degree)."}
+   ]},
+   {"heading": "Themes", "entries": [
+    {"text": "list_themes()", "desc": "print every available plot theme alias."},
+    {"text": "theme=\"darkgrid\"", "desc": "dark background with a grid"},
+    {"text": "theme=\"whitegrid\"", "desc": "light background with a grid"},
+    {"text": "theme=\"ggplot\"", "desc": "ggplot-style"},
+    {"text": "theme=\"538\"", "desc": "FiveThirtyEight style"},
+    {"text": "theme=\"solarized\"", "desc": "Solarized palette"},
+    {"text": "theme=\"paper\"", "desc": "muted, print-friendly"},
+    {"text": "theme=\"presentation\"", "desc": "large elements for slides"},
+    {"text": "theme=\"colorblind\"", "desc": "colourblind-safe palette"}
+   ]},
+   {"heading": "Axis labels via ▸", "entries": [
+    {"text": "plot(, y ▸ μm)", "desc": "display that axis in a chosen unit (μm here)."},
+    {"text": "plot(expr, t ▸ ms, (, ))", "desc": "label a symbolic sweep axis — t ▸ ms gives a 't [ms]' axis, no conversion."},
+    {"text": "plot(x ▸ \"element\", )", "desc": "a bare string labels an axis that has no physical unit (a count, an index)."}
+   ]}
+  ]},
+  {"name": "ISO 286", "sections": [
+   {"heading": "Tolerance bands", "entries": [
+    {"text": "hole(, \"H7\")", "desc": "hole tolerance band as a Range of mm — hole(nominal, class). e.g. hole(25, \"H7\")."},
+    {"text": "shaft(, \"g6\")", "desc": "shaft tolerance band as a Range of mm — shaft(nominal, class). e.g. shaft(25, \"g6\")."}
+   ]},
+   {"heading": "Fit analysis", "entries": [
+    {"text": "fit(, \"H7\", \"g6\")", "desc": "analyse a pairing — fit(nominal, hole_class, shaft_class). Classifies clearance / transition / interference."},
+    {"text": ".kind", "desc": "fit kind — 'clearance', 'transition' or 'interference'."},
+    {"text": ".min_clearance", "desc": "smallest clearance (negative = interference)."},
+    {"text": ".max_clearance", "desc": "largest clearance."}
+   ]},
+   {"heading": "Tolerance formulas", "entries": [
+    {"text": "it_grade(, )", "desc": "IT-grade band width — it_grade(diameter, grade). e.g. it_grade(25, 7)."},
+    {"text": "tolerance_unit()", "desc": "the standard tolerance unit i for a given diameter."}
+   ]},
+   {"heading": "Common classes", "entries": [
+    {"text": "\"H7\"", "desc": "hole basis, grade 7 — the usual reference hole."},
+    {"text": "\"H8\"", "desc": "hole basis, grade 8 — a looser reference hole."},
+    {"text": "\"g6\"", "desc": "shaft, slight clearance — H7/g6 is a precise running fit."},
+    {"text": "\"h6\"", "desc": "shaft basis, grade 6 — zero upper deviation."},
+    {"text": "\"k6\"", "desc": "shaft, transition — H7/k6 may clear or interfere."},
+    {"text": "\"p6\"", "desc": "shaft, interference — H7/p6 is a press fit."},
+    {"text": "\"f7\"", "desc": "shaft, free running clearance."}
+   ]}
+  ]},
+  {"name": "Units", "sections": [
+   {"heading": "Length", "entries": [
+    {"text": "▸ nm", "desc": "nanometres"},
+    {"text": "▸ μm", "desc": "micrometres"},
+    {"text": "▸ mm", "desc": "convert to millimetres"},
+    {"text": "▸ cm", "desc": "convert to centimetres"},
+    {"text": "▸ m", "desc": "convert to metres"},
+    {"text": "▸ km", "desc": "convert to kilometres"},
+    {"text": "▸ in", "desc": "convert to inches (1 in = 25.4 mm exactly) — in is the inch after ▸ and in unit position"},
+    {"text": "▸ ft", "desc": "convert to feet (12 inches)"},
+    {"text": "▸ yd", "desc": "convert to yards (3 feet; yard is an alias)"},
+    {"text": "▸ mi", "desc": "convert to miles (5280 feet; mile is an alias)"},
+    {"text": "▸ nmi", "desc": "nautical miles (= 1852 m)"}
+   ]},
+   {"heading": "Writing a value (unit position)", "entries": [
+    {"text": "5 in", "desc": "in / min / h are the inch, minute and hour when they follow a number or a unit/ — elsewhere Python's in, min() and Planck's h"},
+    {"text": "90 km/h", "desc": "kilometres per hour — h after a unit/ is the hour"},
+    {"text": "20 L/min", "desc": "litres per minute — min after a unit/ is the minute"},
+    {"text": "3 h", "desc": "three hours (also 3 hr)"},
+    {"text": "lbf/in²", "desc": "pounds-force per square inch — the inch takes a superscript"},
+    {"text": "2500 mAh", "desc": "every unit exported by extra_units binds tightly to a preceding number"}
+   ]},
+   {"heading": "Mass", "entries": [
+    {"text": "▸ mg", "desc": "milligrams"},
+    {"text": "▸ g", "desc": "grams"},
+    {"text": "▸ kg", "desc": "kilograms"},
+    {"text": "▸ tonne", "desc": "metric tonnes (1000 kg) — the symbol t is left free for time"},
+    {"text": "▸ oz", "desc": "avoirdupois ounces (1 lb / 16)"},
+    {"text": "▸ lb", "desc": "avoirdupois pounds (= 0.453 592 37 kg, exact)"}
+   ]},
+   {"heading": "Force", "entries": [
+    {"text": "▸ μN", "desc": "micronewtons (strain-gauge scale)"},
+    {"text": "▸ mN", "desc": "millinewtons"},
+    {"text": "▸ N", "desc": "newtons — SI base derived (kg·m/s²)"},
+    {"text": "▸ kN", "desc": "kilonewtons (structural loads)"},
+    {"text": "▸ MN", "desc": "meganewtons"},
+    {"text": "▸ GN", "desc": "giganewtons (rocket-thrust scale)"},
+    {"text": "▸ dyn", "desc": "dynes (CGS, 10 μN)"},
+    {"text": "▸ lbf", "desc": "pounds-force (= lb × g_0)"},
+    {"text": "▸ kgf", "desc": "kilogram-force (legacy non-SI)"},
+    {"text": "▸ kip", "desc": "kilopound-force (1000 lbf, structural)"}
+   ]},
+   {"heading": "Torque (display-preserving)", "entries": [
+    {"text": "▸ N·m", "desc": "newton-metres — stays N·m, never J (Nm is an alias)"},
+    {"text": "▸ mN·m", "desc": "millinewton-metres (small motors)"},
+    {"text": "▸ kN·m", "desc": "kilonewton-metres (structural moments)"},
+    {"text": "▸ lbf·ft", "desc": "pound-force feet"},
+    {"text": "▸ lbf·in", "desc": "pound-force inches (fastener specs) — in after a unit is the inch"},
+    {"text": "25 N·m", "desc": "torque literal — keeps the written N·m form on display"}
+   ]},
+   {"heading": "Pressure", "entries": [
+    {"text": "▸ μPa", "desc": "micropascals (acoustics; 20 μPa reference)"},
+    {"text": "▸ Pa", "desc": "pascals"},
+    {"text": "▸ kPa", "desc": "kilopascals"},
+    {"text": "▸ MPa", "desc": "megapascals"},
+    {"text": "▸ GPa", "desc": "gigapascals (elastic moduli)"},
+    {"text": "▸ mbar", "desc": "millibars"},
+    {"text": "▸ bar", "desc": "bars (= 100 kPa exactly)"},
+    {"text": "▸ atm", "desc": "atmospheres (= 101.325 kPa exactly)"},
+    {"text": "▸ torr", "desc": "torr (= 1/760 atm)"},
+    {"text": "▸ mmHg", "desc": "millimetres of mercury (medical / barometric)"},
+    {"text": "▸ psi", "desc": "pounds per square inch"},
+    {"text": "▸ ksi", "desc": "kilopounds per square inch"}
+   ]},
+   {"heading": "Energy", "entries": [
+    {"text": "▸ mJ", "desc": "millijoules (μJ, nJ, pJ too)"},
+    {"text": "▸ J", "desc": "joules"},
+    {"text": "▸ kJ", "desc": "kilojoules"},
+    {"text": "▸ MJ", "desc": "megajoules"},
+    {"text": "▸ Wh", "desc": "watt-hours"},
+    {"text": "▸ kWh", "desc": "kilowatt-hours"},
+    {"text": "▸ MWh", "desc": "megawatt-hours (GWh too)"},
+    {"text": "▸ eV", "desc": "electronvolts"},
+    {"text": "▸ MeV", "desc": "megaelectronvolts (keV, GeV, TeV too)"},
+    {"text": "▸ cal", "desc": "thermochemical calories"},
+    {"text": "▸ Cal", "desc": "kilocalories (food calorie)"},
+    {"text": "▸ BTU", "desc": "British thermal units"}
+   ]},
+   {"heading": "Power", "entries": [
+    {"text": "▸ mW", "desc": "milliwatts"},
+    {"text": "▸ W", "desc": "watts"},
+    {"text": "▸ kW", "desc": "kilowatts"},
+    {"text": "▸ MW", "desc": "megawatts"},
+    {"text": "▸ VA", "desc": "volt-amperes — apparent power, keeps the written form (kVA, MVA too)"},
+    {"text": "▸ var", "desc": "volt-amperes reactive (kvar, Mvar too)"},
+    {"text": "▸ hp", "desc": "mechanical horsepower (= 745.7 W)"}
+   ]},
+   {"heading": "Time", "entries": [
+    {"text": "▸ ns", "desc": "nanoseconds"},
+    {"text": "▸ μs", "desc": "microseconds"},
+    {"text": "▸ ms", "desc": "milliseconds"},
+    {"text": "▸ s", "desc": "seconds"},
+    {"text": "▸ min", "desc": "minutes — min is the minute as a ▸ target and in unit position"},
+    {"text": "▸ minute", "desc": "minutes (= 60 s)"},
+    {"text": "▸ h", "desc": "hours — h is the hour as a ▸ target and in unit position"},
+    {"text": "▸ hr", "desc": "hours — the short unambiguous spelling"},
+    {"text": "▸ hour", "desc": "hours (= 3600 s)"},
+    {"text": "▸ day", "desc": "days (= 86 400 s)"},
+    {"text": "▸ week", "desc": "weeks (= 7 days)"},
+    {"text": "▸ month", "desc": "months — the average Gregorian month (≈ 30.44 days)."},
+    {"text": "▸ year", "desc": "years — the tropical year (≈ 365.24 days). 'yr' is the Julian year."},
+    {"text": "▸ HMS", "desc": "formatted d/h/m/s display — 3661 s ▸ HMS shows '1h 01m 01s'. Sigfig-aware: fields below the precision are dropped."}
+   ]},
+   {"heading": "Frequency", "entries": [
+    {"text": "▸ Hz", "desc": "hertz (= 1/s)"},
+    {"text": "▸ kHz", "desc": "kilohertz"},
+    {"text": "▸ MHz", "desc": "megahertz"},
+    {"text": "▸ GHz", "desc": "gigahertz"},
+    {"text": "▸ rps", "desc": "revolutions per second"},
+    {"text": "▸ rpm", "desc": "revolutions per minute — a frequency: 3000 rpm ▸ Hz = 50 Hz"}
+   ]},
+   {"heading": "Angle", "entries": [
+    {"text": "▸ deg", "desc": "degrees — asin(0.5) ▸ deg = 30 deg"},
+    {"text": "▸ rad", "desc": "radians (the number itself)"},
+    {"text": "▸ rev", "desc": "revolutions (turns)"},
+    {"text": "▸ arcmin", "desc": "arc minutes (arcsec too)"},
+    {"text": "30°", "desc": "angle literal — 30·π/180 radians"},
+    {"text": "30 deg", "desc": "the same angle with the unit name"},
+    {"text": "1.5 rad", "desc": "radians are the plain number 1"},
+    {"text": "2π · n", "desc": "angular velocity from a rotational frequency n (rpm/rps)"}
+   ]},
+   {"heading": "Speed", "entries": [
+    {"text": "▸ mph", "desc": "miles per hour"},
+    {"text": "▸ kph", "desc": "kilometres per hour"},
+    {"text": "▸ knot", "desc": "knots (= 1.852 km/h)"},
+    {"text": "▸ m/s", "desc": "metres per second"}
+   ]},
+   {"heading": "Electrical", "entries": [
+    {"text": "▸ mV", "desc": "millivolts (μV, nV too)"},
+    {"text": "▸ V", "desc": "volts"},
+    {"text": "▸ kV", "desc": "kilovolts"},
+    {"text": "▸ μA", "desc": "microamperes (nA, pA too)"},
+    {"text": "▸ mA", "desc": "milliamperes"},
+    {"text": "▸ A", "desc": "amperes"},
+    {"text": "▸ kA", "desc": "kiloamperes"},
+    {"text": "▸ Ω", "desc": "ohms"},
+    {"text": "▸ kΩ", "desc": "kilohms (mΩ, MΩ, GΩ too)"},
+    {"text": "▸ mS", "desc": "millisiemens — conductance (μS, kS, siemens too)"},
+    {"text": "▸ pC", "desc": "picocoulombs (semiconductor charge)"},
+    {"text": "▸ nC", "desc": "nanocoulombs"},
+    {"text": "▸ μC", "desc": "microcoulombs"},
+    {"text": "▸ mC", "desc": "millicoulombs"},
+    {"text": "▸ C", "desc": "coulombs (= A·s)"},
+    {"text": "▸ pF", "desc": "picofarads"},
+    {"text": "▸ nF", "desc": "nanofarads"},
+    {"text": "▸ μF", "desc": "microfarads"},
+    {"text": "▸ mF", "desc": "millifarads"},
+    {"text": "▸ mH", "desc": "millihenries (μH, nH too)"},
+    {"text": "▸ Ah", "desc": "ampere-hours — charge capacity"},
+    {"text": "▸ mAh", "desc": "milliampere-hours (battery datasheets)"},
+    {"text": "▸ mT", "desc": "millitesla (μT, nT too)"},
+    {"text": "▸ T", "desc": "tesla — magnetic flux density"},
+    {"text": "▸ gauss", "desc": "gauss (CGS, 0.1 mT)"},
+    {"text": "▸ Wb", "desc": "weber — magnetic flux"}
+   ]},
+   {"heading": "Volume and area", "entries": [
+    {"text": "▸ mL", "desc": "millilitres"},
+    {"text": "▸ cc", "desc": "cubic centimetres (= mL)"},
+    {"text": "▸ L", "desc": "litres (also liter, litre; kL, cL, μL)"},
+    {"text": "▸ gal_us", "label": "▸ gal (US)", "desc": "US liquid gallons (= 3.785 L) — pastes ▸ gal_us"},
+    {"text": "▸ gal_uk", "label": "▸ gal (UK)", "desc": "imperial gallons (= 4.546 L) — pastes ▸ gal_uk"},
+    {"text": "▸ m²", "desc": "square metres (mm², cm² too)"},
+    {"text": "▸ ha", "desc": "hectares (10 000 m²)"},
+    {"text": "▸ acre", "desc": "acres"}
+   ]},
+   {"heading": "Process, light, radiation", "entries": [
+    {"text": "▸ cP", "desc": "centipoise — dynamic viscosity (Pa_s, poise too)"},
+    {"text": "▸ cSt", "desc": "centistokes — kinematic viscosity"},
+    {"text": "▸ mmol", "desc": "millimoles (μmol, kmol too)"},
+    {"text": "▸ lx", "desc": "lux — illuminance"},
+    {"text": "▸ lm", "desc": "lumens — luminous flux"},
+    {"text": "▸ Bq", "desc": "becquerel — activity (kBq, MBq, Ci too)"},
+    {"text": "▸ mSv", "desc": "millisievert — dose equivalent (Sv, μSv too)"}
+   ]},
+   {"heading": "Temperature", "entries": [
+    {"text": "▸ degC", "desc": "display a temperature on the Celsius scale — offset-correct, e.g. 295.15 K → 22 °C."},
+    {"text": "▸ degF", "desc": "display a temperature on the Fahrenheit scale."},
+    {"text": "▸ degR", "desc": "display a temperature on the Rankine scale."},
+    {"text": "▸ K", "desc": "display a temperature in kelvin (the stored form)."},
+    {"text": "22 °C", "desc": "ENTER an absolute temperature — °C literal, stored as 295.15 K (see Engineering tab)."},
+    {"text": "72 °F", "desc": "ENTER an absolute temperature — °F literal, stored in kelvin."},
+    {"text": "from_degC()", "desc": "absolute temperature from a Celsius value → Kelvin Physical."},
+    {"text": "from_degF()", "desc": "absolute temperature from a Fahrenheit value → Kelvin Physical."},
+    {"text": "to_celsius()", "desc": "numeric Kelvin → numeric Celsius (plain number in, plain number out)."},
+    {"text": "to_fahrenheit()", "desc": "numeric Celsius → numeric Fahrenheit."},
+    {"text": "ΔC", "desc": "delta-Celsius — a temperature DIFFERENCE (1 ΔC = 1 K), for changes and coefficients."},
+    {"text": "ΔF", "desc": "delta-Fahrenheit — a temperature DIFFERENCE (1 ΔF = 5/9 K)."},
+    {"text": "ΔK", "desc": "delta-kelvin — a temperature DIFFERENCE of 1 K."}
+   ]},
+   {"heading": "Integer base (radix display)", "entries": [
+    {"text": "▸ hex", "desc": "display an integer in hexadecimal — uses subscript notation, e.g. FF₁₆."},
+    {"text": "▸ bin", "desc": "display an integer in binary — e.g. 1010₂."},
+    {"text": "▸ oct", "desc": "display an integer in octal — e.g. 17₈."},
+    {"text": "▸ dec", "desc": "display an integer in plain decimal."},
+    {"text": "▸ roman", "desc": "display an integer as a Roman numeral — e.g. 2024 → MMXXIV."},
+    {"text": "radix(, )", "desc": "function form — radix(value, base) for any base 2–36. e.g. radix(255, 16)."},
+    {"text": "register_radix(\"\", )", "desc": "register a custom integer format — register_radix(name, int→str function)."},
+    {"text": "to_roman()", "desc": "integer → Roman-numeral string (callable directly)."},
+    {"text": "from_roman(\"\")", "desc": "Roman-numeral string → integer; the inverse of to_roman. Accepts IIII as well as IV. The DSL spelling is \"…\"ᵣₒₘₑ (see the Various tab)."}
+   ]}
+  ]},
+  {"name": "Currency", "sections": [
+   {"heading": "Major", "entries": [
+    {"text": "▸ DKK", "desc": "Danish krone — base of the rate table"},
+    {"text": "▸ USD", "desc": "US dollar"},
+    {"text": "▸ EUR", "desc": "euro"},
+    {"text": "▸ GBP", "desc": "British pound"},
+    {"text": "▸ JPY", "desc": "Japanese yen"},
+    {"text": "▸ CHF", "desc": "Swiss franc"}
+   ]},
+   {"heading": "Other", "entries": [
+    {"text": "▸ SEK", "desc": "Swedish krona"},
+    {"text": "▸ NOK", "desc": "Norwegian krone"},
+    {"text": "▸ CAD", "desc": "Canadian dollar"},
+    {"text": "▸ AUD", "desc": "Australian dollar"},
+    {"text": "▸ CNY", "desc": "Chinese yuan (renminbi)"},
+    {"text": "▸ HKD", "desc": "Hong Kong dollar"},
+    {"text": "▸ INR", "desc": "Indian rupee"},
+    {"text": "▸ PLN", "desc": "Polish złoty"},
+    {"text": "▸ CZK", "desc": "Czech koruna"}
+   ]},
+   {"heading": "Rate management", "entries": [
+    {"text": "update_currency_rates()", "desc": "fetch latest rates from Nationalbanken"},
+    {"text": "rates_status()", "desc": "show source (live / cache / fallback) and age"},
+    {"text": "clear_currency_cache()", "desc": "delete on-disk rates cache; forces refresh next call"}
+   ]}
+  ]},
+  {"name": "Loops", "sections": [
+   {"heading": "Loop templates", "entries": [
+    {"text": "for j in 1..10:\n    ", "desc": "for-loop with inclusive range; cursor lands at body indent"},
+    {"text": "for j in [1..10]:\n    ", "desc": "alternate inclusive-range syntax"},
+    {"text": "for 1 ≤ j ≤ 10:\n    ", "desc": "math-style inclusive bounds (DSL)"},
+    {"text": "for 1 < j < 10:\n    ", "desc": "exclusive bounds"},
+    {"text": "for 0 ≤ j < n:\n    ", "desc": "half-open range (typical 'for i in range(n)' pattern)"},
+    {"text": "for j, x in enumerate():\n    ", "desc": "iterate with index; fill in the iterable"},
+    {"text": "for x, y in zip(, ):\n    ", "desc": "iterate two iterables in parallel"},
+    {"text": "while :", "desc": "while-loop header — type condition before colon"},
+    {"text": "if :", "desc": "if statement — type condition before colon"},
+    {"text": "elif :", "desc": "elif clause — type condition before colon"},
+    {"text": "else:\n    ", "desc": "else clause; cursor at body indent"},
+    {"text": "[ for  in ]", "desc": "list comprehension"},
+    {"text": "{ for  in }", "desc": "set comprehension"},
+    {"text": "{:  for  in }", "desc": "dict comprehension (key:value)"},
+    {"text": "( for  in )", "desc": "generator expression"},
+    {"text": "range()", "desc": "range with stop only"},
+    {"text": "range(, )", "desc": "range(start, stop)"},
+    {"text": "range(, , )", "desc": "range(start, stop, step)"}
+   ]}
+  ]},
+  {"name": "Numbers", "sections": [
+   {"heading": "Base-suffixed integers", "entries": [
+    {"text": "1010₂", "desc": "binary literal — subscript-2 says \"base 2\"."},
+    {"text": "11111111₂", "desc": "binary — eight bits."},
+    {"text": "17₈", "desc": "octal — subscript-8."},
+    {"text": "123₈", "desc": "octal literal."},
+    {"text": "0₁₀", "desc": "explicit base-10 — rewrites verbatim."},
+    {"text": "1A₁₆", "desc": "hex — digit-led, always safe."},
+    {"text": "FF₁₆", "desc": "hex (letter-led) — works for base 16 because F is a hex digit."},
+    {"text": "0FF₁₆", "desc": "hex with a leading 0 — the always-safe form for a letter-led literal."},
+    {"text": "100₃₆", "desc": "base-36, digit-led — letters a–z map to 10–35."},
+    {"text": "radix(, )", "desc": "function form for any base 2–36 — use this when a literal would be letter-led."}
+   ]},
+   {"heading": "Real & complex", "entries": [
+    {"text": "3+2i", "desc": "complex using sympy's imaginary unit — gives 3 + 2*I (symbolic-friendly)"},
+    {"text": "3+2j", "desc": "complex using Python's native imaginary unit — gives (3+2j) (numeric)"},
+    {"text": "1_000_000", "desc": "PEP 515 underscore separator (improves readability for big numbers)"},
+    {"text": "π", "desc": "pi — exact symbolic constant"},
+    {"text": "∞", "desc": "infinity — math.inf"},
+    {"text": "e", "desc": "Euler's number"}
+   ]},
+   {"heading": "Exact & rational", "entries": [
+    {"text": "_R('0.1')", "desc": "exact rational from decimal string — sympy Rational, e.g. 1/10"},
+    {"text": "_R('1/7')", "desc": "exact rational from fraction string — sympy Rational(1, 7)"},
+    {"text": "Rational(, )", "desc": "sympy rational; Rational(1, 7) = 1/7"},
+    {"text": "exact()", "desc": "wrap value as exact (sf=∞) — used for unit constants"},
+    {"text": "measured(, )", "desc": "wrap value with explicit sigfig count, e.g. measured(120, 3)"}
+   ]},
+   {"heading": "Mode switches", "entries": [
+    {"text": "set_decimal_literals(True)", "desc": "make decimal literals like 0.1 evaluate as Rational"},
+    {"text": "set_decimal_literals(False)", "desc": "restore ordinary float literals (default)"}
+   ]}
+  ]},
+  {"name": "Various", "sections": [
+   {"heading": "Pretty print (toolkit)", "entries": [
+    {"text": "pp()", "desc": "symbolic pretty-print; sympy values render with ⋅ and Greek"},
+    {"text": "pn()", "desc": "numeric pretty-print; sympy values evaluate to numbers"}
+   ]},
+   {"heading": "Built-ins", "entries": [
+    {"text": "print()", "desc": "stdlib print — note: shows an empty set as set(), not ∅ (it calls str()). Use pp() or print(fmt(x)) for the ∅ glyph."},
+    {"text": "type()", "desc": "type of an object"},
+    {"text": "len()", "desc": "length of a sequence / collection"},
+    {"text": "abs()", "desc": "absolute value"},
+    {"text": "round(, )", "desc": "round(x, n) — works on DSL values and keeps the unit: round(1.2345 V, 2) = 1.23 V"},
+    {"text": "sum()", "desc": "sum of an iterable; sum([1,2,3]) = 6"},
+    {"text": "min()", "desc": "minimum"},
+    {"text": "max()", "desc": "maximum"},
+    {"text": "isinstance(, )", "desc": "type check"},
+    {"text": "hasattr(, '')", "desc": "check for attribute by name"},
+    {"text": "getattr(, '')", "desc": "get attribute by name"},
+    {"text": "dir()", "desc": "list attributes / methods of an object"},
+    {"text": "help()", "desc": "show help (docstring + signature)"}
+   ]},
+   {"heading": "Toolkit helpers", "entries": [
+    {"text": "in_units(, )", "desc": "express value in target units; in_units(v, mm/s)"},
+    {"text": "sigfigs_of()", "desc": "return sigfig count of a Sig"},
+    {"text": "exact()", "desc": "make value exact (sf=∞)"},
+    {"text": "measured(, )", "desc": "tag value with explicit sigfig count"},
+    {"text": "fmt()", "desc": "string form of a value, showing an empty set as ∅ (for the print() path)."},
+    {"text": "radix(, )", "desc": "display an integer in any base 2–36."},
+    {"text": "register_radix(\"\", )", "desc": "register a custom integer-display format."},
+    {"text": "from_degC()", "desc": "absolute temperature from a Celsius reading → Kelvin Physical."},
+    {"text": "from_degF()", "desc": "absolute temperature from a Fahrenheit reading → Kelvin Physical."}
+   ]},
+   {"heading": "Date / time (input formats)", "entries": [
+    {"text": "\"today\"ₜᵢₘₑ", "desc": "today's date — rewrites to iso(\"today\") → date.today()"},
+    {"text": "\"now\"ₜᵢₘₑ", "desc": "current local datetime — iso(\"now\")"},
+    {"text": "\"utcnow\"ₜᵢₘₑ", "desc": "current UTC datetime — iso(\"utcnow\")"},
+    {"text": "\"2026-05-10\"ₜᵢₘₑ", "desc": "ISO date — fill in the date you want"},
+    {"text": "\"2026-05-10T14:30:00\"ₜᵢₘₑ", "desc": "ISO datetime — date + T + time"},
+    {"text": "\"2026-05-10T14:30:00Z\"ₜᵢₘₑ", "desc": "ISO datetime in UTC — Z suffix"},
+    {"text": "\"14:30:00\"ₜᵢₘₑ", "desc": "ISO time-of-day — date will be today by default"},
+    {"text": "\"PT1H30M\"ₜᵢₘₑ", "desc": "ISO 8601 duration — 1 hour 30 minutes"},
+    {"text": "\"P1Y6M\"ₜᵢₘₑ", "desc": "ISO 8601 duration — 1 year 6 months"},
+    {"text": "\"PT15M30S\"ₜᵢₘₑ", "desc": "ISO 8601 duration — 15 minutes 30 seconds"}
+   ]},
+   {"heading": "Date / time — durations", "entries": [
+    {"text": "\"PT90M\"ₜᵢₘₑ ▸ hour", "desc": "a timedelta read in a time unit — 1.5 hour"},
+    {"text": "\"-PT5M\"ₜᵢₘₑ", "desc": "signed durations parse; fractional too (\"PT1.5H\")"},
+    {"text": "iso()", "desc": "parse or format ISO 8601 — whole years/months/weeks round-trip (P1Y)"}
+   ]},
+   {"heading": "Date / time (functions)", "entries": [
+    {"text": "datetime.now()", "desc": "current local datetime — stdlib form"},
+    {"text": "datetime.today()", "desc": "today's date as datetime"},
+    {"text": "datetime(, , )", "desc": "specific date: datetime(year, month, day)"},
+    {"text": "timedelta(days=)", "desc": "time difference; days/seconds/hours kwargs"},
+    {"text": "time.time()", "desc": "Unix timestamp (seconds since 1970)"}
+   ]},
+   {"heading": "Roman numerals (input)", "entries": [
+    {"text": "\"MMXXVI\"ᵣₒₘₑ", "desc": "Roman-numeral literal → int; \"MMXXVI\" reads as 2026."},
+    {"text": "\"MCMXCIV\"ᵣₒₘₑ", "desc": "subtractive form — MCMXCIV → 1994."},
+    {"text": "\"IIII\"ᵣₒₘₑ", "desc": "additive form — IIII → 4 (the traditional clock-face spelling)."},
+    {"text": "\"\"ᵣₒₘₑ", "desc": "blank Roman literal — fill in the numeral between the quotes."},
+    {"text": "from_roman(\"\")", "desc": "function form — Roman-numeral string → int, callable directly."}
+   ]},
+   {"heading": "Whitespace characters", "entries": [
+    {"text": "⇥", "desc": "tab — pastes ⇥ (U+21E5); the DSL turns it into a tab", "detail": "Inserts the tab glyph ⇥. The DSL's ⇥/↵ rewriter converts it to a tab — as a \\t escape inside a string literal, or as a separate \\t argument in a function call."},
+    {"text": "↵", "label": "NL", "desc": "newline — pastes ↵ (U+21B5); the DSL turns it into a newline", "detail": "Inserts the newline glyph ↵. The DSL's ⇥/↵ rewriter converts it to a newline. The button shows 'NL' because the ↵ glyph does not render in this font."}
+   ]}
+  ]}
+ ]
+}

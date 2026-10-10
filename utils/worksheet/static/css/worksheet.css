@@ -1,0 +1,465 @@
+/* Engineering DSL worksheet.
+ *
+ * The sheet is a white A4 page on a grey desk.  Lengths that describe
+ * the page (width, margins, break interval) are mirrored in js/sheet.js
+ * — change them together.  Syntax colours follow the JupyterLab
+ * highlighter (jupyterlab-edsl-highlight/style/index.css): NCS green for
+ * numbers and keywords, blue for units and constants, red for strings,
+ * amber for toolkit helpers, grey italic comments; nothing bold.
+ */
+
+:root {
+  --page-w: 794px;            /* 210 mm at 96 dpi */
+  --page-margin: 57px;        /* 15 mm */
+  --ink: #1b1b1b;
+  --muted: #6b7076;
+  --line: #d9dce0;
+  --desk: #e7e9ec;
+  --chrome: #f7f8f9;
+  --accent: #1f5fbf;
+  --accent-soft: #dbe7fa;
+  --danger: #b3261e;
+  --danger-soft: #fdecea;
+  --ok: #19a86d;
+  --ui: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --text: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; display: flex; flex-direction: column; overflow: hidden;
+  font: 13px/1.4 var(--ui); color: var(--ink); background: var(--desk);
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+
+/* ---- top bar ---------------------------------------------------------- */
+#bar {
+  display: flex; align-items: center; gap: 2px; flex: none;
+  height: 40px; padding: 0 8px;
+  background: var(--chrome); border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+#bar .sep { width: 1px; height: 20px; margin: 0 6px; background: var(--line); }
+#bar .grow { flex: 1; }
+.menu { position: relative; }
+.menu-button, .tool {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 9px; border: 1px solid transparent; border-radius: 5px;
+  background: none; cursor: pointer; white-space: nowrap;
+}
+.menu-button:hover, .tool:hover:not(:disabled), .menu.open .menu-button { background: #e9ecef; }
+.tool:disabled { opacity: .4; cursor: default; }
+.tool svg { width: 14px; height: 14px; fill: currentColor; }
+.tool[data-cmd="calc"] svg { fill: var(--ok); }
+.tool[data-cmd="stop"]:not(:disabled) svg { fill: var(--danger); }
+.tool .glyph { font: italic 15px/1 "KaTeX_Math", "Cambria Math", Georgia, serif; min-width: 14px; text-align: center; }
+.tool.check { cursor: pointer; }
+.tool.check input { margin: 0; accent-color: var(--accent); }
+.tool.on { background: var(--accent-soft); }
+.menu-list {
+  position: absolute; top: 31px; left: 0; z-index: 60; min-width: 250px; padding: 5px;
+  background: #fff; border: 1px solid var(--line); border-radius: 7px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .14);
+}
+.menu-list button {
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  width: 100%; height: 28px; padding: 0 10px 0 24px; border: 0; border-radius: 4px;
+  background: none; text-align: left; cursor: pointer; position: relative;
+}
+.menu-list button:hover { background: var(--accent-soft); }
+.menu-list button[aria-checked="true"]::before {
+  content: "✓"; position: absolute; left: 8px; color: var(--accent);
+}
+.menu-list hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
+.menu-list kbd { font: 11px var(--ui); color: var(--muted); }
+.menu-label { padding: 4px 10px 2px 24px; font-size: 11px; color: var(--muted); }
+
+#doc-title { font-weight: 600; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#doc-dirty { color: var(--muted); }
+#status { display: flex; align-items: center; gap: 7px; min-width: 150px; justify-content: flex-end;
+          color: var(--muted); font-variant-numeric: tabular-nums; }
+#status-dot { width: 8px; height: 8px; border-radius: 50%; background: #b8bcc2; flex: none; }
+#status[data-state="idle"] #status-dot { background: var(--ok); }
+#status[data-state="busy"] #status-dot, #status[data-state="starting"] #status-dot {
+  background: #e0a400; animation: pulse 1s ease-in-out infinite;
+}
+#status[data-state="dead"] #status-dot, #status[data-state="offline"] #status-dot,
+#status[data-state="signedout"] #status-dot { background: var(--danger); }
+#status.has-errors { color: var(--danger); cursor: pointer; }
+#status.has-errors #status-dot { background: var(--danger); }
+@keyframes pulse { 50% { opacity: .35; } }
+/* In a narrow window (half a screen, say) the tools give up their
+   labels — their tooltips still name them — so the sheet's name stays
+   readable. */
+@media (max-width: 1150px) {
+  .tool[data-cmd="insert-math"] span:not(.glyph),
+  .tool[data-cmd="insert-text"] span:not(.glyph),
+  .tool[data-cmd="toggle-palette"] span:not(.glyph) { display: none; }
+}
+@media (max-width: 900px) {
+  .tool[data-cmd="calc"] span, .tool[data-cmd="stop"] span { display: none; }
+  #status { min-width: 0; }
+  #bar .sep { margin: 0 2px; }
+}
+
+#banner {
+  flex: none; display: flex; align-items: center; gap: 14px; padding: 8px 14px;
+  background: #fff8e1; border-bottom: 1px solid #ecd9a0; color: #5a4500;
+}
+#banner.error { background: var(--danger-soft); border-color: #f1c1bc; color: #6e1410; }
+#banner pre { margin: 0; font: 12px/1.35 var(--mono); white-space: pre-wrap; max-height: 9em; overflow: auto; flex: 1; }
+#banner .msg { flex: 1; }
+.btn {
+  height: 28px; padding: 0 13px; border: 1px solid var(--line); border-radius: 5px;
+  background: #fff; cursor: pointer; white-space: nowrap;
+}
+.btn:hover { background: #f1f3f5; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { background: #184f9f; }
+
+/* ---- desk and page ---------------------------------------------------- */
+#work { flex: 1; display: flex; min-height: 0; }
+#desk { flex: 1; overflow: auto; padding: 22px 22px 60vh; outline: none; }
+#paper {
+  width: var(--page-w); margin: 0 auto; padding: var(--page-margin);
+  background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .18), 0 6px 22px rgba(0, 0, 0, .08);
+  cursor: crosshair;
+}
+#content { position: relative; min-height: 1009px; }
+#paper.grid #content {
+  background-image: radial-gradient(circle, #c9ced4 0.6px, transparent 0.9px);
+  background-size: 16px 16px; background-position: -8px -8px;
+}
+.pagebreak {
+  position: absolute; left: calc(-1 * var(--page-margin)); right: calc(-1 * var(--page-margin));
+  height: 0; border-top: 1px dashed #b9bec5; pointer-events: none;
+}
+.pagebreak span {
+  position: absolute; right: 6px; top: -15px; font-size: 10px; color: #9aa0a6; background: #fff; padding: 0 3px;
+}
+#cross { position: absolute; width: 0; height: 0; pointer-events: none; z-index: 5; }
+#cross::before, #cross::after { content: ""; position: absolute; background: #d0342c; }
+#cross::before { left: -6px; top: 8px; width: 13px; height: 1px; }
+#cross::after { left: 0; top: 2px; width: 1px; height: 13px; }
+#band {
+  position: absolute; z-index: 20; pointer-events: none;
+  border: 1px solid var(--accent); background: rgba(31, 95, 191, .08);
+}
+#sink {
+  position: absolute; width: 2px; height: 18px; padding: 0; margin: 0; border: 0; outline: 0;
+  resize: none; overflow: hidden; opacity: 0; background: transparent; caret-color: transparent;
+}
+
+/* ---- regions ---------------------------------------------------------- */
+.region {
+  position: absolute; z-index: 1; min-width: 14px; min-height: 22px; padding: 2px 5px;
+  border: 1px solid transparent; border-radius: 3px; cursor: default; background: rgba(255, 255, 255, 0);
+}
+.region:hover { border-color: #d3d8de; }
+.region.selected { border-color: var(--accent); background: rgba(31, 95, 191, .05); }
+.region.editing { z-index: 30; border-color: var(--accent); background: #fff;
+                  box-shadow: 0 0 0 3px rgba(31, 95, 191, .13); cursor: text; }
+.region.dragging { z-index: 40; opacity: .85; cursor: grabbing; box-shadow: 0 6px 18px rgba(0, 0, 0, .16); background: #fff; }
+.region.has-error:not(.editing) { border-color: #e8a29c; }
+.region .grip {
+  position: absolute; left: -13px; top: -1px; width: 12px; height: calc(100% + 2px);
+  border-radius: 3px 0 0 3px; background: var(--accent); cursor: grab; display: none;
+}
+.region .grip::after {
+  content: ""; position: absolute; left: 4px; top: 50%; width: 4px; height: 10px; margin-top: -5px;
+  background: radial-gradient(circle, #fff 1px, transparent 1.3px) 0 0 / 4px 4px;
+}
+.region.editing .grip, .region.selected .grip { display: block; }
+.region .sizer {
+  position: absolute; right: -4px; top: 0; width: 7px; height: 100%; cursor: ew-resize; display: none;
+}
+.region.text:hover .sizer, .region.text.editing .sizer, .region.text.selected .sizer { display: block; }
+.region.text .sizer::after {
+  content: ""; position: absolute; right: 2px; top: 50%; width: 3px; height: 18px; margin-top: -9px;
+  border-radius: 2px; background: var(--accent); opacity: .55;
+}
+
+/* math regions — a row is: expression, "=", result, comment.  Rows wrap
+   (KaTeX breaks a formula at its top-level operators) when a region
+   reaches the right margin; sheet.js sets the region's max-width. */
+.region.math { white-space: normal; width: max-content; }
+.line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0; min-height: 22px; padding: 2px 0; }
+.line.gap { margin-top: 9px; }
+.line .tex { display: inline-block; min-width: 0; }
+.line .katex .base { margin-top: 1px; margin-bottom: 1px; }
+.line .eq { margin: 0 .42em; font-family: KaTeX_Main, "Times New Roman", serif; font-size: 1.14em; }
+.line .res { color: #0d2f66; }
+.line .cmt, .cmtline {
+  margin-left: 1.6em; color: #5f656c; font: italic 13px/1.4 var(--text); white-space: normal;
+  min-width: 9em; max-width: 30em;
+}
+.cmtline { margin-left: 0; padding: 2px 0; display: block; }
+.cmtline.gap { margin-top: 9px; }
+.line .plain { font: 13px/1.4 var(--mono); white-space: pre; }
+.line code.src, .pending-src {
+  font: 13px/1.5 var(--mono); white-space: pre; display: inline-block; color: #33383d;
+}
+.pending-src { opacity: .75; }
+.katex { font-size: 1.14em; }
+.region.stale .res, .region.stale .eq, .region.stale .outs { opacity: .35; transition: opacity .12s; }
+.region.uncalculated .res, .region.uncalculated .eq { display: none; }
+
+.outs { margin: 2px 0 3px; white-space: normal; }
+.outs pre.stream {
+  margin: 0; font: 12.5px/1.45 var(--mono); white-space: pre-wrap; color: #2c3136; max-width: 680px;
+}
+.outs pre.stream.stderr { color: #8a5a00; }
+.outs .out-tex { padding: 2px 0; }
+.outs img { display: block; max-width: 680px; height: auto; }
+.outs .html { max-width: 680px; overflow: auto; font: 12.5px/1.4 var(--text); }
+.outs .html table { border-collapse: collapse; }
+.outs .html td, .outs .html th { border: 1px solid var(--line); padding: 2px 7px; }
+.saved-note { font-size: 11px; color: var(--muted); font-style: italic; }
+
+/* A failed statement: red, flagged, and the message floating on demand
+   (it takes no room — an error must not rearrange the sheet). */
+.line { position: relative; }
+.line.bad .expr, .line.bad code.src { color: var(--danger); }
+.flag {
+  flex: none; align-self: center; width: 15px; height: 15px; margin-left: 8px; border-radius: 50%;
+  background: var(--danger); color: #fff; font: 700 11px/15px var(--ui); text-align: center; cursor: pointer;
+}
+.flag.pinned { box-shadow: 0 0 0 3px rgba(179, 38, 30, .25); }
+.errpop {
+  position: absolute; left: 0; top: 100%; z-index: 50; padding-top: 3px; cursor: default;
+}
+/* Each region stacks on its own: lift the one whose message is showing
+   above the regions that follow it. */
+.region:has(.errpop) { z-index: 35; }
+.err {
+  /* Its own width, not what is left of the page: a region near the
+     right margin would otherwise squeeze the message into a column. */
+  padding: 5px 10px; width: max-content; max-width: 460px; white-space: normal;
+  border-left: 3px solid var(--danger); background: #fff5f4; color: #5f1612;
+  font: 12.5px/1.4 var(--text); border-radius: 0 4px 4px 0;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .16); user-select: text;
+}
+.err b { font-weight: 600; }
+.err .hint { display: block; margin-top: 2px; color: #7a3a36; }
+.err pre { margin: 5px 0 2px; font: 11.5px/1.35 var(--mono); white-space: pre-wrap; color: #4a1512; }
+.err .more { margin-left: 8px; color: #9a4a44; text-decoration: underline; cursor: pointer; font-size: 11.5px; }
+
+/* text regions */
+.region.text { white-space: normal; font: 14px/1.5 var(--text); }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md h1 { font-size: 23px; line-height: 1.25; margin: 4px 0 6px; font-weight: 600; }
+.md h2 { font-size: 18.5px; line-height: 1.3; margin: 4px 0 5px; font-weight: 600; }
+.md h3 { font-size: 15.5px; margin: 3px 0 4px; font-weight: 600; }
+.md h4, .md h5, .md h6 { font-size: 14px; margin: 3px 0; font-weight: 600; }
+.md p { margin: 0 0 7px; }
+.md ul, .md ol { margin: 0 0 7px; padding-left: 24px; }
+.md li > p { margin: 0; }
+.md blockquote { margin: 0 0 7px; padding: 1px 12px; border-left: 3px solid var(--line); color: #4b5057; }
+.md code { font: 12.5px var(--mono); background: #f1f3f5; padding: 1px 4px; border-radius: 3px; }
+.md pre { margin: 0 0 7px; padding: 7px 10px; background: #f5f6f8; border-radius: 4px; overflow: auto; }
+.md pre code { background: none; padding: 0; }
+.md table { border-collapse: collapse; margin: 0 0 7px; }
+.md th, .md td { border: 1px solid var(--line); padding: 3px 9px; }
+.md th { background: #f5f6f8; font-weight: 600; }
+.md .al-left { text-align: left; }
+.md .al-center { text-align: center; }
+.md .al-right { text-align: right; }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 9px 0; }
+.md a { color: var(--accent); }
+.md img { max-width: 100%; }
+.md .katex-display { margin: 6px 0; }
+.md .empty { color: #a3a8ae; font-style: italic; }
+
+/* ---- editors ---------------------------------------------------------- */
+.ed { display: inline-grid; position: relative; vertical-align: top; }
+.ed > * { grid-area: 1 / 1; margin: 0; padding: 2px 0; border: 0; min-width: 12px; }
+.ed pre, .ed textarea {
+  font: 14px/1.55 var(--mono); white-space: pre; tab-size: 4; letter-spacing: 0;
+  font-variant-ligatures: none; overflow: hidden;
+}
+.ed pre { pointer-events: none; color: var(--ink); padding-right: 14px; }
+.ed textarea { resize: none; outline: none; background: transparent; color: transparent; caret-color: #000; width: 100%; height: 100%; }
+.ed.text > * { font: 14px/1.5 var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ed.text { display: grid; width: 100%; }
+.ed.text pre { visibility: hidden; }
+.ed.text textarea { color: var(--ink); }
+
+.tk-number, .tk-keyword, .tk-opword { color: #19a86d; }
+.tk-unit, .tk-constant { color: #218bc0; }
+.tk-string { color: #cc1e3b; }
+.tk-helper { color: #a08600; }
+.tk-comment { color: #888; font-style: italic; }
+.tk-greek { color: #5a3e8c; }
+.tk-subsup { color: #7a4ea0; }
+.tk-user { color: #000; }
+
+.preview {
+  position: absolute; left: -1px; top: calc(100% + 5px); z-index: 45; padding: 5px 10px 6px;
+  background: #fff; border: 1px solid var(--line); border-radius: 5px; white-space: nowrap;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .13); pointer-events: none; min-width: 60px;
+}
+.preview .label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #9aa0a6; margin-bottom: 1px; }
+.preview .perr { color: var(--danger); font: 12px/1.4 var(--text); white-space: normal; width: max-content; max-width: 420px; }
+.preview .flag { display: none; }
+.preview.stale .line { opacity: .45; }
+
+.popup {
+  position: absolute; z-index: 70; min-width: 190px; max-height: 232px; overflow: auto; padding: 4px;
+  background: #fff; border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .16); font: 13px var(--ui); white-space: nowrap;
+}
+.popup div { display: flex; align-items: center; gap: 10px; padding: 3px 8px; border-radius: 4px; cursor: pointer; }
+.popup div.on { background: var(--accent-soft); }
+.popup .g { width: 26px; text-align: center; font: 16px "Cambria Math", "Segoe UI Symbol", serif; }
+.popup .n { color: var(--muted); }
+.popup .n b { color: var(--ink); font-weight: 600; }
+/* An entry of the library: what it inserts, then what it is for. */
+.popup .s { font: 12px var(--mono); }
+.popup .d { max-width: 290px; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; color: var(--muted); }
+
+/* ---- symbol panel: search, tabs, keys, status line ---------------------- */
+#palette {
+  flex: none; width: 292px; display: flex; flex-direction: column; min-height: 0;
+  background: var(--chrome); border-left: 1px solid var(--line); user-select: none;
+}
+.lib-top { flex: none; padding: 8px 10px 7px; border-bottom: 1px solid var(--line); }
+.lib-top input {
+  width: 100%; height: 28px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px;
+  background: #fff; font: 13px var(--ui); outline: none;
+}
+.lib-top input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31, 95, 191, .15); }
+/* Every tab stays in sight and one click away, on as many rows as it takes. */
+.lib-tabs { display: flex; flex-wrap: wrap; gap: 2px 3px; margin-top: 7px; }
+.lib-tabs button {
+  height: 21px; padding: 0 7px; border: 0; border-radius: 11px; background: none;
+  font: 11.5px var(--ui); color: #4a5058; cursor: pointer; white-space: nowrap;
+}
+.lib-tabs button:hover { background: #e3e6ea; }
+.lib-tabs button.on { background: var(--accent); color: #fff; }
+
+.lib-body { flex: 1; min-height: 0; overflow: auto; padding: 2px 10px 14px; }
+.lib-body h4 { margin: 10px 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.lib-body .keys { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.lib-body .keys.wide { grid-template-columns: repeat(4, 1fr); }
+.lib-body .chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.lib-body button {
+  height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: #fff;
+  font: 15px "Cambria Math", "Segoe UI Symbol", "Segoe UI", serif; color: var(--ink); cursor: pointer;
+}
+.lib-body .chips button {
+  min-width: 34px; max-width: 100%; padding: 0 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lib-body .keys.wide button, .lib-body .plain { font: 12.5px var(--ui); }
+.lib-body .code { font: 12px var(--mono); }
+.lib-body button:hover, .lib-body .hit.on { background: var(--accent-soft); border-color: #b9cdf0; }
+.lib-body .raised, .lib-body .lowered { position: relative; font-size: 13px; pointer-events: none; }
+.lib-body .raised { top: -5px; }
+.lib-body .lowered { top: 5px; }
+/* What a search found: the entry, what it is for, where it lives. */
+.lib-body.found { padding-top: 8px; }
+.lib-body .hit { display: block; width: 100%; height: auto; margin-bottom: 3px; padding: 5px 8px 6px; text-align: left; white-space: normal; }
+.hit .t, .hit .d, .hit .w { display: block; pointer-events: none; }
+.hit .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hit .d { margin-top: 2px; font: 11.5px/1.35 var(--ui); color: #4a5058; }
+.hit .w { margin-top: 2px; font: 10.5px var(--ui); color: var(--muted); }
+.lib-body .none { margin: 12px 2px; color: var(--muted); font-style: italic; }
+
+/* The two tools for text regions: the formula editor and the table builder. */
+.tool-pane { padding-top: 10px; font: 12.5px var(--ui); color: var(--ink); }
+.tool-pane .mf { min-height: 56px; }
+.tool-pane math-field {
+  display: block; box-sizing: border-box; width: 100%; min-height: 56px; padding: 7px 8px;
+  border: 1px solid var(--line); border-radius: 5px; background: #fff; font-size: 19px; outline: none;
+}
+.tool-pane math-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31, 95, 191, .15); }
+.tool-pane math-field::part(virtual-keyboard-toggle), .tool-pane math-field::part(menu-toggle) { display: none; }
+.tool-pane .wait { color: var(--muted); font-style: italic; }
+.tool-pane .latex {
+  min-height: 16px; margin: 5px 1px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 11px var(--mono); color: var(--muted); user-select: text;
+}
+.tool-pane .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; }
+.tool-pane label { display: inline-flex; align-items: center; gap: 5px; color: #4a5058; }
+.tool-pane input[type="number"], .tool-pane select {
+  height: 26px; border: 1px solid var(--line); border-radius: 4px; background: #fff;
+}
+.tool-pane input[type="number"] { width: 52px; padding: 0 3px 0 7px; }
+.tool-pane .sample {
+  max-height: 170px; margin: 9px 0 0; padding: 7px 8px; overflow: auto; border: 1px solid var(--line);
+  border-radius: 5px; background: #fff; font: 11px/1.45 var(--mono); user-select: text;
+}
+.tool-pane .hint { margin: 11px 1px 0; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.lib-body .tool-pane .btn { height: 28px; padding: 0 11px; font: 12.5px var(--ui); }
+.lib-body .tool-pane .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.lib-body .tool-pane .btn.primary:hover { background: #184f9f; }
+.lib-body .tool-pane .btn:disabled { opacity: .45; cursor: default; }
+
+.lib-info {
+  flex: none; height: 104px; overflow: hidden; padding: 7px 10px 0; border-top: 1px solid var(--line);
+  background: #fff; font: 11.5px/1.4 var(--ui); color: #4a5058; user-select: text;
+}
+.lib-info .what { display: flex; align-items: baseline; gap: 10px; overflow: hidden; white-space: nowrap; }
+.lib-info .what b { font: 15px "Cambria Math", "Segoe UI Symbol", "Segoe UI", serif; color: var(--ink); }
+.lib-info .what span { font: 11px var(--mono); color: var(--accent); }
+.lib-info .said { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
+.help kbd { font: 11px var(--mono); background: #fff; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+
+/* ---- dialogs and toasts ---------------------------------------------- */
+#overlay {
+  position: fixed; inset: 0; z-index: 100; display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 12vh; background: rgba(20, 24, 30, .32);
+}
+.dialog {
+  width: 560px; max-width: calc(100vw - 40px); max-height: 72vh; display: flex; flex-direction: column;
+  background: #fff; border-radius: 9px; box-shadow: 0 18px 60px rgba(0, 0, 0, .3); overflow: hidden;
+}
+.dialog:focus { outline: none; }
+.dialog h3 { margin: 0; padding: 14px 18px 8px; font-size: 15px; font-weight: 600; }
+.dialog .body { padding: 4px 18px 10px; overflow: auto; }
+.dialog .foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px 14px; }
+.dialog .crumbs { padding: 0 18px 6px; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dialog .crumbs a { color: var(--accent); cursor: pointer; }
+.files { border: 1px solid var(--line); border-radius: 6px; overflow: auto; max-height: 44vh; }
+.files div { display: flex; justify-content: space-between; gap: 16px; padding: 6px 11px; cursor: pointer; }
+.files div:hover { background: #f1f3f5; }
+.files div.on { background: var(--accent-soft); }
+.files div .when { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.files .dir .name::before { content: "▸ "; color: var(--muted); }
+.files .none { color: var(--muted); cursor: default; font-style: italic; }
+.dialog input[type="text"] {
+  width: 100%; height: 30px; padding: 0 9px; margin-top: 10px; border: 1px solid #c3c8ce; border-radius: 5px; outline: none;
+}
+.dialog input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31, 95, 191, .15); }
+.dialog p { margin: 4px 0 8px; line-height: 1.5; }
+.dialog.wide { width: 720px; }
+.help h4 { margin: 12px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.help h4:first-child { margin-top: 0; }
+.help table { border-collapse: collapse; width: 100%; }
+.help td { padding: 2px 0; vertical-align: top; line-height: 1.45; }
+.help td:first-child { width: 40%; padding-right: 14px; }
+.help kbd { font-size: 12px; padding: 1px 5px; white-space: pre-wrap; }
+
+#toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 120;
+  padding: 8px 16px; border-radius: 6px; background: #2b3036; color: #fff;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .25); max-width: 70vw;
+}
+#toast.error { background: var(--danger); }
+
+/* ---- printing --------------------------------------------------------- */
+@page { size: A4; margin: 15mm; }
+@media print {
+  html, body { height: auto; overflow: visible; background: #fff; }
+  body { display: block; }
+  #bar, #banner, #palette, #overlay, #toast, #cross, #band, #sink, .pagebreak, .grip, .sizer, .preview, .popup,
+  .errpop, .flag { display: none !important; }
+  #work, #desk { display: block; overflow: visible; padding: 0; }
+  #paper { width: 680px; margin: 0; padding: 0; box-shadow: none; zoom: 1 !important; }
+  #paper.grid #content { background-image: none; }
+  .region { border-color: transparent !important; background: none !important; box-shadow: none !important; }
+  .region.stale .res, .region.stale .eq, .region.stale .outs { opacity: 1; }
+}
