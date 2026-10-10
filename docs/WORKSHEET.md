@@ -46,8 +46,10 @@ New → Shortcut) with this as its location, the path being the one
     "C:\path\to\python.exe" -m utils.worksheet --app
 
 Then, in the shortcut's Properties, set *Start in* to the folder your
-sheets live in and *Run* to *Minimized*. The console window that stays
-minimized is the worksheet server: close it when you are done.
+sheets live in and *Run* to *Minimized*; *Change Icon…* takes the
+worksheet's own icon, `utils\worksheet\static\icon.ico` in the
+toolkit's folder. The console window that stays minimized is the
+worksheet server: close it when you are done.
 
 ## The page
 
@@ -324,6 +326,7 @@ the folder the server was started in.
 | `utils/worksheet/prefs.py` | what the user chose for the page (grid, symbol panel): a file in Jupyter's data folder, because a browser keeps its own storage per port |
 | `utils/worksheet/static/` | the front end: plain ES modules, no build step |
 | `utils/worksheet/make_library.py` | writes `static/data/library.json` — the symbol panel's library — from the Windows palette's list |
+| `utils/worksheet/make_icon.py` | writes `static/icon.ico` from the drawings `static/icon.svg` and `static/icon-small.svg` (needs Playwright and a Chromium) |
 
 The library has one source: the palette's
 `SymbolPaletteWinUI/Services/SymbolRepository.cs`. After changing it,

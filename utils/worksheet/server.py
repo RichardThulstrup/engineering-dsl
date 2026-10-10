@@ -153,7 +153,8 @@ class _Static(tornado.web.StaticFileHandler):
     # these in its registry, where ``.mjs`` (and on some machines ``.js``)
     # reads as plain text — and a browser does not run a module of that type.
     TYPES = {".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
-             ".json": "application/json", ".html": "text/html", ".woff2": "font/woff2"}
+             ".json": "application/json", ".html": "text/html", ".woff2": "font/woff2",
+             ".ico": "image/x-icon", ".svg": "image/svg+xml"}
 
     def prepare(self):
         if self.request.host not in self.application.settings["config"].hosts:

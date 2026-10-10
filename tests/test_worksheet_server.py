@@ -150,6 +150,10 @@ def test_static_files_are_served_and_revalidated(server):
     # a browser will not run a module that arrives as plain text.
     for script in ("/static/js/main.js", "/static/vendor/mathlive/mathlive.min.mjs"):
         assert fetch(server, script, cookie=False)[1]["Content-Type"].startswith("text/javascript")
+    # The page names its icon, which arrives as an icon.
+    assert '<link rel="icon" href="/static/icon.ico">' in fetch(server, "/")[2]
+    status, headers, _ = fetch(server, "/static/icon.ico", cookie=False, method="HEAD")
+    assert status == 200 and headers["Content-Type"] == "image/x-icon"
     # A browser that holds the same bytes under another type (from a server
     # that left the type to the registry) is not told "not modified" — that
     # answer has no type, and would leave the script unusable for good.

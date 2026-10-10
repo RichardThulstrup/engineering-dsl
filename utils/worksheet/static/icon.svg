@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- The worksheet's icon: a root of x.  icon.ico holds this drawing at
+       40 px and more, and the heavier icon-small.svg below that. -->
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3f82e0"/>
+      <stop offset="1" stop-color="#1a4da6"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#ground)"/>
+  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M40 140 L66 130 L102 200 L138 64 L220 64" stroke-width="22"/>
+    <path d="M158 112 L208 192 M208 112 L158 192" stroke-width="20"/>
+  </g>
+</svg>
