@@ -167,6 +167,9 @@ type, and the line becomes a typeset formula with its value beside it.
 - **Sheets that build on each other** — a sheet takes values from
   another sheet, as that sheet had them at a revision, and says which
   sheet and which revision. When the other sheet moves on, it is told.
+- **A revision shows what it showed** — random numbers, the clock,
+  files and currency rates are read once and kept with the sheet, until
+  you ask for them to be read again.
 - **Still a notebook** — a worksheet is saved as `.ipynb` (positions in
   cell metadata), so JupyterLab, VS Code, `hardcopy()` and GitHub all
   read it, and every existing notebook opens as a worksheet.

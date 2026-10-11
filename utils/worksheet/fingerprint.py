@@ -62,6 +62,7 @@ class Fingerprinter:
         self._budget = 0
         self._stack: set = set()
         self.mutable = False
+        self.parts = None           # a list, where a caller wants what can change in place
 
     def __call__(self, obj):
         """The fingerprint of ``obj``, or ``None`` if it has none.
@@ -71,6 +72,9 @@ class Fingerprinter:
         Two such values that compare equal are still two objects — code
         can tell them apart by modifying one — so callers treat a mutable
         value as "the same" only when it is the very same object.
+
+        A caller that sets :attr:`parts` to a list finds every such part
+        in it afterwards, as far as the walk got.
         """
         self._budget = _BUDGET
         self._stack.clear()
@@ -127,6 +131,11 @@ class Fingerprinter:
         finally:
             self._stack.discard(oid)
 
+    def _changeable(self, obj):
+        self.mutable = True
+        if self.parts is not None:
+            self.parts.append(obj)
+
     def _seq(self, items):
         return tuple(self._fp(x) for x in items)
 
@@ -137,13 +146,14 @@ class Fingerprinter:
         if isinstance(obj, tuple):               # includes namedtuples (Physical)
             return ("t", t.__module__, t.__qualname__, self._seq(obj))
         if isinstance(obj, list):
-            self.mutable = True
+            self._changeable(obj)
             return ("l", t.__qualname__, self._seq(obj))
         if isinstance(obj, dict):
-            self.mutable = True
+            self._changeable(obj)
             return ("d", t.__qualname__, tuple((fp(k), fp(v)) for k, v in obj.items()))
         if isinstance(obj, (set, frozenset)):
-            self.mutable = self.mutable or isinstance(obj, set)
+            if isinstance(obj, set):
+                self._changeable(obj)
             return ("S", t.__qualname__, frozenset(fp(x) for x in obj))
         if isinstance(obj, types.FunctionType):
             return self._function(obj)
@@ -205,7 +215,7 @@ class Fingerprinter:
         return tuple(state)
 
     def _array(self, obj, t):
-        self.mutable = True
+        self._changeable(obj)
         extra = self._slots(obj, t) if type(obj).__module__ != "numpy" else ()
         if obj.dtype.hasobject:
             return ("a", t.__qualname__, obj.shape, self._seq(obj.flat), extra)
@@ -214,7 +224,7 @@ class Fingerprinter:
 
     def _sympy(self, obj, t, sympy):
         if isinstance(obj, sympy.MatrixBase):
-            self.mutable = True
+            self._changeable(obj)
             extra = self._fp(getattr(obj, "_dsl_radix", None))   # ``M ▸ hex`` display tag
             return ("M", t.__qualname__, obj.shape, self._seq(obj), extra)
         # Immutable expression trees; srepr is their exact structure.

@@ -149,6 +149,33 @@ function flagError(line, error) {
   line.append(flag);
 }
 
+// ---- what was read outside the sheet, and is kept ---------------------------
+
+const READ_FROM = { clock: "the clock", random: "a random number", file: "a file", rates: "the day's currency rates" };
+
+/** When something was read, in a word or two: the time of day if that was today, else the day (with its year, if that is another). */
+export function keptWhen(at, now = new Date()) {
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return "";
+  if (date.toDateString() === now.toDateString()) return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleDateString([], { day: "numeric", month: "short",
+                                       ...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }) });
+}
+
+/**
+ * The mark on a statement whose result was read outside the sheet and
+ * is kept with it ({id, at, why}, as the engine says): when it was read.
+ * A click on it asks for it to be read again (sheet.js).
+ */
+function keptNode(kept) {
+  const from = (Array.isArray(kept.why) ? kept.why : []).map((why) => READ_FROM[why]).filter(Boolean).join(", ");
+  const date = new Date(kept.at);
+  const when = Number.isNaN(date.getTime()) ? "" : ` on ${date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
+  return el("span", { class: "kept", role: "button", dataset: { id: kept.id }, text: `kept ${keptWhen(kept.at)}`.trim(),
+                      title: `Read from outside the sheet${from ? ` (${from})` : ""}${when}, and kept since. ` +
+                             "Click to read it again; Ctrl+F9 reads everything again." });
+}
+
 /** Whether a statement's value is drawn after it, given the view setting. */
 export function showsResult(item, mode) {
   if (!item.result || item.suppress || item.error) return false;
@@ -193,6 +220,7 @@ export function renderItems(body, items, { mode, highlight, tail, results = true
     if (results && showsResult(item, mode)) {
       line.append(el("span", { class: "eq", text: "=" }), resultNode(item));
     }
+    if (results && item.kept) line.append(keptNode(item.kept));
     if (item.error) flagError(line, item.error);
     if (item.comment) line.append(el("span", { class: "cmt", text: item.comment }));
     body.append(line);

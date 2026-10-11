@@ -155,7 +155,10 @@ line**. A name must be defined above (or to the left of) where it is
 used; moving a region changes the order, and the sheet follows.
 
 Each pass gives exactly what running everything from the top in a
-fresh kernel would give — a deleted definition is really gone.
+fresh kernel would give — a deleted definition is really gone. (But
+for what the sheet reads from outside itself — a random number, the
+clock, a file — which it reads once: see
+[below](#what-is-read-from-outside-the-sheet).)
 
 | Write | to |
 |---|---|
@@ -187,7 +190,8 @@ errors; click it to go to the first.
 
 *Automatic* (on by default) recalculates after every change. With it
 off, changed regions are dimmed until **F9**. **Ctrl+F9** recalculates
-everything from scratch. **Stop** (or Esc) interrupts a calculation:
+everything from scratch, and reads again what the sheet reads from
+outside itself. **Stop** (or Esc) interrupts a calculation:
 the statement it was in is flagged, and what lies below keeps its old
 values, dimmed. *Calculate → Restart the kernel* starts a fresh Python.
 
@@ -203,16 +207,74 @@ of running:
   same object, so aliases stay aliases;
 - a statement that changes an object in place (`xs.append(…)`,
   `M[0, 0] = …`) always runs, and whatever it changed is made afresh;
-- anything involving the clock, random numbers, files, `pv()` without
-  arguments, or a module other than the toolkit and the numeric
-  libraries (numpy, sympy, scipy, math …) always runs — so does raw
-  `matplotlib.pyplot`; the toolkit's own `plot()` is reused;
+- `pv()` without arguments, and anything that calls into a module
+  other than the toolkit and the numeric libraries (numpy, sympy,
+  scipy, math …), always runs — so does raw `matplotlib.pyplot`; the
+  toolkit's own `plot()` is reused;
 - values the engine cannot compare reliably (objects of your own
   classes, figures) are recalculated every time.
 
-Results that depend on something outside the sheet and are *not* in
-that list — currency rates, a data file read by a function of yours —
-are refreshed by **Ctrl+F9**.
+### What is read from outside the sheet
+
+A random number, the time of day, the contents of a file, the day's
+currency rates: a statement that reads one of these would come to
+something else every time it ran. It is run **once**. What it made is
+kept — marked *kept*, with the time it was read — and stays: while you
+work on the sheet, and with the sheet's file. Opened next week, on
+another computer, without the file it read, the sheet shows what it
+showed. So a revision of a sheet is one set of results: what it
+[hands on to other sheets](#values-from-another-sheet), and what it
+shows itself.
+
+It is read again when
+
+- the statement is changed, or something of the sheet that it uses
+  (`noise := np.random.rand() · scale` draws again when `scale`
+  changes: put the reading on a line of its own if it is to stay);
+- you click its mark — that one statement reads again;
+- everything is calculated from scratch (**Ctrl+F9**).
+
+Reading again changes the sheet: it has unsaved changes then, and the
+next save is a new revision. A statement that is changed and then put
+back as it was — an undo — has its reading back: the last forty
+readings that were left over like that are held on to.
+
+| What is read | for instance |
+|---|---|
+| random numbers | `np.random.rand()`, `random.random()`, a draw from `rng := np.random.default_rng()` |
+| the clock | `"now"ₜᵢₘₑ`, `datetime.datetime.now()`, `time.time()` |
+| files | `np.loadtxt(…)`, `open(…).read()`, `with open(…) as f:`, `os.environ[…]` |
+| currency rates | `100 USD ▸ DKK` — a conversion; `price · 2` reads none |
+
+The same goes for a statement that calls a function defined on the
+sheet which does one of these. What counts is what a name leads to,
+not how it reads: `input := 5 V` and `load := 5 kN` are variables like
+any other, and `when.time()` is the time of day of a date.
+
+Made anew on every pass all the same, as before:
+
+- what is no value that can be written down: a function, a table from
+  pandas, a file that is open, the random stream itself (what is
+  *drawn* from it is kept), and values larger than a sheet
+  [hands on](#values-from-another-sheet);
+- what is read from a file that a variable holds open (`f := open(…)`,
+  and then `f.readline()`): where that reads depends on what was read
+  before it. A file that is read in one statement — `open(…).read()`,
+  `with open(…) as f:` — is kept;
+- random numbers once the sheet has given their stream its seed
+  (`np.random.seed(1)`, `default_rng(42)`): they come out the same
+  every time by the sheet's own doing, and are drawn on every pass from
+  there down;
+- what is a part of something else on the sheet: a row picked out of a
+  list of rows (`random.choice(rows)`) is that list's own row, and
+  changing it changes the list. A copy of it (`list(…)`) is kept;
+- a file that is opened for writing, and calls into other modules — an
+  instrument's driver, a request to the web: the worksheet cannot know
+  what they do besides reading.
+
+A sheet that was saved before its readings could be kept reads once
+more when it is opened, and has unsaved changes then: save it, and it
+has them.
 
 ## Values from another sheet
 
@@ -463,6 +525,8 @@ A worksheet is saved as `.ipynb`:
   beside its settings;
 - so is what its variables were when it was last saved calculated
   (`values`): what other sheets take from it;
+- what a statement read outside the sheet — a random number, the
+  clock, a file — is in its cell's metadata (`kept`);
 - a region that holds values from another sheet is a cell of code that
   any notebook runs, and its metadata says where they are from (`given`);
 - tags, attachments and other metadata of existing cells are preserved.
@@ -580,10 +644,15 @@ the folder the server was started in.
 - A value from another sheet is taken, and brought up to a newer
   revision, by hand and sheet by sheet: a chain of sheets is not
   brought up to date in one go.
-- What a revision hands on is fixed; the sheet itself is not. Opened
-  again, a sheet that reads the clock, a random number or a file
-  calculates with what it finds then, and may show other values than
-  its revision handed on — until it is saved changed, as a new revision.
+- What a sheet reads outside itself is kept by the worksheet, not by
+  the notebook: run in JupyterLab, the notebook reads everything again.
+  Kept are random numbers, the clock, files and currency rates as far
+  as the worksheet recognises them; a call into another module — an
+  instrument's driver, a request to the web — is made on every pass.
+- A revision keeps what the sheet read, not the software that
+  calculates it: another version of the toolkit, or of numpy, may come
+  to something else. The sheet says so when the toolkit is another
+  version than it was saved with.
 - A value that is handed on is at most 400 000 characters of text (an
   array of some 35 000 numbers), and all of a sheet's together 4 million.
 - Header and footer are the worksheet's: JupyterLab and `hardcopy()`,
@@ -598,7 +667,7 @@ the folder the server was started in.
 |---|---|
 | `utils/worksheet/server.py` | tornado server: page, notebook API, WebSocket |
 | `utils/worksheet/session.py` | one kernel per sheet; request/reply plumbing |
-| `utils/worksheet/engine.py` | *in the kernel*: splits regions into statements, runs them, decides what can be reused |
+| `utils/worksheet/engine.py` | *in the kernel*: splits regions into statements, runs them, decides what can be reused — and what was read outside the sheet, and is kept |
 | `utils/worksheet/fingerprint.py` | "same value as last time?" for the reuse rules |
 | `utils/worksheet/mathrender.py` | transformed-Python AST → LaTeX |
 | `utils/worksheet/document.py` | `.ipynb` ⇄ worksheet document, trust |
@@ -663,13 +732,15 @@ only so is that the 1009 a page of the sheet has.
 
 ```bash
 python -m pytest tests/test_worksheet_render.py tests/test_worksheet_engine.py \
-                 tests/test_worksheet_values.py \
+                 tests/test_worksheet_values.py tests/test_worksheet_kept.py \
                  tests/test_worksheet_document.py tests/test_worksheet_server.py \
                  tests/test_worksheet_library.py tests/test_worksheet_frontend.py
 ```
 
 `test_worksheet_engine.py` includes a randomized check that an
 incremental pass always shows what a from-scratch pass shows.
+`test_worksheet_kept.py` is what a sheet reads outside itself: read
+once, kept, and handed to another kernel as text.
 `test_worksheet_frontend.py` runs the front end's pure logic under
 node and drives the real page in a browser; each part skips if its tool
 (node; Playwright with a Chromium) is missing.

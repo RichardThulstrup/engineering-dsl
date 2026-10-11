@@ -65,6 +65,10 @@ class Region {
     // delivers now (given.js: standing) — undefined until that is known.
     this.mark = undefined;
     this.gift = 0;                      // of what it was given: the number a snapshot for undo names it by
+    // What its statements read outside the sheet, as its file has it (the
+    // engine's records) — and the text those records are of.
+    this.kept = Array.isArray(data.kept) ? data.kept : [];
+    this.filed = this.source;
     this.result = null;                 // {items, tail, rev} from the kernel
     this.typeset = null;                // {source, items}: typeset without results
     this.stale = false;
@@ -89,6 +93,8 @@ export class Sheet {
    *   prefs()                  {markdown}: text is written as its markdown, not as it looks
    *   frame()                  the header or the footer of a page was double-clicked
    *   given(region)            what this region was given by another sheet is to be chosen anew
+   *   kept(id)                 the record of what a statement read outside the sheet — or null
+   *   again(id)                that statement is to read it again
    */
   constructor(hooks) {
     this.hooks = hooks;
@@ -179,6 +185,33 @@ export class Sheet {
     return this.regions.filter((r) => r.given);
   }
 
+  /**
+   * What the statements of a region read outside the sheet, for its
+   * file: as the kernel has it where the region is calculated as it
+   * stands — and otherwise as the file had it, while the text is the
+   * file's still.
+   */
+  keptOf(region) {
+    if (region.result && region.result.source === region.source) {
+      return region.result.items.filter((item) => item.kept).map((item) => this.hooks.kept(item.kept.id)).filter(Boolean);
+    }
+    return region.source === region.filed ? region.kept : [];
+  }
+
+  /** Has a region read other things outside the sheet than its file has of it?  (Then the sheet is not what its file is.) */
+  keptAnew(region) {
+    const said = (records) => JSON.stringify(records.map((record) => [record.id, record.at]));
+    return said(this.keptOf(region)) !== said(region.kept);
+  }
+
+  /** The sheet has been saved as these regions (see serialize): what they read outside the sheet is the file's now. */
+  filed(saved) {
+    for (const data of saved) {
+      const region = this.find(data.id);
+      if (region) Object.assign(region, { kept: data.kept || [], filed: data.source });
+    }
+  }
+
   /** The kernel's word on a region that was given values, as far as it is of the region as it stands: {told, error}. */
   said(region) {
     return givenSaid(region.result && region.result.source === region.source ? region.result : null);
@@ -207,6 +240,7 @@ export class Sheet {
       // The pictures a text still names; one it has let go of is not kept.
       attachments: r.kind === "text" ? named(r.source, r.attachments) : undefined,
       given: r.given || undefined,
+      kept: r.kind === "math" && this.keptOf(r).length ? this.keptOf(r) : undefined,
     }));
   }
 
@@ -1328,7 +1362,8 @@ export class Sheet {
     const rowNode = event.target.closest("[data-line]");
     this.press = { kind: "region", region, start: point, moved: false, dragging: false,
                    line: rowNode ? Number(rowNode.dataset.line) : null, grip: onGrip,
-                   mark: Boolean(event.target.closest(".mark")) };
+                   mark: Boolean(event.target.closest(".mark")),
+                   kept: event.target.closest(".kept")?.dataset.id ?? null };
   }
 
   pointerMove(event) {
@@ -1396,6 +1431,8 @@ export class Sheet {
       return;
     }
     if (!press.dragging) {
+      // A click on the mark of what was read outside the sheet reads it again.
+      if (press.kept !== null) { this.hooks.again?.(press.kept); this.focus(); return; }
       // A click on a picture selects it — there is no text in it to edit;
       // a double click opens the text that names it (for a caption, say).
       // So for what another sheet gave: a double click asks what it is to

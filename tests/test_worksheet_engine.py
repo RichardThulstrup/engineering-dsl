@@ -187,17 +187,22 @@ def test_values_without_a_reliable_fingerprint_are_recalculated(kernel):
     assert kernel.calc([s.format(2) for s in sheet]).value(2) == "2"
 
 
-def test_statements_that_look_outside_the_sheet_always_run(kernel):
-    clock = "%%python\nimport time\ntime.perf_counter()"
-    assert kernel.calc([clock], fresh=True).value(0) != kernel.calc([clock]).value(0)
+def test_what_looks_at_everything_always_runs_and_what_reads_outside_the_sheet_is_kept(kernel):
     # ``pv()`` lists every variable, so it depends on all of them.
     before = kernel.calc(["a := 1", "pv()"]).item(1)["outputs"]
     after = kernel.calc(["a := 2", "pv()"]).item(1)["outputs"]
     assert before != after
-    # The toolkit's own clock literal, and a file read through numpy.
-    for source in ('t_now := "now"ₜᵢₘₑ', "d_1 := np.loadtxt('nothing.csv')"):
+    # The clock is something else: it is read once, and what was read is
+    # kept (tests/test_worksheet_kept.py) — until everything is calculated
+    # from scratch.
+    clock = "%%python\nimport time\ntime.perf_counter()"
+    first = kernel.calc([clock], fresh=True).value(0)
+    assert kernel.calc([clock]).value(0) == first != kernel.calc([clock], fresh=True).value(0)
+    # So for the toolkit's own clock literal; a file that is not there is
+    # looked for every time (an error is nothing to keep).
+    for source, run in (('t_now := "now"ₜᵢₘₑ', 0), ("d_1 := np.loadtxt('nothing.csv')", 1)):
         kernel.calc([source], fresh=True)
-        assert kernel.calc([source]).executed == 1, source
+        assert kernel.calc([source]).executed == run, source
     # ... whereas ``time`` and ``load`` are perfectly good names for values.
     kernel.calc(["load := 250 mA", "p_load := 5 V · load"], fresh=True)
     assert kernel.calc(["load := 250 mA", "p_load := 5 V · load"]).reused == 2

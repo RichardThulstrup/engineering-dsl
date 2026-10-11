@@ -11,6 +11,12 @@ time.  Statements whose inputs are unchanged are not executed again —
 their recorded effect is replayed — which is what makes editing a large
 sheet feel immediate (see :class:`_Memo` for when that is allowed).
 
+One thing a clean run would not give again: what a statement reads from
+outside the sheet — the clock, a random number, a file, the day's
+currency rates.  Such a statement is run once, and what it made is kept:
+here, and as text with the sheet's file, so that a revision of a sheet
+shows what it showed (see ``Engine._outside`` and ``Engine._keep``).
+
 Results travel to the front end as ``display_data`` messages carrying
 the :data:`MIME` type; nothing here knows about the web server.
 """
@@ -19,15 +25,19 @@ from __future__ import annotations
 import ast
 import base64
 import builtins
+import datetime
 import hashlib
+import io
 import json
 import linecache
+import re
 import sys
 import time
 import traceback
 import types
 
 from .. import circuit_dsl as _dsl
+from .. import currencies as _currencies
 from .. import runtime as _runtime
 from .. import sigfig as _sigfig
 from . import mathrender
@@ -42,24 +52,40 @@ _SHOW_MIMES = ("text/plain", "text/latex", "text/html", "text/markdown",
                "image/png", "image/jpeg", "image/svg+xml")
 _MAX_TEXT = 20_000
 
-# A statement mentioning one of these reads the namespace wholesale or
-# depends on something outside the sheet (the clock, a random stream, a
-# file), so its result is never reused — it runs on every pass.
-_VOLATILE_NAMES = frozenset({
-    "globals", "locals", "vars", "dir", "eval", "exec", "get_ipython",
-    "__import__", "input", "open",
-    "random", "rand", "randn", "randint", "default_rng",
-    "perf_counter", "monotonic", "environ",
+# A statement mentioning one of these is never reused as a calculation
+# is.  It reads the namespace wholesale — then it runs on every pass, for
+# anything may have changed that it sees …
+_WHOLESALE_NAMES = frozenset({
+    "globals", "locals", "vars", "dir", "eval", "exec", "get_ipython", "__import__",
 })
+# … or it depends on something outside the sheet: a random stream, the
+# clock, a file, the day's currency rates.  What such a statement makes is
+# taken once and kept, with the sheet's file too (see ``Engine._keep``).
+_OUTSIDE_NAMES = {
+    "random": "random", "rand": "random", "randn": "random", "randint": "random",
+    "default_rng": "random",
+    "perf_counter": "clock", "monotonic": "clock",
+    "input": "file", "open": "file", "environ": "file",
+    "get_currency_rate": "rates", "update_currency_rates": "rates",
+}
+_VOLATILE_NAMES = _WHOLESALE_NAMES | frozenset(_OUTSIDE_NAMES)
 # The same, for names that are too ordinary to act on by themselves
 # (``time`` and ``load`` are fine variables) but telling as attributes:
-# ``datetime.now()``, ``np.random.seed(1)``, ``np.loadtxt(…)``, ``f.read()``.
-_VOLATILE_ATTRIBUTES = _VOLATILE_NAMES | frozenset({
-    "seed", "now", "today", "utcnow", "time",
-    "load", "loadtxt", "genfromtxt", "fromfile", "read", "readlines",
-    "read_text", "read_bytes", "read_csv", "read_excel",
+# ``datetime.now()``, ``np.loadtxt(…)``, ``f.read()``.
+_OUTSIDE_ATTRIBUTES = dict(_OUTSIDE_NAMES, **{
+    "now": "clock", "today": "clock", "utcnow": "clock", "time": "clock",
+    "load": "file", "loadtxt": "file", "genfromtxt": "file", "fromfile": "file",
+    "read": "file", "readlines": "file", "read_text": "file", "read_bytes": "file",
+    "read_csv": "file", "read_excel": "file",
 })
+_VOLATILE_ATTRIBUTES = _VOLATILE_NAMES | frozenset(_OUTSIDE_ATTRIBUTES)
 _CLOCK_LITERALS = mathrender.CLOCK_WORDS          # ``"now"ₜᵢₘₑ`` and friends
+# A random stream that is given its seed — ``np.random.seed(1)``,
+# ``default_rng(42)`` — comes out the same on every run by the sheet's own
+# doing.  From there on a pass draws its random numbers anew, as a run
+# from the top would: kept ones would not move the stream along.
+_SEEDED = frozenset({"default_rng", "RandomState", "Random", "PCG64", "MT19937", "Philox", "SFC64"})
+_OPEN_MODE = re.compile(r"[rwxabt+U]{1,4}\Z")
 
 # Calls into these packages are computations: same arguments, same answer.
 # A call into any other module (pyplot, pandas I/O, os …) may touch state
@@ -71,8 +97,17 @@ _PURE_PACKAGES = frozenset({
 })
 
 
-def _pure_module(name) -> bool:
-    return (name or "").split(".")[0] in _PURE_PACKAGES
+# These, though, are where the clock, random numbers and files are had
+# from: a statement that reads outside the sheet may call into them and
+# still have what it made kept.
+_SOURCE_PACKAGES = frozenset({
+    "random", "time", "datetime", "os", "pathlib", "io", "json", "csv", "pandas",
+})
+
+
+def _pure_module(name, also=frozenset()) -> bool:
+    package = (name or "").split(".")[0]
+    return package in _PURE_PACKAGES or package in also
 
 
 # What a statement shows when the user stopped the calculation in it.
@@ -218,7 +253,7 @@ class _Item:
     room for its result, or a comment."""
     __slots__ = ("kind", "first", "last", "src", "comment", "gap", "nodes", "code",
                  "mode", "tsrc", "offset", "suppress", "reads", "volatile", "calls",
-                 "error", "key")
+                 "outside", "whole", "seeds", "binds", "error", "key")
 
     def __init__(self, kind, first, last, src):
         self.kind, self.first, self.last, self.src = kind, first, last, src
@@ -233,6 +268,10 @@ class _Item:
         self.reads = frozenset()
         self.volatile = False
         self.calls = ()
+        self.outside = frozenset()  # what it reads outside the sheet: "clock", "random", "file", "rates"
+        self.whole = False          # it reads the namespace wholesale, or does what cannot be told: run on every pass
+        self.seeds = False          # it gives a random stream its seed
+        self.binds = frozenset()    # every name it may bind (or unbind)
         self.error = None
         self.key = None
 
@@ -299,49 +338,200 @@ def _logical_chunks(lines):
     return trimmed
 
 
+def _opens_to_write(call) -> bool:
+    """Is this ``open(…)`` for writing — as far as can be told?  (Writing
+    a file is something done, not something read: it is done every time.)"""
+    stated = list(call.args[:2]) + [k.value for k in call.keywords if k.arg == "mode"]
+    for arg in stated:
+        if (isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                and _OPEN_MODE.match(arg.value) and set(arg.value) & set("wax+")):
+            return True
+    mode = next((k.value for k in call.keywords if k.arg == "mode"), None)
+    if mode is None and len(call.args) > 1:
+        mode = call.args[1]
+    return mode is not None and not isinstance(mode, ast.Constant)     # a mode that is worked out: who knows
+
+
+def _through(node):
+    """The names an attribute is had through, from the first one on —
+    ``("np", "random", "rand")`` for ``np.random.rand`` — or ``None``
+    where it hangs on something that is worked out."""
+    names = []
+    while isinstance(node, ast.Attribute):
+        names.append(node.attr)
+        node = node.value
+    return (node.id, *reversed(names)) if isinstance(node, ast.Name) else None
+
+
 def _analyse(nodes):
-    """``(reads, volatile, calls)`` for a statement.
+    """``(reads, volatile, calls, outside, whole, seeds, binds)`` for a statement.
 
     ``reads`` is every name it may look up — a superset is fine: an
     extra name can only cause a needless recalculation, never a stale
     result.  ``calls`` lists what is called, for the check at run time
     that those callables are computations (see ``Engine._impure``).
+    ``volatile`` says that its result is never reused as a calculation
+    is, and the three after it why: it reads something ``outside`` the
+    sheet, it reads the namespace as a ``whole`` (or does what cannot be
+    told), it ``seeds`` a random stream.  ``binds`` is every name it may
+    bind or unbind.
+
+    ``outside`` is pairs ``(which, through)``: which of "clock",
+    "random", "file", "rates" — and the names it is had through
+    (``("np", "random", "rand")`` for ``np.random.rand()``,
+    ``("input",)`` for ``input()``; ``None`` where it hangs on no name).
+    What those names lead to when the statement runs says whether it
+    is a way out of the sheet at all (``Engine._way_out``): ``load := 5
+    kN`` is a fine variable.
     """
-    reads, calls, volatile = set(), [], False
+    reads, calls, binds, outside = set(), [], set(), set()
+    volatile = whole = seeds = False
     for root in nodes:
         for node in ast.walk(root):
             if isinstance(node, ast.Name):
                 reads.add(node.id)              # targets too: ``x += 1`` reads x
+                if not isinstance(node.ctx, ast.Load):
+                    binds.add(node.id)
+                elif node.id in _OUTSIDE_NAMES:
+                    outside.add((_OUTSIDE_NAMES[node.id], (node.id,)))
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 reads.add(node.name)
+                binds.add(node.name)
+            elif isinstance(node, ast.ExceptHandler):
+                if node.name:
+                    binds.add(node.name)
             elif isinstance(node, ast.Attribute):
                 if node.attr in _VOLATILE_ATTRIBUTES:
                     volatile = True
+                    if node.attr in _OUTSIDE_ATTRIBUTES:
+                        outside.add((_OUTSIDE_ATTRIBUTES[node.attr], _through(node)))
             elif isinstance(node, (ast.Import, ast.ImportFrom)):
                 module = node.module if isinstance(node, ast.ImportFrom) else None
                 for alias in node.names:
+                    binds.add(alias.asname or alias.name.split(".")[0])
                     if alias.name == "*" or not _pure_module(module or alias.name):
                         volatile = True
             elif isinstance(node, (ast.Global, ast.Nonlocal, ast.Await, ast.Yield,
                                    ast.YieldFrom)):
-                volatile = True
+                volatile = whole = True
             if isinstance(node, ast.Call):
                 func = node.func
+                called = (func.id if isinstance(func, ast.Name)
+                          else func.attr if isinstance(func, ast.Attribute) else None)
+                if called == "seed" or (called in _SEEDED and (node.args or node.keywords)):
+                    volatile = seeds = True
+                if called == "open" and _opens_to_write(node):
+                    whole = True
                 if isinstance(func, ast.Name):
                     calls.append((func.id, False))
                     if func.id == "pv" and not node.args:
-                        volatile = True         # pv() lists every variable
+                        volatile = whole = True     # pv() lists every variable
                     if (func.id == "iso" and node.args and isinstance(node.args[0], ast.Constant)
                             and str(node.args[0].value).strip().lower() in _CLOCK_LITERALS):
                         volatile = True
+                        outside.add(("clock", None))
                 else:
                     while isinstance(func, ast.Attribute):
                         func = func.value
                     if isinstance(func, ast.Name):
                         calls.append((func.id, True))
-    if reads & _VOLATILE_NAMES:
+    for name in reads & _VOLATILE_NAMES:
         volatile = True
-    return frozenset(reads), volatile, tuple(dict.fromkeys(calls))
+        if name not in _OUTSIDE_NAMES:
+            whole = True
+    return (frozenset(reads), volatile, tuple(dict.fromkeys(calls)), frozenset(outside), whole, seeds,
+            frozenset(binds))
+
+
+# ---------------------------------------------------------------------------
+# What is read from outside the sheet, and kept
+# ---------------------------------------------------------------------------
+
+def _stream_kinds():
+    """What a random stream may be, as far as the modules are loaded."""
+    streams = []
+    module = sys.modules.get("random")
+    if module is not None:
+        streams.append(module.Random)
+    numpy = sys.modules.get("numpy")
+    if numpy is not None:
+        streams += [numpy.random.Generator, numpy.random.RandomState, numpy.random.BitGenerator]
+    return tuple(streams)
+
+
+def _draws(obj, streams) -> bool:
+    """Is this a random stream — or what draws from one: ``rand``, of
+    ``from numpy.random import rand``?"""
+    if isinstance(obj, (types.MethodType, types.BuiltinFunctionType)):
+        obj = obj.__self__
+    return isinstance(obj, streams)
+
+
+def _closed_file(name, mode):
+    """What is left of a file that a statement opened, read and closed
+    (``with open(…) as f``), for the name it is bound to: a file that is
+    closed, of that name."""
+    file = io.StringIO()
+    file.name, file.mode = name, mode
+    file.close()
+    return file
+
+
+def _plain(print_):
+    """A fingerprint as JSON can carry it — the same for the same value in
+    another kernel, on another day (a set of prints has no order of its own)."""
+    if isinstance(print_, tuple):
+        return [_plain(part) for part in print_]
+    if isinstance(print_, frozenset):
+        return ["{}", sorted(_digest(_plain(part)) for part in print_)]
+    return print_
+
+
+def _state_digest() -> str:
+    """The DSL's state as far as it is the same in another kernel (see ``_state_token``)."""
+    return _digest([_runtime._syntax_mode, _sigfig._DECIMAL_LITERAL_MODE,
+                    sorted(_dsl._DECLARED_SUBSCRIPT_SYMBOLS.items()), sorted(_dsl.PROTECTED_NAMES),
+                    sorted(_sigfig._RADIX_FORMATTERS)])
+
+
+def _events_ok(events) -> bool:
+    """Is this what a statement printed and displayed, as the engine says it (``_Capture``)?"""
+    if not isinstance(events, list):
+        return False
+    for event in events:
+        if not isinstance(event, dict):
+            return False
+        if event.get("type") == "stream":
+            if not (isinstance(event.get("name"), str) and isinstance(event.get("text"), str)):
+                return False
+        elif event.get("type") == "display":
+            data = event.get("data")
+            if not (isinstance(data, dict) and all(isinstance(text, str) for text in data.values())):
+                return False
+        else:
+            return False
+    return True
+
+
+def _closed_ok(held) -> bool:
+    return isinstance(held, dict) and all(
+        isinstance(said, list) and len(said) == 2 and all(isinstance(word, str) for word in said)
+        for said in held.values())
+
+
+def _record_ok(record) -> bool:
+    """Is this what a statement made, as ``Engine._keep`` says it — as far
+    as its shape goes?  (A sheet's file says it, and that may be anyone's:
+    it comes as JSON.  What it says is looked at in ``Engine._replay``,
+    where a text that is no value makes no record.)"""
+    return (isinstance(record, dict)
+            and all(isinstance(record.get(key), str) for key in ("id", "at"))
+            and isinstance(record.get("reads"), dict) and isinstance(record.get("writes"), dict)
+            and _closed_ok(record.get("closed", {}))
+            and isinstance(record.get("gone", []), list)
+            and all(isinstance(name, str) for name in record.get("gone", []))
+            and isinstance(record.get("why", []), list)
+            and _events_ok(record.get("outputs", [])))
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +625,10 @@ def _digest(obj) -> str:
 
 
 class Engine:
+    # How many readings of statements that the sheet has no more are held
+    # on to: an undo brings its statement back, and its reading with it.
+    SPARE = 40
+
     def __init__(self, shell):
         self.shell = shell
         self.ns = shell.user_ns
@@ -448,6 +642,12 @@ class Engine:
         self.executed = self.reused = 0
         self.interrupted = False
         self.calculated = None      # the pass (its ``seq``) whose values the namespace holds, once it got to its end
+        # What statements made that read outside the sheet, by what names
+        # them (``_ident``): kept, and standing in for running them again.
+        self.kept = {}
+        self.seeded = False         # this pass has given a random stream its seed
+        self._met = {}              # this pass: how often each statement's text has come by
+        self._taken = {}            # this region: what was kept anew, for the page (and the file)
         self._registered = set()
 
     # ---- transport -----------------------------------------------------
@@ -610,7 +810,8 @@ class Engine:
             item.mode = "exec"
             item.code = compile(ast.Module(list(nodes), []), filename, "exec",
                                 dont_inherit=True)
-        item.reads, item.volatile, item.calls = _analyse(nodes)
+        (item.reads, item.volatile, item.calls, item.outside, item.whole, item.seeds,
+         item.binds) = _analyse(nodes)
         item.key = (tag, item.src, item.comment, item.suppress)
 
     # ---- errors --------------------------------------------------------
@@ -710,24 +911,264 @@ class Engine:
             return [t.id for t in target.elts]
         return []
 
-    def _impure(self, item):
+    def _impure(self, item, also=frozenset(), known=frozenset()):
         """Does the statement call into a module that may keep state of
-        its own?  Decided when it runs, from what the names are bound to."""
+        its own?  Decided when it runs, from what the names are bound to.
+        (``also``: packages that are let pass as well; ``known``: names
+        that are known for what they are.)"""
         ns = self.ns
         for name, through_attribute in item.calls:
             obj = ns.get(name, MISSING)
-            if obj is MISSING or self.baseline.get(name, MISSING) is obj:
+            if obj is MISSING or self.baseline.get(name, MISSING) is obj or name in known:
                 continue                        # a builtin, or the toolkit's own
             if isinstance(obj, types.ModuleType):
-                if not _pure_module(obj.__name__):
+                if not _pure_module(obj.__name__, also):
                     return True
             elif not through_attribute:
                 if isinstance(obj, types.FunctionType) and obj.__globals__ is ns:
                     continue                    # defined in the sheet: tracked by value
                 if isinstance(obj, (types.FunctionType, types.BuiltinFunctionType, type)) \
-                        and not _pure_module(getattr(obj, "__module__", None)):
+                        and not _pure_module(getattr(obj, "__module__", None), also):
                     return True
         return False
+
+    # ---- what is read from outside the sheet, and kept --------------------
+    def _way_out(self, through):
+        """Is what these names lead to — ``("np", "random", "rand")`` for
+        ``np.random.rand`` — a way out of the sheet: a function, a
+        module, something the sheet cannot look into?  A plain value is
+        none (``load := 5 kN`` is a variable like any other, and
+        ``when.time()`` reads no clock where ``when`` is a date), and
+        neither is a class (``datetime.time(12, 30)`` makes a time of
+        day)."""
+        obj = self.ns.get(through[0], MISSING)
+        for name in through[1:]:
+            if not isinstance(obj, (types.ModuleType, type)):
+                break                           # (a value is not asked for its attributes: asking may run code)
+            obj = getattr(obj, name, MISSING)
+        if isinstance(obj, (types.ModuleType, types.FunctionType, types.BuiltinFunctionType)):
+            return True
+        # What the sheet can compare is data — and so is a class it knows.
+        # What it cannot is a way out: ``os.environ``, a stream, and what
+        # is no name of the sheet at all (``open``).
+        return self.fp(obj) is None
+
+    def _function_names(self, item):
+        """Every name in the code of the sheet's own functions that a
+        statement has in hand — and of the ones those name in turn.  (A
+        function reads, when it is called, what the names in its code
+        read.)"""
+        ns = self.ns
+        names, seen, queue = set(), set(), list(item.reads)
+        while queue:
+            fn = ns.get(queue.pop(), MISSING)
+            if isinstance(fn, types.FunctionType) and fn.__globals__ is ns and id(fn) not in seen:
+                seen.add(id(fn))
+                own = Fingerprinter._global_names(fn.__code__, set())
+                names |= own
+                queue += own
+        return names
+
+    def _outside(self, item):
+        """What a statement reads from outside the sheet — some of
+        "clock", "random", "file", "rates" — where what it makes of that
+        can be kept; nothing, for a statement that reads nothing out
+        there; and ``None`` for one that is run on every pass, whatever
+        it reads:
+
+        * it reads the namespace wholesale, or gives a random stream its
+          seed (and after that, in the same pass, it draws from one);
+        * it calls into a module that may keep state of its own, other
+          than the ones the clock, random numbers and files come from.
+
+        (What it makes is not kept either where it reads something that
+        cannot be compared — a file it has in hand, say: see ``_keep``.)
+        """
+        if item.whole or item.seeds:
+            return None
+        ns = self.ns
+        found = {which for which, through in item.outside if through is None or self._way_out(through)}
+        streams = _stream_kinds()
+        drawn = set()                           # the names that are a random stream, or draw from one
+        for name in item.reads:
+            if _draws(ns.get(name, MISSING), streams):
+                drawn.add(name)
+                found.add("random")
+        # (A function of the sheet's own that gives a seed: the statement
+        # that defines it says ``seed``, and the pass has its seed from there.)
+        found |= {_OUTSIDE_ATTRIBUTES[name] for name in self._function_names(item)
+                  if name in _OUTSIDE_ATTRIBUTES and self._way_out((name,))}
+        if "random" in found and self.seeded:
+            return None
+        if found and self._impure(item, _SOURCE_PACKAGES, drawn):
+            return None
+        return found
+
+    def _has_currency(self, item):
+        """Has the statement a currency in hand — itself, or in a function
+        of the sheet's own that it names?"""
+        ns = self.ns
+        return any(isinstance(ns.get(name), _currencies.Currency)
+                   for name in item.reads | self._function_names(item))
+
+    def _parts(self, objects):
+        """Every part of these values that can be changed in place — a
+        list, an array — as far as a fingerprint looks into them."""
+        fp = self.fp
+        fp.parts = found = []
+        try:
+            for obj in objects:
+                fp(obj)
+        finally:
+            fp.parts = None
+        return found
+
+    def _entangled(self, read, made):
+        """Is something a statement made a part of what it read, so that
+        changing the one in place changes the other?  (``pick :=
+        random.choice(rows)`` hands on a row of ``rows`` itself.)"""
+        mine = self._parts(made)
+        if not mine:
+            return False
+        theirs = self._parts(read)
+        if {id(part) for part in mine} & {id(part) for part in theirs}:
+            return True
+        numpy = sys.modules.get("numpy")
+        if numpy is None:
+            return False
+        arrays = lambda parts: [part for part in parts if isinstance(part, numpy.ndarray)]     # noqa: E731
+        return any(numpy.may_share_memory(one, other) for one in arrays(mine) for other in arrays(theirs))
+
+    def _ident(self, item):
+        """What names a statement among the ones that are kept: its text,
+        and the how-manieth statement of that text it is in this pass (two
+        lines that say ``random()`` are two draws)."""
+        said = item.src.rstrip("; \t") if item.suppress else item.src      # (hiding its value changes nothing of it)
+        text = _digest(said)
+        self._met[text] = count = self._met.get(text, 0) + 1
+        return f"{text}.{count}"
+
+    def _named(self, name):
+        """The toolkit's own object of this name (for values read from text)."""
+        return self.baseline.get(name)
+
+    def _keep(self, ident, item, out, why, inputs, seen, before, value):
+        """Keep what a statement made that read outside the sheet — where
+        it can be kept: binding the same names to the same values, and
+        showing what it showed, must be all that running it did.
+
+        Kept are the names it bound, and its value, as text (``values``);
+        what it printed and displayed; and what it read of the sheet, as
+        fingerprints — while those are what they were, the record stands
+        in for the statement (``_replay``).
+        """
+        from . import values
+        ns, fp = self.ns, self.fp
+        streams = _stream_kinds()
+        reads = {}
+        for name, (print_, _) in inputs.items():
+            obj = seen[name]
+            if print_ is None:
+                # It reads what cannot be compared: who knows what it depends
+                # on.  (A file that is held open, for one: what is read from
+                # it depends on what was read before — and kept, the reads
+                # before it would not have moved the file along.)
+                if not _draws(obj, streams):
+                    return None
+            elif obj is not MISSING and fp(obj) != print_:
+                return None                     # it changed what it read: that is not done again by binding names
+            else:
+                reads[name] = _digest(_plain(print_))
+        writes = {name: obj for name, obj in ns.items() if before.get(name, MISSING) is not obj}
+        forms, made, closed = {}, {}, {}
+        try:
+            for name, obj in writes.items():
+                if name not in item.binds:
+                    if isinstance(name, str) and name.startswith("__"):
+                        continue                # Python's own notes (``__warningregistry__``): not the statement's
+                    return None                 # bound in a way that cannot be read off the statement
+                made[name] = obj
+                if isinstance(obj, io.IOBase) and obj.closed:
+                    # ``with open(…) as f``: the file is done with — what is left of it is its name.
+                    closed[name] = [str(getattr(obj, "name", "")), str(getattr(obj, "mode", ""))]
+                else:
+                    forms[name] = values.dump(obj, fp._base)
+            shown = values.dump(value, fp._base) if item.mode == "eval" else None
+        except values.NotOffered:
+            return None                         # (a function, a table, a file that is open: made anew every time)
+        if self._entangled([obj for obj in seen.values() if obj is not MISSING], [made[name] for name in forms]):
+            return None                         # (read back from text, it would be a copy of that part)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        record = {"id": ident, "why": sorted(why), "state": _state_digest(), "reads": reads, "writes": forms,
+                  "at": now.isoformat(timespec="seconds").replace("+00:00", "Z")}
+        gone = [name for name in before if name not in ns]
+        if gone:
+            record["gone"] = gone
+        if closed:
+            record["closed"] = closed
+        if shown is not None:
+            record["value"] = shown
+        if out.get("outputs"):
+            if len(json.dumps(out["outputs"])) > values._TEXT:
+                return None                     # (it printed more than a sheet should carry about)
+            record["outputs"] = out["outputs"]
+        # In this kernel the very objects are bound again — as long as nothing has changed them since.
+        record["_made"] = (made, value)
+        record["_prints"] = {name: fp(obj) for name, obj in made.items()}
+        self.kept[ident] = record
+        self._taken[ident] = {key: held for key, held in record.items() if not key.startswith("_")}
+        return record
+
+    def _replay(self, item, record, given):
+        """What a statement shows, from what was kept of it — with the
+        names it bound then bound again.  ``None`` where the record does
+        not stand: the statement reads other things of the sheet than it
+        did, the notation is in another state, or the record is not one
+        of this statement (it binds other names) or cannot be read.
+        """
+        from . import values
+        ns, fp = self.ns, self.fp
+        if record.get("state") != _state_digest():
+            return None
+        if not (set(record["writes"]) | set(record.get("gone", ())) | set(record.get("closed", ()))) <= item.binds:
+            return None
+        streams = _stream_kinds()
+        reads = record["reads"]
+        for name in item.reads:
+            print_, _ = fp.of_name(name)
+            if print_ is None:
+                if name in reads or not _draws(ns.get(name, MISSING), streams):
+                    return None
+            elif reads.get(name) != _digest(_plain(print_)):
+                return None
+        made = record.get("_made")
+        if made is not None and any(fp(obj) != record["_prints"][name] for name, obj in made[0].items()):
+            made = None                         # changed in place since: made afresh, from the text
+        if made is None:
+            try:
+                bound = {name: values.load(form, self._named) for name, form in record["writes"].items()}
+                value = values.load(record["value"], self._named) if "value" in record else None
+            except ValueError:
+                return None
+            bound.update((name, _closed_file(*said)) for name, said in record.get("closed", {}).items())
+            made = record["_made"] = (bound, value)
+            record["_prints"] = {name: fp(obj) for name, obj in bound.items()}
+        bound, value = made
+        ns.update(bound)
+        for name in record.get("gone", ()):
+            ns.pop(name, None)
+        out = {"t": "stmt", "src": item.src, "lines": [item.first, item.last], "gap": item.gap}
+        if item.comment:
+            out["comment"] = item.comment
+        if item.suppress:
+            out["suppress"] = True
+        self._typeset(item, out)
+        out["outputs"] = record.get("outputs", [])
+        self._shown(item, out, value, given)
+        out["kept"] = {"id": record["id"], "at": record["at"], "why": record.get("why", [])}
+        out["h"] = _digest(out)
+        out["ms"] = 0.0
+        return out
 
     def _run_magic(self, item, out):
         with _Capture(self.shell) as cap:
@@ -758,8 +1199,7 @@ class Engine:
         rendered = mathrender.render_statement(ast.parse(name).body[0], name, self.names)
         return rendered["latex"] if rendered else ""
 
-    def _execute(self, item, out, given=False):
-        ns = self.ns
+    def _typeset(self, item, out):
         rendered = None
         if len(item.nodes) == 1:
             rendered = mathrender.render_statement(item.nodes[0], item.tsrc, self.names)
@@ -770,6 +1210,12 @@ class Engine:
                 out["target"] = rendered["target"]
         else:
             out["kind"] = "expr" if item.mode == "eval" else "other"
+
+    def _execute(self, item, out, given=False):
+        """Run a statement; what it shows goes into ``out``.  Returns its
+        value (of a statement that is an expression, and ran)."""
+        ns = self.ns
+        self._typeset(item, out)
         value = None
         with _Capture(self.shell) as cap:
             try:
@@ -785,8 +1231,13 @@ class Engine:
             except BaseException as exc:        # SystemExit too: report it, carry on
                 out["error"] = self._error(exc, item)
         out["outputs"] = cap.events
-        if "error" in out:
-            return
+        if "error" not in out:
+            self._shown(item, out, value, given)
+        return value
+
+    def _shown(self, item, out, value, given):
+        """What a statement that ran shows of its result: into ``out``."""
+        ns = self.ns
         if given:
             # What the names it binds are now, for the page to show: each
             # name as the sheet typesets it, each value as it is displayed.
@@ -842,11 +1293,31 @@ class Engine:
             return base
 
         key = (item.key, given, _state_token())
-        memoizable = (use_memo and item.kind == "stmt" and not item.volatile
-                      and not self._impure(item))
+        # A statement that reads outside the sheet: what was kept of it
+        # stands, while what it reads of the sheet is what it was.
+        # (``outside``: what it reads out there; nothing, for a
+        # calculation; ``None``: it is run on every pass.)
+        outside = ident = None
+        if use_memo and item.kind == "stmt":
+            outside = self._outside(item)
+            ident = self._ident(item)
+            record = self.kept.get(ident)
+            # (Whether a statement reads the day's currency rates shows only
+            # when it runs: one that did is taken at its record's word —
+            # if it has a currency in hand at all.)
+            if record is not None and (outside or (record.get("why") == ["rates"] and self._has_currency(item))):
+                out = self._replay(item, record, given)
+                if out is not None:
+                    self.reused += 1
+                    return out
+        memoizable = (use_memo and item.kind == "stmt" and not item.volatile and outside is not None
+                      and not outside and not self._impure(item))
         if memoizable:
             for entry in self.memo.candidates(key):
-                if self._reusable(entry):
+                # (A result that holds a reading of the day's rates is good
+                # only while that reading is kept: asked for anew, it is not.)
+                held = entry.result.get("kept")
+                if self._reusable(entry) and (held is None or held["id"] in self.kept):
                     ns = self.ns
                     ns.update(entry.writes)
                     for name in entry.deletes:
@@ -863,20 +1334,29 @@ class Engine:
 
         ns, fp = self.ns, self.fp
         state_before = key[-1]
-        if memoizable:
+        if memoizable or outside:
             inputs = {name: fp.of_name(name) for name in item.reads}
             seen = {name: ns.get(name, MISSING) for name in item.reads}
         figures = _open_figures()
         before = dict(ns)
+        rates, value = _currencies._reads, None
         t0 = time.perf_counter()
         try:
             if item.kind == "magic":
                 self._run_magic(item, out)
             else:
-                self._execute(item, out, given)
+                value = self._execute(item, out, given)
         finally:
             ms = round((time.perf_counter() - t0) * 1000, 2)
             self.executed += 1
+        if item.seeds:
+            self.seeded = True
+        if memoizable and _currencies._reads != rates:
+            outside = {"rates"}                 # (it read the day's rates: its result is of that day)
+        if outside and "error" not in out and _state_token() == state_before and _open_figures() == figures:
+            record = self._keep(ident, item, out, outside, inputs, seen, before, value)
+            if record is not None:
+                out["kept"] = {"id": ident, "at": record["at"], "why": record["why"]}
         out["h"] = _digest(out)
         out["ms"] = ms
 
@@ -934,19 +1414,37 @@ class Engine:
         everything").  ``reuse: false`` runs every statement without
         consulting or touching what is remembered — the reference run
         the tests compare an incremental pass against.
+
+        What statements read outside the sheet is kept (``_keep``).
+        ``kept`` is what the page has of that — from the sheet's file —
+        for a kernel that has just come: the records, which are what
+        there is from then on.  ``anew`` names records that are to be
+        read again.  A region's reply carries the records made in this
+        pass (``kept``: id → record), and ``done`` the ids of all that
+        there are now (``kept``): the page holds what the kernel holds.
         """
         seq = request.get("seq")
         self.pass_no += 1
         self.executed = self.reused = 0
         self.calculated = None                  # (until this pass has got to its end)
+        if "kept" in request:
+            # What the page has of what was read outside the sheet — from
+            # the sheet's file — is what there is of it from here on.
+            self.kept = {record["id"]: {key: held for key, held in record.items() if not key.startswith("_")}
+                         for record in request["kept"] if _record_ok(record)}
         if request.get("fresh"):
             self.memo.clear()
+            self.kept.clear()
+        for ident in request.get("anew", ()):
+            self.kept.pop(ident, None)
+        self.seeded, self._met = False, {}
         use_memo = bool(request.get("reuse", True))
         t0 = time.perf_counter()
         self._reset()
         self.interrupted = False
         for region in request.get("regions", ()):
             results, tail = [], []
+            self._taken = {}
             started = time.perf_counter()
             try:
                 for item in self.parse(region.get("source", "")).items:
@@ -958,6 +1456,8 @@ class Engine:
                 self.interrupted = True
             rev = _digest([[r["h"], r["lines"], r.get("gap", False)] for r in results] + [tail])
             message = {"op": "region", "seq": seq, "id": region.get("id"), "rev": rev}
+            if self._taken:
+                message["kept"] = self._taken   # what was read outside the sheet in this pass: the page keeps it, too
             if rev == region.get("have") and not self.interrupted:
                 message["same"] = True
             else:
@@ -971,11 +1471,18 @@ class Engine:
         self.memo.prune(self.pass_no)
         if not self.interrupted:
             self.calculated = seq
+            if use_memo:
+                # What was read for statements that the sheet has no more
+                # is let go — but for the last of it.
+                met = {f"{text}.{n}" for text, count in self._met.items() for n in range(1, count + 1)}
+                loose = [ident for ident in self.kept if ident not in met]
+                for ident in loose[:max(0, len(loose) - self.SPARE)]:
+                    del self.kept[ident]
         self._publish({
             "op": "done", "seq": seq, "interrupted": self.interrupted,
             "ms": round((time.perf_counter() - t0) * 1000, 1),
             "executed": self.executed, "reused": self.reused,
-            "names": self.user_names(),
+            "names": self.user_names(), "kept": list(self.kept),
         })
 
     def op_render(self, request):
@@ -1079,6 +1586,7 @@ class Engine:
             "functions": sorted(functions), "constants": sorted(constants),
             "python": platform.python_version(),
             "syntax_mode": _runtime.get_syntax_mode(),
+            "toolkit": _toolkit_version(),
         })
         self._publish({"op": "done", "seq": seq})
 

@@ -235,6 +235,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .cmtline { margin-left: 0; padding: 2px 0; display: block; }
 .cmtline.gap { margin-top: 9px; }
 .line .plain { font: 13px/1.4 var(--mono); white-space: pre; }
+/* The mark on what was read outside the sheet (the clock, a random number,
+   a file) and is kept: when it was read.  A click reads it again. */
+.line .kept {
+  margin-left: .9em; padding: 0 5px; border-radius: 7px; font: 10.5px/1.5 var(--ui); color: var(--muted);
+  background: #f1f3f5; white-space: nowrap; cursor: pointer; align-self: center; user-select: none;
+}
+.line .kept:hover { background: var(--accent-soft); color: var(--accent); }
 .line code.src, .pending-src {
   font: 13px/1.5 var(--mono); white-space: pre; display: inline-block; color: #33383d;
 }
@@ -609,7 +616,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   html, body { height: auto; overflow: visible; background: #fff; }
   body { display: block; }
   #bar, #banner, #palette, #overlay, #toast, #cross, #band, #sink, .pagebreak, .grip, .sizer, .preview, .popup,
-  .errpop, .flag, .pageframe.ahead, .region.given .mark { display: none !important; }
+  .errpop, .flag, .pageframe.ahead, .region.given .mark, .line .kept { display: none !important; }
   #work, #desk { display: block; overflow: visible; padding: 0; }
   #paper { width: 680px; margin: 0; padding: 0; box-shadow: none; zoom: 1 !important; }
   /* As long as what is on it, and no longer (sheet.js: drawBreaks). */

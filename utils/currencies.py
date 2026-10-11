@@ -303,6 +303,12 @@ class Currency:
 # Rate management
 # ---------------------------------------------------------------------------
 
+# How often a rate has been asked for.  The worksheet looks at this
+# around each statement: one that read the day's rates is one whose result
+# is of that day, and is kept with the sheet (worksheet/engine.py).
+_reads = 0
+
+
 def get_currency_rate(code: str) -> float:
     """Return DKK-per-unit-of-``code`` at the current time.
 
@@ -315,6 +321,8 @@ def get_currency_rate(code: str) -> float:
     DKK and the static fallback list (so the call works offline for
     common currencies even on first use).
     """
+    global _reads
+    _reads += 1
     _ensure_rates_fresh()
     try:
         return _rates[code]

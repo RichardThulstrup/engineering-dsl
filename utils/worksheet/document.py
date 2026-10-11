@@ -12,8 +12,11 @@ A sheet delivers values to other sheets: what its variables were when
 it was saved is kept in the notebook's metadata, with the revision that
 save made (``values``), and a region that was given values by another
 sheet says in its cell's metadata where they are from (``given``).
-Both are text and data — see ``values.py`` — and nothing here reads
-more out of them than that they have the shape they should.
+There, too, is what the region's statements read outside the sheet —
+the clock, a random number, a file — so that the sheet shows on another
+day what it showed (``kept``; the records are the engine's).  All of it
+is text and data — see ``values.py`` — and nothing here reads more out
+of it than that it has the shape it should.
 
 Opening a sheet does not, by itself, run it: a notebook that was not
 last saved on this machine (Jupyter's own trust record decides) is
@@ -202,6 +205,73 @@ def _values(listed) -> list:
     return kept
 
 
+def _texts(held) -> bool:
+    return isinstance(held, dict) and all(isinstance(text, str) for text in held.values())
+
+
+def _sizes(said, data) -> dict:
+    """How large what was displayed is shown: all that is kept of what is
+    said about it.  (A figure is drawn with twice the dots, and says how
+    large it is meant to be.)"""
+    sizes = {}
+    for kind, size in said.items() if isinstance(said, dict) else ():
+        if kind in data and isinstance(size, dict):
+            sides = {side: size[side] for side in ("width", "height")
+                     if isinstance(size.get(side), (int, float)) and not isinstance(size[side], bool)}
+            if sides:
+                sizes[kind] = sides
+    return sizes
+
+
+def _events(events):
+    """What a statement printed and displayed, as the engine says it —
+    or ``None`` for what is not that."""
+    kept = []
+    for event in events if isinstance(events, list) else [None]:
+        if not isinstance(event, dict):
+            return None
+        if event.get("type") == "stream" and isinstance(event.get("name"), str) and isinstance(event.get("text"), str):
+            kept.append({"type": "stream", "name": event["name"], "text": event["text"]})
+        elif event.get("type") == "display" and _texts(event.get("data")):
+            data = {kind: text for kind, text in event["data"].items() if kind in _STORED_MIMES}
+            kept.append({"type": "display", "data": data, "metadata": _sizes(event.get("metadata"), data)})
+        else:
+            return None
+    return kept
+
+
+def _kept(records) -> list:
+    """What the statements of a region made that read outside the sheet:
+    the engine's records (``Engine._keep``), each as far as it is one —
+    whole, or not at all."""
+    kept = []
+    for record in records if isinstance(records, list) else []:
+        if not (isinstance(record, dict) and all(isinstance(record.get(key), str) for key in ("id", "at", "state"))
+                and _texts(record.get("reads")) and _texts(record.get("writes"))):
+            continue
+        why, gone, closed = record.get("why", []), record.get("gone", []), record.get("closed", {})
+        events = _events(record.get("outputs", []))
+        if not (isinstance(why, list) and isinstance(gone, list) and all(isinstance(word, str) for word in why + gone)
+                and isinstance(record.get("value", ""), str) and events is not None):
+            continue
+        if not (isinstance(closed, dict) and all(
+                isinstance(said, list) and len(said) == 2 and all(isinstance(word, str) for word in said)
+                for said in closed.values())):
+            continue
+        one = {"id": record["id"], "at": record["at"], "why": why, "state": record["state"],
+               "reads": record["reads"], "writes": record["writes"]}
+        if gone:
+            one["gone"] = gone
+        if closed:
+            one["closed"] = closed
+        if "value" in record:
+            one["value"] = record["value"]
+        if events:
+            one["outputs"] = events
+        kept.append(one)
+    return kept
+
+
 def _revision(value):
     """A revision as it is counted or was typed: a number, or text — else ``None``."""
     if isinstance(value, str) or (isinstance(value, int) and not isinstance(value, bool)):
@@ -286,15 +356,21 @@ def load(path: Path) -> dict:
             given = _given(place.get("given"))
             if given:
                 region["given"] = given
+            kept = _kept(place.get("kept"))
+            if kept:
+                region["kept"] = kept
         else:
             pictures = _pictures(cell.get("attachments"))
             if pictures:
                 region["attachments"] = pictures
         regions.append(region)
+    record = _record(meta.get("values"))
     return {
         "name": path.stem, "trusted": trusted, "mtime": _stamp(path),
         "settings": meta.get("settings") or {}, "laidOut": "version" in meta,
         "preamble": preamble, "regions": regions,
+        # (Which toolkit its values were made with: another one may make others.)
+        "toolkit": record["toolkit"] if record else "",
     }
 
 
@@ -359,7 +435,7 @@ def save(path: Path, doc: dict, *, expect_mtime=None, force=False) -> dict:
         cell.outputs, cell.execution_count = [], None
         cells.append(cell)
 
-    count = pictures = 0
+    count = pictures = read = 0
     for region in regions:
         want = "code" if region.get("kind") == "math" else "markdown"
         cell = old.get(region.get("id"))
@@ -375,6 +451,10 @@ def save(path: Path, doc: dict, *, expect_mtime=None, force=False) -> dict:
         given = _given(region.get("given")) if want == "code" else None
         if given:
             place["given"] = given
+        kept = _kept(region.get("kept")) if want == "code" else []
+        if kept:
+            place["kept"] = kept
+            read += len(kept)
         if place:
             cell.metadata["edsl"] = place
         else:
@@ -416,8 +496,9 @@ def save(path: Path, doc: dict, *, expect_mtime=None, force=False) -> dict:
     # (How many pictures were stored is said, so that a page can tell when
     # one it sent was turned down — or when a server from before pictures
     # could be kept has answered it.)
+    # (And how many records of what was read outside the sheet: see ``kept``.)
     return {"mtime": _stamp(path), "name": path.stem,
-            "ids": [c.get("id") for c in cells], "pictures": pictures,
+            "ids": [c.get("id") for c in cells], "pictures": pictures, "kept": read,
             "values": None if record is None else sum("form" in e for e in record["values"])}
 
 

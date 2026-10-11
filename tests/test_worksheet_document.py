@@ -327,3 +327,70 @@ def test_what_a_region_was_given_is_kept_with_its_cell(tmp_path):
             cell.metadata["edsl"]["given"] = cells[cell["id"]].metadata["edsl"]["given"]
     nbformat.write(nb, str(path))
     assert not any("given" in region for region in document.load(path)["regions"])
+
+
+# ---------------------------------------------------------------------------
+# what a statement read outside the sheet — the clock, a random number, a file
+# ---------------------------------------------------------------------------
+
+READ = {"id": "0123456789abcdef.1", "at": "2026-10-11T10:00:00Z", "why": ["random"], "state": "8f5e50a04cd55be3",
+        "reads": {"np": "53489b35e03bdc66"}, "writes": {"noise": '["f","0.25"]'}}
+
+
+def test_what_a_region_read_outside_the_sheet_is_kept_with_its_cell(tmp_path):
+    path = tmp_path / "reads.ipynb"
+    printed = dict(READ, id="0123456789abcdef.2", value='["i","3"]', gone=["old"], writes={}, closed={"f_h": ["data.txt", "r"]},
+                   outputs=[{"type": "stream", "name": "stdout", "text": "drawn\n"},
+                            {"type": "display", "data": {"text/plain": "3", "image/png": "AAAA", "application/x-widget": "{}"},
+                             "metadata": {"image/png": {"width": 9, "height": 4.5, "onload": "alert(1)", "depth": [1]},
+                                          "text/plain": "wide", "image/jpeg": {"width": 9},
+                                          "application/x-widget": {"width": 9}, "isolated": True}},
+                            {"type": "display", "data": {"text/plain": "4"}, "metadata": "none"},
+                            {"type": "display", "data": {"image/png": "BBBB"},
+                             "metadata": {"image/png": {"width": "wide", "height": True}}}])
+    # What is no record is none of them — each is whole, or not there.
+    junk = [None, "noise", {"id": "x"}, dict(READ, id=5), dict(READ, at=None), dict(READ, state=["s"]), dict(READ, reads=["np"]),
+            dict(READ, reads={"np": 5}), dict(READ, writes={"noise": 0.25}), dict(READ, why="random"), dict(READ, why=[1]),
+            dict(READ, gone="old"), dict(READ, gone=[1]), dict(READ, value=3), dict(READ, outputs="drawn"),
+            dict(READ, outputs=[{"type": "widget"}]), dict(READ, outputs=[{"type": "stream", "name": "stdout", "text": 5}]),
+            dict(READ, outputs=[{"type": "display", "data": {"text/plain": 3}}]), dict(READ, outputs=[None]),
+            dict(READ, outputs=5), dict(READ, outputs=[{"type": "stream", "name": 5, "text": "drawn"}]),
+            dict(READ, closed={"f_h": "ab"}),
+            dict(READ, closed=["f_h"]), dict(READ, closed={"f_h": "data.txt"}), dict(READ, closed={"f_h": ["data.txt"]}),
+            dict(READ, closed={"f_h": ["data.txt", 5]}), dict(READ, closed={"f_h": ["data.txt", "r", "more"]})]
+    said = document.save(path, {"regions": [
+        {"id": "m1", "kind": "math", "source": "noise := np.random.rand()", "x": 0, "y": 0,
+         "kept": [dict(READ, more="than it has")] + junk + [printed]},
+        {"id": "t1", "kind": "text", "source": "words", "x": 0, "y": 80, "kept": [READ]},                 # (a text reads nothing)
+        {"id": "m2", "kind": "math", "source": "a := 1", "x": 0, "y": 160, "kept": junk},
+        {"id": "m3", "kind": "math", "source": "b := 2", "kept": [READ]}]})                              # (a region that flows)
+    assert said["kept"] == 3
+    # (Of what is said about something displayed, how large a picture is shown is kept: no more.)
+    kept = dict(printed, outputs=[printed["outputs"][0],
+                                  {"type": "display", "data": {"text/plain": "3", "image/png": "AAAA"},
+                                   "metadata": {"image/png": {"width": 9, "height": 4.5}}},
+                                  {"type": "display", "data": {"text/plain": "4"}, "metadata": {}},
+                                  {"type": "display", "data": {"image/png": "BBBB"}, "metadata": {}}])
+    cells = {cell["id"]: cell for cell in nbformat.read(str(path), as_version=4).cells}
+    assert cells["m1"].metadata["edsl"] == {"x": 0, "y": 0, "kept": [READ, kept]}
+    assert cells["t1"].metadata["edsl"] == {"x": 0, "y": 80}
+    assert cells["m2"].metadata["edsl"] == {"x": 0, "y": 160} and cells["m3"].metadata["edsl"] == {"kept": [READ]}
+    regions = {region["id"]: region for region in document.load(path)["regions"]}
+    assert regions["m1"]["kept"] == [READ, kept] and regions["m3"]["kept"] == [READ]
+    assert "kept" not in regions["t1"] and "kept" not in regions["m2"]
+    # A sheet that is saved without them has none.
+    bare = {"regions": [{"id": "m1", "kind": "math", "source": "noise := np.random.rand()", "x": 0, "y": 0}]}
+    assert document.save(path, bare)["kept"] == 0
+    assert "kept" not in nbformat.read(str(path), as_version=4).cells[-1].metadata["edsl"]
+
+
+def test_a_sheet_says_which_toolkit_its_values_were_made_with(tmp_path):
+    path = tmp_path / "made.ipynb"
+    sheet = {"regions": [{"id": "r1", "kind": "math", "source": "U := 5.5", "x": 0, "y": 0}],
+             "settings": {"about": {"revision": 3, "saved": "2026-10-11T10:00:00.000Z"}}}
+    document.save(path, sheet)
+    assert document.load(path)["toolkit"] == ""                 # (never saved calculated: no values, of no toolkit)
+    made = {"revision": 3, "saved": "2026-10-11T10:00:00.000Z", "toolkit": "0.1.0", "values": VALUES}
+    document.save(path, dict(sheet, values=made))
+    assert document.load(path)["toolkit"] == "0.1.0"
+

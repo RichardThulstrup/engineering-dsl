@@ -868,4 +868,52 @@ else {
                    { "text/plain": "x = 1" });
 }
 
+// ---- what was read outside the sheet, and is kept ------------------------------
+{
+  const view = await import(js("mathview.js"));
+  // When it was read, in a word or two: the time of day for today, the day
+  // for another day, with its year for another year.
+  const now = new Date(2026, 9, 11, 14, 5);
+  const said = (date, how) => (how === "time" ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleDateString([], { day: "numeric", month: "short", ...(how === "year" ? { year: "numeric" } : {}) }));
+  const [today, yesterday, lastYear] = [new Date(2026, 9, 11, 9, 30), new Date(2026, 9, 10, 23, 59), new Date(2025, 11, 31, 12, 0)];
+  assert.equal(view.keptWhen(today.toISOString(), now), said(today, "time"));
+  assert.equal(view.keptWhen(yesterday.toISOString(), now), said(yesterday, "day"));
+  assert.equal(view.keptWhen(lastYear.toISOString(), now), said(lastYear, "year"));
+  assert.notEqual(said(today, "time"), said(today, "day"));
+  assert.notEqual(said(lastYear, "day"), said(lastYear, "year"));
+  assert.deepEqual(["yesterday", "", null, undefined].map((at) => view.keptWhen(at, now)), ["", "", view.keptWhen(null, now), ""]);
+  assert.equal(view.keptWhen("no time at all"), "");
+
+  // The mark stands after the value of the statement, and says what was read and when; without results there is none.
+  const at = new Date(2025, 11, 31, 12, 0).toISOString();
+  const items = [
+    { t: "stmt", src: "noise := np.random.rand()", lines: [1, 1], latex: "n", kind: "assign", result: [{ "text/plain": "0.25" }],
+      kept: { id: "abc.1", at, why: ["random", "clock", "nothing known"] } },
+    { t: "stmt", src: "gain := 2", lines: [2, 2], latex: "g", kind: "assign", literal: true, result: [{ "text/plain": "2" }] },
+    { t: "stmt", src: "x;", lines: [3, 3], latex: "x", kind: "expr", suppress: true, kept: { id: "abc.2", at: "never", why: "file" } }];
+  const body = document.createElement("div");
+  view.renderItems(body, items, { mode: "auto", highlight: (text) => text });
+  const lines = body.find("div").filter((node) => node.className.startsWith("line"));
+  const marks = lines.map((line) => line.find("span").filter((node) => node.className === "kept"));
+  assert.deepEqual(marks.map((found) => found.length), [1, 0, 1]);
+  const [first] = marks[0];
+  assert.equal(first.textContent, `kept ${view.keptWhen(at)}`);
+  assert.deepEqual([first.dataset.id, first.attributes.role], ["abc.1", "button"]);
+  assert.equal(first.attributes.title, "Read from outside the sheet (a random number, the clock) on " +
+               `${new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}, and kept since. ` +
+               "Click to read it again; Ctrl+F9 reads everything again.");
+  // (It comes after the value: the last thing on its line.)
+  assert.deepEqual(lines[0].childNodes.map((node) => node.className), ["tex expr", "eq", "plain res", "kept"]);
+  // What says no time, or not what it read, is marked all the same.
+  assert.equal(marks[2][0].textContent, "kept");
+  assert.equal(marks[2][0].attributes.title, "Read from outside the sheet, and kept since. Click to read it again; Ctrl+F9 reads everything again.");
+  const every = { t: "stmt", src: "a", lines: [1, 1], latex: "a", kind: "expr", kept: { id: "k", at, why: ["clock", "random", "file", "rates"] } };
+  view.renderItems(body, [every], { mode: "auto", highlight: (text) => text });
+  assert.ok(body.find("span").find((node) => node.className === "kept").attributes.title
+    .startsWith("Read from outside the sheet (the clock, a random number, a file, the day's currency rates) on "));
+  view.renderItems(body, items, { mode: "auto", highlight: (text) => text, results: false });
+  assert.equal(body.find("span").filter((node) => node.className === "kept").length, 0);
+}
+
 console.log("FRONTEND_OK");

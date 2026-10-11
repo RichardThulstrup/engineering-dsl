@@ -48,6 +48,15 @@ const state = {
   waiting: new Set(),       // what is woken when a pass comes to its end (a save: ownValues)
   asked: new Map(),         // seq → what takes the kernel's word on the sheet's values
   values: false,            // the server hands a sheet's values on (one started before it could does not)
+  // What statements read outside the sheet — the clock, a random number,
+  // a file — as the engine recorded it, by what names each record: from
+  // the sheet's file, and from the kernel as it reads.  A kernel that has
+  // just come is handed them (`seed`), so that the sheet shows what it showed.
+  kept: new Map(),
+  seed: true,
+  since: 0,                 // the last request made before this sheet was opened: what answers a later one is of this sheet
+  anew: new Set(),          // the records that are to be read again with the next pass
+  toolkit: "",              // the toolkit the sheet was last saved with
   settling: 0,
   greet: false,
   lastPass: "",
@@ -75,6 +84,8 @@ const sheet = new Sheet({
   preview: (region, source) => requestPreview(region, source),
   frame: () => run("page-frame"),
   given: (region) => takeValues(region),
+  kept: (id) => state.kept.get(id) ?? null,
+  again: (id) => { state.anew.add(id); scheduleCalc({ now: true }); },
 });
 
 const session = sessionStorage.getItem("edsl-session") || uid();
@@ -452,6 +463,8 @@ function receive(message) {
       highlighter = makeHighlighter(message);
       sheet.redrawAll();
       state.calc = null;
+      state.seed = true;                // (a kernel that has just come knows nothing of what was read before)
+      toolkitNote();
       if (!state.trusted) typesetAll();
       else if (state.died) {
         // The last kernel died calculating this very sheet: leave the
@@ -462,6 +475,12 @@ function receive(message) {
       } else scheduleCalc({ now: true });
       break;
     case "region": {
+      // What was read outside the sheet is taken from every pass of this
+      // sheet — also from one that another has overtaken, whose results
+      // are not shown: the kernel has it all the same, and says it once.
+      if (message.seq > state.since) {
+        for (const [id, record] of Object.entries(message.kept || {})) state.kept.set(id, record);
+      }
       const pass = state.calc;
       if (!pass || pass.seq !== message.seq) break;
       pass.seen.add(message.id);
@@ -473,6 +492,8 @@ function receive(message) {
         sheet.setResult(message.id, { items: message.items, tail: message.tail || [], rev: message.rev },
                         pass.sources.get(message.id));
       }
+      // What was read outside the sheet anew is not in the sheet's file: the sheet is not what its file is.
+      if (sheet.keptAnew(region)) setDirty(true);
       relayout();
       break;
     }
@@ -483,6 +504,15 @@ function receive(message) {
       break;
     }
     case "done": {
+      // The kernel says what it holds of what was read outside the sheet.
+      // What it has let go of — asked for anew, and not to be had; read
+      // for a statement that is long gone — the page lets go of, too.
+      if (Array.isArray(message.kept) && message.seq > state.since) {
+        const held = new Set(message.kept);
+        for (const id of [...state.kept.keys()]) {
+          if (!held.has(id)) state.kept.delete(id);
+        }
+      }
       const request = state.renders.get(message.seq);
       if (request) {
         state.renders.delete(message.seq);
@@ -507,6 +537,20 @@ function receive(message) {
     default:
       break;
   }
+}
+
+/**
+ * A sheet's revision keeps what the sheet read; the toolkit that
+ * calculates it is the one that is installed.  Another one than the sheet
+ * was saved with may make something else of it: said once, when both are
+ * known.
+ */
+function toolkitNote() {
+  const here = state.vocab && state.vocab.toolkit;
+  if (!state.toolkit || !here || here === state.toolkit) return;
+  toast(`This sheet was last saved with version ${state.toolkit} of the toolkit; this is ${here}. ` +
+        "What is calculated may come out otherwise than it did.");
+  state.toolkit = "";
 }
 
 const relayout = debounce(() => sheet.layout(), 16);
@@ -577,8 +621,14 @@ function runCalc(fresh) {
       have: r.result && r.result.source === r.source ? r.result.rev : null,
       // (What another sheet gave is run, and shown by the page itself.)
       given: r.given ? true : undefined })),
+    // What was read outside the sheet before, for a kernel that has just
+    // come; and what of it is to be read again.
+    kept: state.seed ? [...state.kept.values()] : undefined,
+    anew: state.anew.size ? [...state.anew] : undefined,
   });
   if (!seq) { state.wantCalc = true; return; }
+  state.seed = false;
+  state.anew.clear();
   const pass = { seq, sources, seen: new Set(), wanted: state.wanted, at: Date.now() };
   state.calc = pass;
   // Dim what is still waiting to be recalculated — but only if the pass
@@ -643,6 +693,11 @@ function adopt(doc) {
   state.calc = null;
   state.renders.clear();
   state.passed = null;                  // (what the kernel has is another sheet)
+  state.kept = new Map((doc.regions || []).flatMap((region) => (region.kept || []).map((record) => [record.id, record])));
+  state.since = conn.seq;
+  state.seed = true;
+  state.anew.clear();
+  state.toolkit = typeof doc.toolkit === "string" ? doc.toolkit : "";
   sheet.calculated = state.trusted;
   showFrame();
   sheet.load(doc);
@@ -654,6 +709,7 @@ function adopt(doc) {
   if (state.path) url.searchParams.set("open", state.path); else url.searchParams.delete("open");
   history.replaceState(null, "", url);
   if (state.trusted) banner(null); else showTrustBanner();
+  toolkitNote();
 }
 
 async function openPath(path) {
@@ -744,6 +800,7 @@ async function write(as) {
       if (about) state.settings = { ...state.settings, about };
       setTitle();
       // Saved — but for what was changed while the server was writing.
+      sheet.filed(doc.regions);
       if (state.changes === changes) setDirty(false);
       showFrame();                          // (its name, its revision, when it was saved)
       const url = new URL(location.href);
@@ -760,6 +817,15 @@ async function write(as) {
         setDirty(true);
         toast(`Not all of it is saved: the worksheet server stored ${stored} of the ${sent} pictures. ` +
               "They are still on this page — copy them into a sheet of a freshly started worksheet.", "error");
+        return false;
+      }
+      // So for what was read outside the sheet: a server from before it
+      // could be kept writes the sheet without it.
+      const read = doc.regions.reduce((count, r) => count + (r.kept ? r.kept.length : 0), 0);
+      if ((data.kept ?? 0) !== read) {
+        setDirty(true);
+        toast("Not all of it is saved: what the sheet read outside itself — the values marked “kept” — is not in its file. " +
+              "The worksheet server running here was started before it could keep them: close the worksheet and start it again.", "error");
         return false;
       }
       // Without its values, a sheet that could have had them says so:
@@ -911,7 +977,9 @@ const HELP = [
     ["a line ending in ;", "shows no value"],
     ["f := x → x² + 1", "defines a function"],
     ["F9", "bring the sheet up to date (needed when Automatic is off, or after Stop)"],
-    ["Ctrl+F9", "recalculate everything from scratch"],
+    ["Ctrl+F9", "recalculate everything from scratch — and read again what is read outside the sheet"],
+    ["a value marked “kept”", "was read outside the sheet — the clock, a random number, a file, the day's currency rates — once, and stays " +
+                              "with the sheet as it was read.  A click on the mark reads it again"],
   ]],
   ["Typing notation", [
     ["\\ohm  \\mu  \\pi  \\sqrt  \\cdot  \\par  \\pm  \\to", "Ω μ π √ · ‖ ± →  — a backslash and a name, ended by any other key"],

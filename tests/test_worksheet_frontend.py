@@ -3707,3 +3707,239 @@ def test_a_server_started_before_sheets_handed_values_on_is_not_asked_to(page_an
     page.click(".tool[data-cmd='take-values']")
     page.wait_for_function(f"{TOAST}.startsWith('The worksheet server running here was started before sheets could hand values on')")
     assert page.locator(".dialog").count() == 0
+
+
+# ---- what a sheet reads outside itself ------------------------------------------
+
+# Each line of the math regions as it reads (without the blanks KaTeX sets), and the marks on what is kept.
+LINES = "[...document.querySelectorAll('.region.math .line')].map((l) => l.innerText.replace(/[\\s\\u200b]+/g, ''))"
+KEPT = "[...document.querySelectorAll('.line .kept')].map((k) => [k.closest('.line').innerText.replace(/[\\s\\u200b]+/g, '').split(':=')[0], k.title])"
+FAILED = "[...document.querySelectorAll('.line.bad .flag')].map((flag) => flag.getAttribute('aria-label').split(':')[0])"
+READS = ["import numpy as np", "noise := np.random.rand()", 'at_ := "now"\\time', "bench := np.loadtxt('bench.txt')",
+         "level := bench.mean()", "gain := 2", "out := level \\cdot gain + noise"]
+
+
+def kept_cells(folder, name):
+    """What a sheet's file keeps of what was read outside the sheet: for each cell that has any, the names read and why."""
+    out = {}
+    for cell in nbformat.read(str(folder / name), as_version=4).cells:
+        records = cell.metadata.get("edsl", {}).get("kept")
+        if records:
+            out[cell.source.split(" :=")[0]] = [(record["why"], sorted(record["writes"])) for record in records]
+    return out
+
+
+def changed(before, after):
+    """The lines that read otherwise now, by the name they begin with."""
+    return [old.split(":=")[0] for old, new in zip(before, after) if old != new]
+
+
+def test_what_a_sheet_reads_outside_itself_is_read_once_and_stays_with_it(page_and_folder):
+    page, folder = page_and_folder
+    (folder / "bench.txt").write_text("4.98\n5.02\n5.01\n", encoding="utf-8")
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    typed(page, *READS)                                         # (line upon line: one calculation overtakes another)
+    settled(page)
+    first = page.evaluate(LINES)
+    assert "array([4.98,5.02,5.01])" in first[3] and first[5] == "gain:=2" and len(first) == 7
+    # A random number, the clock and a file were read: each is marked, and says what it read and when.
+    marks = page.evaluate(KEPT)
+    assert [name for name, title in marks] == ["noise", "at_", "bench"]
+    assert [title.split(")")[0] for name, title in marks] == ["Read from outside the sheet (a random number", "Read from outside the sheet (the clock",
+                                                               "Read from outside the sheet (a file"]
+    assert all(title.endswith(", and kept since. Click to read it again; Ctrl+F9 reads everything again.") for name, title in marks)
+    assert page.evaluate("[...document.querySelectorAll('.line .kept')].every((k) => /^kept \\d/.test(k.textContent) && k === k.parentNode.lastChild)")
+    # Saved, the file has what was read, with the statement that read it.
+    save_as(page, "bench.ipynb")
+    named(page, "bench")
+    assert kept_cells(folder, "bench.ipynb") == {"noise": [(["random"], ["noise"])], "at_": [(["clock"], ["at_"])], "bench": [(["file"], ["bench"])]}
+    assert saved_settings(folder, "bench.ipynb")["about"]["revision"] == 1
+    # (And the sheet is what its file is, however often it is calculated.)
+    keys.press("F9")
+    settled(page)
+    assert not page.evaluate(DIRTY)
+
+    # Another day: the file that was read is another one, the clock has
+    # moved on.  The sheet shows what it showed, and is what its file is.
+    (folder / "bench.txt").write_text("1.0\n1.0\n1.0\n", encoding="utf-8")
+    opened(page, "bench.ipynb")
+    assert page.evaluate(LINES) == first and not page.evaluate(DIRTY) and page.evaluate(TOAST) == ""
+    assert page.evaluate("document.querySelector('#status').title").startswith("Last calculation: 1 statements run, 6 unchanged")
+    assert [name for name, title in page.evaluate(KEPT)] == ["noise", "at_", "bench"]
+    # Saved again as it is, it is the same revision, with the same readings.
+    before = kept_cells(folder, "bench.ipynb"), (folder / "bench.ipynb").read_text(encoding="utf-8").count('"at": ')
+    save(page)
+    assert saved_settings(folder, "bench.ipynb")["about"]["revision"] == 1
+    assert (kept_cells(folder, "bench.ipynb"), (folder / "bench.ipynb").read_text(encoding="utf-8").count('"at": ')) == before
+
+    # Something else is changed: what was read stands, and what follows from both follows.
+    page.locator(".region.math").nth(5).click()
+    keys.press("Control+a")
+    keys.type("gain := 3")
+    keys.press("Enter")
+    settled(page)
+    assert changed(first, page.evaluate(LINES)) == ["gain", "out"]
+    # A calculation that brings the sheet up to date reads nothing again (F9) ...
+    keys.press("F9")
+    settled(page)
+    third = page.evaluate(LINES)
+    assert changed(first, third) == ["gain", "out"]
+    save(page)
+    assert saved_settings(folder, "bench.ipynb")["about"]["revision"] == 2 and not page.evaluate(DIRTY)
+    # ... a click on a mark reads that one again — the file, here: the sheet
+    # follows, is not opened for writing, and is no longer what its file is.
+    page.locator(".line .kept").nth(2).click()
+    settled(page)
+    fourth = page.evaluate(LINES)
+    assert changed(third, fourth) == ["bench", "level", "out"] and "array([1.,1.,1.])" in fourth[3]
+    assert page.locator(".region.editing").count() == 0 and page.evaluate(DIRTY)
+    # ... and calculating everything from scratch reads everything again.
+    save(page)
+    assert saved_settings(folder, "bench.ipynb")["about"]["revision"] == 3 and not page.evaluate(DIRTY)
+    # (That one click read it once: the calculations after it read nothing again.)
+    (folder / "bench.txt").write_text("2.0\n2.0\n2.0\n", encoding="utf-8")
+    keys.press("F9")
+    settled(page)
+    assert page.evaluate(LINES) == fourth and not page.evaluate(DIRTY)
+    (folder / "bench.txt").write_text("1.0\n1.0\n1.0\n", encoding="utf-8")
+    keys.press("Control+F9")
+    settled(page)
+    fifth = page.evaluate(LINES)
+    assert changed(fourth, fifth) == ["noise", "at_", "out"] and page.evaluate(DIRTY)
+    # What is asked for anew and is not to be had is not there any more ...
+    (folder / "bench.txt").rename(folder / "away.txt")
+    page.locator(".line .kept").nth(2).click()
+    settled(page)
+    assert page.evaluate(FAILED) == ["FileNotFoundError", "NameError", "NameError"]
+    assert [name for name, title in page.evaluate(KEPT)] == ["noise", "at_"]
+    # The kernel is started anew: the sheet has what was read — also what
+    # is not in its file yet — and not what it has let go of.
+    page.click("#calc-menu .menu-button")
+    page.click("#calc-menu [data-cmd='restart']")
+    page.wait_for_selector("#status[data-state='starting'], #status[data-state='none']", timeout=20_000)
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    settled(page)
+    assert [page.evaluate(LINES)[at] for at in (1, 2, 5)] == [fifth[at] for at in (1, 2, 5)]
+    assert page.evaluate(FAILED) == ["FileNotFoundError", "NameError", "NameError"]
+    assert [name for name, title in page.evaluate(KEPT)] == ["noise", "at_"]
+    # (The file is there again: a calculation reads what there is no reading of.)
+    (folder / "away.txt").rename(folder / "bench.txt")
+    keys.press("F9")
+    settled(page)
+    assert page.evaluate(LINES) == fifth and page.evaluate(FAILED) == []
+    save(page)
+    assert saved_settings(folder, "bench.ipynb")["about"]["revision"] == 4
+    # On paper the marks are not there: they are for whoever works on the sheet.
+    page.emulate_media(media="print")
+    assert page.evaluate("[...document.querySelectorAll('.line .kept')].map((k) => getComputedStyle(k).display)") == ["none"] * 3
+    page.emulate_media(media="screen")
+
+    # A sheet that is saved while it is not calculated keeps what its file
+    # has for the regions that are as they were, and nothing for one that
+    # has been rewritten.
+    page.uncheck("#auto-calc")
+    page.locator(".region.math").nth(2).click()
+    keys.press("Control+a")
+    keys.type('at_ := "today"\\time')
+    keys.press("Enter")
+    page.wait_for_selector(".region.stale")
+    keys.press("Control+s")
+    page.wait_for_function(f"{TOAST} === {json.dumps(NOT_KEPT)}")
+    assert kept_cells(folder, "bench.ipynb") == {"noise": [(["random"], ["noise"])], "bench": [(["file"], ["bench"])]}
+    page.check("#auto-calc")
+    settled(page)
+    save(page)
+    assert sorted(kept_cells(folder, "bench.ipynb")) == ["at_", "bench", "noise"]
+
+
+def test_a_sheet_from_before_reads_anew_and_a_server_from_before_says_what_it_cannot_keep(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    # A sheet that was saved before what it read could be kept — or by
+    # another program: opened, it reads, and is then no longer what its
+    # file is (which has none of that).
+    place = lambda source, y, **more: nbformat.v4.new_code_cell(source, metadata={"edsl": dict({"x": 0, "y": y}, **more)})          # noqa: E731
+    forged = {"id": "?", "at": "2026-10-11T10:00:00Z", "why": ["random"], "state": "?", "reads": {}, "writes": {"plain": '["i","99"]'}}
+    nb = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell("from utils.Engineer import *"), place("import numpy as np", 0),
+                                         place("noise := np.random.rand()", 40), place("plain := 2 + 2", 80, kept=[forged])])
+    nb.metadata["edsl_worksheet"] = {"version": 1, "settings": {"about": {"revision": 7, "saved": "2026-10-11T10:00:00.000Z"}},
+                                     "values": {"revision": 7, "saved": "2026-10-11T10:00:00.000Z", "toolkit": "0.0.1", "values": []}}
+    nbformat.write(nb, str(folder / "before.ipynb"))
+    try:
+        from importlib.metadata import version
+        toolkit = version("engineering-dsl")
+    except Exception:
+        toolkit = ""
+    opened(page, "before.ipynb")
+    # (It says, too, that another toolkit made what it has than the one that calculates it now.)
+    if toolkit:
+        assert page.evaluate(TOAST) == (f"This sheet was last saved with version 0.0.1 of the toolkit; this is {toolkit}. "
+                                        "What is calculated may come out otherwise than it did.")
+    assert page.is_visible("#banner") and not page.evaluate(DIRTY) and page.evaluate(KEPT) == []
+    # (Saved as it was opened — not calculated — it has what its file had.)
+    save(page)
+    assert kept_cells(folder, "before.ipynb") == {"plain": [(["random"], ["plain"])]}
+    assert saved_settings(folder, "before.ipynb")["about"]["revision"] == 7
+    page.click("#banner .btn.primary")
+    settled(page)
+    assert [name for name, title in page.evaluate(KEPT)] == ["noise"] and page.evaluate(DIRTY)
+    # What its file says a calculation came to is not asked: a calculation is calculated.
+    assert page.evaluate(LINES)[2] == "plain:=2+2=4"
+    drawn = page.evaluate(LINES)[1]
+
+    # A worksheet server that was started before this could be kept writes
+    # the sheet without it: that is not done without a word.
+    def as_before(route):
+        response = route.fetch()
+        said = response.json()
+        said.pop("kept", None)
+        route.fulfill(response=response, json=said)
+
+    wrote = lambda url: "/api/doc" in url                                                  # noqa: E731
+    page.route(wrote, lambda route: as_before(route) if route.request.method == "PUT" else route.continue_())
+    page.evaluate("document.querySelector('#toast').hidden = true")
+    keys.press("Control+s")
+    page.wait_for_function(f"{TOAST}.startsWith('Not all of it is saved: what the sheet read outside itself')")
+    assert "started before it could keep them" in page.evaluate(TOAST) and page.evaluate(DIRTY)
+    page.unroute(wrote)
+    save(page)
+    assert kept_cells(folder, "before.ipynb") == {"noise": [(["random"], ["noise"])]} and not page.evaluate(DIRTY)
+    assert saved_settings(folder, "before.ipynb")["about"]["revision"] == 9          # (the server of before did write it: that was 8)
+    # Opened once more, in the place of another sheet, it has what it read.
+    new_sheet(page)
+    typed(page, "import numpy as np", "noise := np.random.rand()")       # (the same statement, on another sheet: another reading)
+    settled(page)
+    other = page.evaluate(LINES)[1]
+    assert other != drawn
+    save_as(page, "other.ipynb")
+    named(page, "other")
+    keys.press("Control+o")
+    page.wait_for_selector(".dialog .files")
+    page.click(".files div:has-text('before.ipynb')")
+    keys.press("Enter")
+    page.wait_for_function("document.querySelector('#doc-name').textContent === 'before'")
+    settled(page)
+    assert page.evaluate(LINES)[1] == drawn and not page.evaluate(DIRTY)
+
+
+def test_a_picture_of_what_was_read_is_kept_as_it_was_drawn(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    typed(page, "import numpy as np", "plot([1, 2, 3], np.random.rand(3))")
+    settled(page)
+    # (A figure is drawn with twice the dots, and says how large it is meant to be.)
+    picture = ("(() => { const img = document.querySelector('.region.math img');"
+               " return img && [img.src.length, img.src.slice(-80), img.width, img.height, img.naturalWidth, img.naturalHeight]; })()")
+    page.wait_for_function(f"{picture} && document.querySelector('.region.math img').naturalWidth > 0")
+    drawn = page.evaluate(picture)
+    assert drawn[2] > 100 and abs(drawn[4] - 2 * drawn[2]) <= 2 and abs(drawn[5] - 2 * drawn[3]) <= 2
+    assert page.locator(".line .kept").count() == 1
+    save_as(page, "drawn.ipynb")
+    named(page, "drawn")
+    # Opened again it is the picture that was drawn — of the numbers that were drawn — and as large.
+    opened(page, "drawn.ipynb")
+    page.wait_for_function(f"{picture} && document.querySelector('.region.math img').naturalWidth > 0")
+    assert page.evaluate(picture) == drawn and not page.evaluate(DIRTY)
+    assert page.evaluate("document.querySelector('#status').title").startswith("Last calculation: 0 statements run, 2 unchanged")
