@@ -13,6 +13,7 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -42,10 +43,15 @@ def private(folder):
 def launch(folder, *options):
     """A worksheet server on ``folder``, started the way a user starts it."""
     port = free_port()
+    # What the server says goes into a file.  A pipe that nobody reads
+    # holds some thirty lines of its log (every request that is turned
+    # down is one), and the server stops for good at the line that no
+    # longer fits: the test that asks next waits in vain.
+    said = tempfile.TemporaryFile()
     process = subprocess.Popen(
         [sys.executable, "-B", "-m", "utils.worksheet", str(folder), "--no-browser", *options,
          "--port", str(port), "--token", TOKEN],
-        cwd=str(ROOT), env=private(folder), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        cwd=str(ROOT), env=private(folder), stdout=said, stderr=subprocess.STDOUT)
     try:
         deadline = time.time() + 30
         while time.time() < deadline:
@@ -56,12 +62,14 @@ def launch(folder, *options):
                 time.sleep(0.1)
         else:
             process.kill()
-            pytest.fail("server did not start: " + process.stdout.read().decode("utf-8", "replace"))
+            said.seek(0)
+            pytest.fail("server did not start: " + said.read().decode("utf-8", "replace"))
         yield type("Server", (), {"port": port, "folder": folder, "base": f"http://127.0.0.1:{port}",
                                   "cookie": f"edsl_ws_{port}={TOKEN}"})
     finally:
         process.terminate()
         process.wait(timeout=15)
+        said.close()
 
 
 @pytest.fixture(scope="module")
