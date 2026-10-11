@@ -216,3 +216,114 @@ def test_only_pictures_are_taken_from_the_page(tmp_path):
     region["attachments"] = {}
     document.save(path, {"regions": [region]})
     assert "attachments" not in nbformat.read(str(path), as_version=4).cells[-1]
+
+
+# ---------------------------------------------------------------------------
+# values: what a sheet delivers to other sheets, and what a region was given
+# ---------------------------------------------------------------------------
+
+VALUES = [{"name": "U", "form": '["f","5.5"]', "shown": {"text/plain": "5.5", "text/latex": "$5.5$"}},
+          {"name": "f", "why": "a function"}]
+
+
+def metadata(path):
+    return nbformat.read(str(path), as_version=4).metadata["edsl_worksheet"]
+
+
+def test_what_a_sheets_variables_were_is_kept_with_its_revision(tmp_path):
+    path = tmp_path / "source.ipynb"
+    sheet = {"regions": [{"id": "r1", "kind": "math", "source": "U := 5.5", "x": 0, "y": 0}],
+             "settings": {"about": {"revision": 3, "saved": "2026-10-11T10:00:00.000Z"}}}
+    # A sheet that was never saved calculated delivers no values — and says which revision it is all the same.
+    document.save(path, sheet)
+    assert "values" not in metadata(path)
+    assert document.published(path) == {"name": "source", "revision": 3, "saved": "2026-10-11T10:00:00.000Z", "values": None}
+    # Saved with them, it keeps them — as far as they are values by name:
+    # the name as it is typeset, text and how it is shown, or why there is
+    # none to hand on.  A name is one a sheet can define, and is there once.
+    typeset = {"name": "R_tol", "tex": "R_{\\mathrm{tol}}", "form": '["f","0.05"]', "shown": {"text/plain": "5%"}}
+    offered = VALUES + [{"name": "not a name!", "form": "x"}, {"name": "x"}, {"name": 5, "form": "x"}, "junk", None,
+                        {"name": "V", "form": '["i","1"]', "shown": {"text/html": "<b>no</b>", "text/plain": 7}},
+                        {"name": "_kept", "form": "x"}, {"name": "__builtins__", "form": "x"}, {"name": "class", "form": "x"},
+                        {"name": "U", "form": "again"}, {"name": "f", "form": "now a value"}, dict(typeset, more="than it has"),
+                        {"name": "g", "tex": 5, "why": "a function"}, {"name": "h", "tex": "h", "form": 5, "why": 6}]
+    said = document.save(path, dict(sheet, values={"revision": 3, "saved": "2026-10-11T10:00:00.000Z", "toolkit": "0.1.0",
+                                                   "values": offered, "more": "than a record has"}))
+    assert said["values"] == 3
+    record = {"revision": 3, "saved": "2026-10-11T10:00:00.000Z", "toolkit": "0.1.0",
+              "values": VALUES + [{"name": "V", "form": '["i","1"]', "shown": {}}, typeset, {"name": "g", "why": "a function"}]}
+    assert metadata(path)["values"] == record
+    assert document.published(path) == {"name": "source", "revision": 3, "saved": "2026-10-11T10:00:00.000Z", "values": record}
+    assert document.published(path, brief=True)["values"] == {"revision": 3, "saved": "2026-10-11T10:00:00.000Z", "count": 3}
+    # A save that says nothing of values — the sheet was not calculated —
+    # keeps the ones there are: those of the revision they were taken at.
+    later = dict(sheet, settings={"about": {"revision": 4, "saved": "2026-10-12T08:00:00.000Z"}})
+    assert document.save(path, later)["values"] == 3
+    assert metadata(path)["values"] == record and document.published(path)["revision"] == 4
+    assert document.published(path, brief=True)["values"]["revision"] == 3
+    # One that says there are none takes them out; what is no record is none.
+    assert document.save(path, dict(later, values=None))["values"] is None and "values" not in metadata(path)
+    assert document.save(path, dict(later, values=["U"]))["values"] is None and "values" not in metadata(path)
+    document.save(path, dict(later, values={"revision": {"no": 1}, "saved": 5, "values": "U"}))
+    assert metadata(path)["values"] == {"revision": None, "saved": "", "toolkit": "", "values": []}
+    # A notebook that is no worksheet delivers nothing, and says so plainly.
+    plain = write(tmp_path / "plain.ipynb", [new_code_cell("x = 1")])
+    assert document.published(plain) == {"name": "plain", "revision": None, "saved": "", "values": None}
+    odd = write(tmp_path / "odd.ipynb", [new_code_cell("x = 1")], edsl_worksheet={"settings": "none", "values": [1, 2]})
+    assert document.published(odd) == {"name": "odd", "revision": None, "saved": "", "values": None}
+
+
+def test_what_a_revision_delivers_is_what_it_delivered_first(tmp_path):
+    path = tmp_path / "source.ipynb"
+    sheet = {"regions": [{"id": "r1", "kind": "math", "source": "U := now()", "x": 0, "y": 0}],
+             "settings": {"about": {"revision": 3, "saved": "2026-10-11T10:00:00.000Z"}}}
+    first = {"revision": 3, "saved": "2026-10-11T10:00:00.000Z", "toolkit": "0.1.0", "values": [VALUES[0]]}
+    assert document.save(path, dict(sheet, values=first))["values"] == 1
+    # Saved again as it is — the same revision, of the same moment — the
+    # sheet keeps the values it has, whatever a calculation on another day
+    # makes of it: a sheet that names the revision gets what others got.
+    later = dict(first, toolkit="0.2.0", values=[{"name": "U", "form": '["f","6.5"]', "shown": {"text/plain": "6.5"}}, VALUES[1]])
+    assert document.save(path, dict(sheet, values=later))["values"] == 1 and metadata(path)["values"] == first
+    # Another revision is new values; so is the same one saved at another
+    # moment (a revision that was typed is not counted on).
+    for stamp in ({"revision": 4}, {"revision": "3"}, {"saved": "2026-10-11T11:00:00.000Z"}):
+        document.save(path, dict(sheet, values=first))
+        assert metadata(path)["values"] == first
+        assert document.save(path, dict(sheet, values=dict(later, **stamp)))["values"] == 1
+        assert metadata(path)["values"] == dict(later, **stamp)
+        document.save(path, dict(sheet, values=None))
+    # (Values that say of no moment when they were saved are of no revision that could be named.)
+    document.save(path, dict(sheet, values=dict(first, saved="")))
+    document.save(path, dict(sheet, values=dict(later, saved="")))
+    assert metadata(path)["values"] == dict(later, saved="")
+
+
+def test_what_a_region_was_given_is_kept_with_its_cell(tmp_path):
+    path = tmp_path / "taking.ipynb"
+    given = {"sheet": "source.ipynb", "name": "source", "revision": 3, "saved": "2026-10-11T10:00:00.000Z",
+             "values": [VALUES[0]]}
+    code = "from utils.worksheet.values import given as _given\n(U,) = _given('{}')"
+    document.save(path, {"regions": [
+        {"id": "g1", "kind": "math", "source": code, "x": 16, "y": 32, "given": dict(given, more="than it has")},
+        {"id": "t1", "kind": "text", "source": "words", "x": 16, "y": 96, "given": given},          # (text is given nothing)
+        {"id": "g2", "kind": "math", "source": "a := 1", "x": 16, "y": 160, "given": {"sheet": "", "values": [VALUES[0]]}},
+        {"id": "g3", "kind": "math", "source": "b := 1", "x": 16, "y": 200, "given": {"sheet": "s.ipynb", "values": [VALUES[1]]}},
+        {"id": "g4", "kind": "math", "source": "c := 1", "x": 16, "y": 240, "given": "source.ipynb"},
+        {"id": "g5", "kind": "math", "source": "d := 1", "given": dict(given, revision="B", name=7, saved=None)}]})
+    cells = {cell["id"]: cell for cell in nbformat.read(str(path), as_version=4).cells}
+    assert cells["g1"].metadata["edsl"] == {"x": 16, "y": 32, "given": given} and cells["g1"].source == code
+    assert all(cells[name].metadata["edsl"] == {"x": 16, "y": y} for name, y in (("t1", 96), ("g2", 160), ("g3", 200), ("g4", 240)))
+    # (A region that flows — no place of its own yet — is given values all the same.)
+    assert cells["g5"].metadata["edsl"] == {"given": dict(given, revision="B", name="", saved="")}
+    regions = {region["id"]: region for region in document.load(path)["regions"]}
+    assert regions["g1"]["given"] == given and regions["g5"]["given"]["revision"] == "B"
+    assert not any("given" in regions[name] for name in ("t1", "g2", "g3", "g4"))
+    # What a file from elsewhere says a region was given is read as far as it is that.
+    cells["g1"].metadata["edsl"]["given"] = {"sheet": "x.ipynb", "values": [{"name": "U", "form": 5}]}
+    cells["g5"].metadata["edsl"]["given"] = ["source.ipynb"]
+    nb = nbformat.read(str(path), as_version=4)
+    for cell in nb.cells:
+        if cell["id"] in ("g1", "g5"):
+            cell.metadata["edsl"]["given"] = cells[cell["id"]].metadata["edsl"]["given"]
+    nbformat.write(nb, str(path))
+    assert not any("given" in region for region in document.load(path)["regions"])

@@ -707,4 +707,165 @@ else {
   assert.ok(!rich.pictureAllowed("javascript:alert(1)") && !rich.pictureAllowed("file:///C:/a.png"));
 }
 
+// ---- values a sheet is given by another sheet -----------------------------------
+{
+  const given = await import(js("given.js"));
+  const view = await import(js("mathview.js"));
+  Element.prototype.replaceChildren = function replaceChildren(...items) { this.childNodes = []; this.append(...items); };
+  document.createTextNode = (text) => ({ nodeType: 3, textContent: text });
+
+  // A name is one a sheet can define, and does not keep to itself.
+  const names = { x: true, R_1: true, "\u03b8_JA": true, "\u00c5ngstr\u00f6m": true, match: true, x1: true,
+                  _x: false, __builtins__: false, __proto__: false, class: false, import: false, None: false, "1x": false, "x y": false,
+                  "x)": false, "x;y": false, "x\ny": false, "x=1": false, "": false, "\ufb01x": false, "\uff3fx": false, "x\u2028": false };
+  for (const [name, fine] of Object.entries(names)) assert.equal(given.isName(name), fine, JSON.stringify(name));
+  for (const none of [5, null, undefined, ["x"], { name: "x" }]) assert.equal(given.isName(none), false);
+
+  // The code that holds what a region was given: made from the names and
+  // the forms, in their order — and from nothing else that is said of it.
+  const HEAD = "# Values given by another sheet: this cell's output says which sheet, and what they are.\n" +
+               "from utils.worksheet.values import given as _given\n";
+  const entry = (name, form, more = {}) => ({ name, form, shown: { "text/plain": `<${name}>` }, ...more });
+  const two = { sheet: "a.ipynb", name: "a", revision: 3, saved: "2026-10-11T10:00:00.000Z",
+                values: [entry("U", '["f","5.5"]', { tex: "U" }), entry("R_tol", '["s","x"]')] };
+  assert.equal(given.sourceOf(two), HEAD + "(U, R_tol,) = _given('{\"U\":\"[\\\\\"f\\\\\",\\\\\"5.5\\\\\"]\",\"R_tol\":\"[\\\\\"s\\\\\",\\\\\"x\\\\\"]\"}')");
+  assert.equal(given.sourceOf({ values: two.values }), given.sourceOf(two));
+  assert.equal(given.sourceOf({ ...two, sheet: "b.ipynb", name: "x\nimport os", revision: "');import os;('", saved: "\n" }), given.sourceOf(two));
+  assert.equal(given.sourceOf({ ...two, values: [two.values[1], two.values[0]] }).split("\n")[2].slice(0, 12), "(R_tol, U,) ");
+  assert.equal(given.sourceOf({ ...two, values: [two.values[0]] }).split("\n")[2].slice(0, 16), "(U,) = _given('{");
+  // What is no such thing has no code: nothing to hold, a name that is none, a name twice, a value that is no text.
+  for (const none of [null, undefined, "x", {}, { values: [] }, { values: "U" }, { values: [null] }, { values: [entry("x y", "1")] },
+                      { values: [entry("_x", "1")] }, { values: [entry("x", "1"), entry("x", "2")] }, { values: [entry("x", 5)] },
+                      { values: [entry("x", "1"), entry("y);import os;(", "2")] }, { values: [{ name: "x" }] }]) {
+    assert.equal(given.sourceOf(none), null, JSON.stringify(none));
+  }
+  // Whatever the forms hold, the code is three lines of plain characters
+  // (but for a name, which is as it is), and gives the forms back as they
+  // were: no character of them ends the text it stands in, or a line.
+  const awkward = "it's \"quoted\" \\ back\\\\slash := 5 V \u2192 mV\u00b2 # no % \n line \r\t \u2028 \u2029 \u0085 \u007f \ud83d\ude00 \u00e6 '\x27\x27 \"\"\" \\n \\u0041 \\' \ud800 lone";
+  const odd = { values: [entry("text", JSON.stringify(["s", awkward])), entry("\u03b8_JA", '["i","40"]'), entry("constructor", "''"), entry("toString", "\\")] };
+  const code = given.sourceOf(odd);
+  const [comment, bring, hold, ...more] = code.split(/\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]/);
+  assert.deepEqual([comment + "\n" + bring + "\n", more], [HEAD, []]);
+  assert.ok(/^[\x20-\x7e]*$/.test(hold.replace("\u03b8_JA", "")) && hold.startsWith("(text, \u03b8_JA, constructor, toString,) = _given('") && hold.endsWith("')"));
+  const literal = hold.slice(hold.indexOf("_given(") + 7, -1);
+  assert.ok(!/(^|[^\\])(\\\\)*'/.test(literal.slice(1, -1)), "a quote that is not escaped would end the text");
+  const read = JSON.parse(literal.slice(1, -1).replace(/\\(.)/g, "$1"));                  // (as Python reads '...': \\ and \')
+  assert.deepEqual(Object.entries(read), odd.values.map((value) => [value.name, value.form]));
+  assert.equal(JSON.parse(read.text)[1], awkward);
+
+  // What a file — or the clipboard — says a region was given is taken as far as it is that.
+  const kept = { sheet: "a.ipynb", name: "a", revision: 3, saved: "2026-10-11T10:00:00.000Z",
+                 values: [{ name: "U", tex: "U", form: '["f","5.5"]', shown: { "text/plain": "<U>" } },
+                          { name: "R_tol", form: '["s","x"]', shown: { "text/plain": "<R_tol>" } }] };
+  assert.deepEqual(given.normal(two), kept);
+  assert.deepEqual(given.normal({ ...two, more: 1, name: 5, revision: 2.5, saved: null,
+                                  values: [{ ...two.values[0], tex: 7, shown: { "text/html": "<b>", "text/latex": "$x$", "text/plain": 9 }, why: "x" },
+                                           null, "U", { name: "U", form: "again" }, { name: "_x", form: "1" }, { name: "y" }, { name: "z", form: 5 }] }),
+                   { sheet: "a.ipynb", name: "", revision: null, saved: "", values: [{ name: "U", form: '["f","5.5"]', shown: { "text/latex": "$x$" } }] });
+  assert.equal(given.normal({ ...two, revision: "B" }).revision, "B");
+  for (const none of [null, undefined, "a.ipynb", [], { ...two, sheet: "" }, { ...two, sheet: 5 }, { ...two, values: [] }, { ...two, values: null },
+                      { ...two, values: [{ name: "x" }] }]) {
+    assert.equal(given.normal(none), null, JSON.stringify(none));
+  }
+
+  // Taking values of a sheet: those of the names asked for that it delivers, as it has them, in its order.
+  const said = { name: "Limits", revision: 5, saved: "2026-10-12T08:00:00.000Z",
+                 values: { revision: 4, saved: "2026-10-11T10:00:00.000Z", toolkit: "0.1.0",
+                           values: [two.values[0], { name: "f", tex: "f", why: "a function" }, two.values[1], entry("P", '["i","1"]')] } };
+  assert.deepEqual(given.taken(said, "../Limits.ipynb", ["R_tol", "U", "f", "gone"]),
+                   { ...kept, sheet: "../Limits.ipynb", name: "Limits", revision: 4 });
+  assert.deepEqual(given.taken(said, "Limits.ipynb", ["P"]).values, [{ name: "P", form: '["i","1"]', shown: { "text/plain": "<P>" } }]);
+  for (const none of [[said, "Limits.ipynb", []], [said, "Limits.ipynb", ["f"]], [{ ...said, values: null }, "Limits.ipynb", ["U"]],
+                      [null, "Limits.ipynb", ["U"]], [said, "", ["U"]]]) {
+    assert.equal(given.taken(...none), null);
+  }
+
+  // Where it is from, in a few words; and how it stands to what the other sheet delivers now.
+  assert.equal(given.caption(kept), "From a \u00b7 rev. 3");
+  assert.equal(given.caption({ ...kept, revision: "B" }), "From a \u00b7 rev. B");
+  assert.equal(given.caption({ ...kept, revision: 0 }), "From a \u00b7 rev. 0");
+  assert.equal(given.caption({ ...kept, name: "", revision: null }), "From a.ipynb");
+  assert.equal(given.caption({ ...kept, revision: "" }), "From a");
+  const brief = (revision, saved) => ({ name: "a", revision: 9, saved: "x", values: { revision, saved, count: 2 } });
+  assert.equal(given.standing(kept, brief(3, "2026-10-11T10:00:00.000Z")), null);
+  assert.deepEqual(given.standing(kept, brief(4, "2026-10-12T10:00:00.000Z")), { revision: 4, saved: "2026-10-12T10:00:00.000Z" });
+  assert.deepEqual(given.standing(kept, brief(3, "2026-10-12T10:00:00.000Z")), { revision: 3, saved: "2026-10-12T10:00:00.000Z" });
+  assert.deepEqual(given.standing(kept, brief("3", "2026-10-11T10:00:00.000Z")), { revision: "3", saved: "2026-10-11T10:00:00.000Z" });
+  assert.deepEqual(given.standing(kept, brief({ no: 1 }, 5)), { revision: null, saved: "" });
+  assert.deepEqual(given.standing(kept, { name: "a", revision: 9, saved: "x", values: null }), { lost: "keeps no values" });
+  assert.deepEqual(given.standing(kept, null), { lost: "not found" });
+  assert.deepEqual([{ revision: 4, saved: "" }, { revision: "B", saved: "" }, { revision: null, saved: "x" }, { revision: "", saved: "x" }, { revision: 0, saved: "" },
+                    { lost: "not found" }].map(given.markText),
+                   ["rev. 4 is there", "rev. B is there", "newer values are there", "newer values are there", "rev. 0 is there", "not found"]);
+
+  // The other sheet is named as it is reached from this sheet's folder.
+  for (const [folder, whole, reference] of [["", "a.ipynb", "a.ipynb"], ["", "x/a.ipynb", "x/a.ipynb"], ["x", "x/a.ipynb", "a.ipynb"],
+                                            ["x", "a.ipynb", "../a.ipynb"], ["x/y", "x/a.ipynb", "../a.ipynb"], ["x/y", "z/a.ipynb", "../../z/a.ipynb"],
+                                            ["x/y", "x/y/z/a.ipynb", "z/a.ipynb"], ["x", "x/x/a.ipynb", "x/a.ipynb"], ["a.ipynb", "a.ipynb", "../a.ipynb"],
+                                            ["x/y", "x/yy/a.ipynb", "../yy/a.ipynb"], ["a/b", "b/a/x.ipynb", "../../b/a/x.ipynb"]]) {
+    assert.equal(given.relative(folder, whole), reference, `${folder} -> ${whole}`);
+    assert.equal(given.resolve(folder, reference), whole, `${folder} + ${reference}`);
+  }
+  assert.deepEqual(["./a.ipynb", "x//a.ipynb", "x/./../a.ipynb", "x/../a.ipynb"].map((reference) => given.resolve("d", reference)),
+                   ["d/a.ipynb", "d/x/a.ipynb", "d/a.ipynb", "d/a.ipynb"]);
+  assert.deepEqual(["../a.ipynb", "x/../../a.ipynb", "../../a.ipynb"].map((reference) => given.resolve("", reference)), [null, null, null]);
+  assert.deepEqual([given.resolve("d", "../../a.ipynb"), given.resolve("d", "../a.ipynb"), given.resolve("d/e", 5)], [null, "a.ipynb", "d/e/5"]);
+
+  // How it is drawn: where it is from, then each name with its value as a
+  // definition is written — by the kernel's word on it once there is one,
+  // and until then by the file's.
+  const drawn = (...options) => {
+    const body = document.createElement("div");
+    view.renderGiven(body, kept, ...options);
+    return body.html.replace(/^<div>|<\/div>$/g, "");
+  };
+  const whence = '<div class="whence"><span title="a.ipynb">From a \u00b7 rev. 3</span>';
+  const fromFile = '<div class="line"><span class="tex expr">[math:\\displaystyle U \\coloneqq{}]</span><span class="plain res">&lt;U&gt;</span></div>' +
+                   '<div class="line"><code class="src">R_tol := </code><span class="plain res">&lt;R_tol&gt;</span></div>';
+  assert.equal(drawn(), whence + "</div>" + fromFile);
+  assert.equal(drawn({ told: null, error: null, mark: null }), drawn());
+  assert.equal(drawn({ mark: undefined }), drawn());
+  const told = [{ name: "R_tol", latex: "R_{\\mathrm{tol}}", value: { "text/latex": "$\\displaystyle 5\\,\\%$", "text/plain": "5%" } },
+                { name: "U", latex: "", value: { "text/plain": "6 V" } }, { name: "more", latex: "m", value: { "text/plain": "1" } }];
+  assert.equal(drawn({ told }), whence + "</div>" +
+               '<div class="line"><span class="tex expr">[math:\\displaystyle U \\coloneqq{}]</span><span class="plain res">6 V</span></div>' +
+               '<div class="line"><span class="tex expr">[math:\\displaystyle R_{\\mathrm{tol}} \\coloneqq{}]</span><span class="tex res">[math:\\displaystyle 5\\,\\%]</span></div>');
+  const body = document.createElement("div");
+  view.renderGiven(body, kept, { told });
+  assert.deepEqual(body.find("div").filter((node) => node.className === "line").map((node) => node.dataset.name), ["U", "R_tol"]);
+  assert.equal(drawn({ mark: { revision: 4, saved: "" } }),
+               whence + '<span class="mark" role="button" title="See what has changed, and take the new values">rev. 4 is there</span></div>' + fromFile);
+  assert.equal(drawn({ mark: { lost: "not found" } }),
+               whence + '<span class="mark lost" role="button" title="Choose the sheet again, or other values">not found</span></div>' + fromFile);
+  assert.equal(drawn({ error: { ename: "ValueError", evalue: "this is <no> stored value" } }),
+               whence + "</div>" + fromFile + '<div class="err"><b>ValueError</b>: this is &lt;no&gt; stored value</div>');
+  assert.ok(drawn({ error: { ename: "Stopped" } }).endsWith(fromFile + '<div class="err"><b>Stopped</b>: </div>'));
+  // (Drawn anew, what was there is gone.)
+  view.renderGiven(body, kept);
+  assert.equal(body.html, "<div>" + drawn() + "</div>");
+
+  // The kernel's word on such a region, out of what it says of the region's statements.
+  const items = [{ t: "comment", text: "#" }, { t: "stmt", src: "from", lines: [2, 2] }, { t: "stmt", src: "(U,) =", lines: [3, 3], given: told }];
+  assert.deepEqual(view.givenSaid({ items }), { told, error: null });
+  assert.deepEqual(view.givenSaid(null), { told: null, error: null });
+  assert.deepEqual(view.givenSaid({ items: [] }), { told: null, error: null });
+  assert.deepEqual(view.givenSaid({ items: [items[0], { ...items[1], error: { ename: "ImportError" } }, { t: "stmt", error: { ename: "NameError" } }] }),
+                   { told: null, error: { ename: "ImportError" } });
+
+  // In the notebook: where it is from, then a line for each name — which any Jupyter shows.
+  assert.deepEqual(view.givenOutputs(kept, null), [
+    { output_type: "stream", name: "stdout", text: "From a \u00b7 rev. 3\n" },
+    { output_type: "display_data", data: { "text/plain": "U = <U>" }, metadata: {} },
+    { output_type: "display_data", data: { "text/plain": "R_tol = <R_tol>" }, metadata: {} }]);
+  assert.deepEqual(view.givenOutputs(kept, told).slice(1), [
+    { output_type: "display_data", data: { "text/plain": "U = 6 V" }, metadata: {} },
+    { output_type: "display_data", data: { "text/plain": "R_tol = 5%", "text/latex": "$\\displaystyle R_{\\mathrm{tol}} = 5\\,\\%$" }, metadata: {} }]);
+  assert.deepEqual(view.givenOutputs({ ...kept, values: [{ name: "x", tex: "x", form: "1", shown: { "text/latex": "$$1$$" } }] }, null)[1].data,
+                   { "text/plain": "x = ", "text/latex": "$\\displaystyle x = 1$" });
+  // (A value under a name that is not typeset is not typeset by halves.)
+  assert.deepEqual(view.givenOutputs({ ...kept, values: [{ name: "x", form: "1", shown: { "text/latex": "$$1$$", "text/plain": "1" } }] }, null)[1].data,
+                   { "text/plain": "x = 1" });
+}
+
 console.log("FRONTEND_OK");

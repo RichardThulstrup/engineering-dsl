@@ -98,10 +98,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* In a narrow window (half a screen, say) the tools give up their
    labels — their tooltips still name them — so the sheet's name stays
    readable. */
-@media (max-width: 1480px) {
+@media (max-width: 1560px) {
   .tool[data-cmd="insert-math"] span:not(.glyph),
   .tool[data-cmd="insert-text"] span:not(.glyph),
   .tool[data-cmd="insert-picture"] span,
+  .tool[data-cmd="take-values"] span,
   .tool[data-cmd="toggle-palette"] span:not(.glyph) { display: none; }
 }
 @media (max-width: 1240px) {
@@ -114,6 +115,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 @media (max-width: 700px) {
   .tool.check span { display: none; }                   /* "Automatic": its box stays */
+  .tool[data-cmd="take-values"] { display: none; }      /* the Edit menu has it too */
 }
 
 #banner {
@@ -240,6 +242,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .katex { font-size: 1.14em; }
 .region.stale .res, .region.stale .eq, .region.stale .outs { opacity: .35; transition: opacity .12s; }
 .region.uncalculated .res, .region.uncalculated .eq { display: none; }
+
+/* What a sheet was given by another one (js/given.js): where it is from,
+   then each name with its value, set as a definition is. */
+.region.given .whence {
+  display: flex; align-items: baseline; gap: 8px; font: 11px/1.6 var(--ui); color: var(--muted); white-space: nowrap;
+}
+.region.given .mark {
+  padding: 0 7px; border-radius: 8px; background: #fff3cd; color: #6b4e00; cursor: pointer;
+}
+.region.given .mark:hover { background: #ffe69c; }
+.region.given .mark.lost { background: var(--danger-soft); color: var(--danger); }
+.region.given .err { margin-top: 3px; box-shadow: none; }
+.region.given.has-error .line .res { opacity: .35; }          /* (what could not be read is not in force) */
 
 .outs { margin: 2px 0 3px; white-space: normal; }
 .outs pre.stream {
@@ -511,6 +526,34 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dialog input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31, 95, 191, .15); }
 .dialog p { margin: 4px 0 8px; line-height: 1.5; }
 .dialog.wide { width: 720px; }
+.dialog .foot .grow { flex: 1; }
+/* The dialog for values from another sheet (js/givendialog.js). */
+.dialog.given { width: 640px; max-height: 80vh; }
+.dialog.given .source { display: flex; align-items: baseline; gap: 10px; margin: 2px 0 6px; }
+.dialog.given .source b { font-size: 14px; }
+.dialog.given .source .btn { margin-left: auto; }
+.dialog.given .note { color: var(--muted); font-size: 12px; }
+.dialog.given p.note { margin: 0 0 6px; }
+.dialog.given input[type="text"] { margin: 0 0 8px; }
+.dialog.given .btn:disabled { opacity: .5; cursor: default; }
+.values { border: 1px solid var(--line); border-radius: 6px; overflow: auto; max-height: 46vh; }
+.values .value {
+  display: grid; grid-template-columns: 18px minmax(70px, max-content) 1fr auto; align-items: baseline; gap: 2px 12px;
+  padding: 3px 11px; cursor: pointer;
+}
+.values .value:hover { background: #f1f3f5; }
+.values .value input { margin: 0; align-self: center; accent-color: var(--accent); }
+.values .value.none { cursor: default; }
+.values .value.none:hover { background: none; }
+.values .value.none .name { opacity: .55; }
+/* (A value is a line here, however long it is: what does not fit is cut off.) */
+.values .is, .values .was { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.values .is { color: #0d2f66; }
+.values .is.why, .values .was { color: var(--muted); font-size: 12px; }
+.values .was { max-width: 220px; }
+.values .was .katex { font-size: 1em; }
+.values .plain { font: 12.5px/1.4 var(--mono); white-space: inherit; }
+.values code { font: 12.5px var(--mono); }
 /* The dialog for header and footer (js/framedialog.js): wide enough to
    show both as wide as they are on the page. */
 .dialog.frame { width: 760px; max-height: 86vh; }
@@ -566,7 +609,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   html, body { height: auto; overflow: visible; background: #fff; }
   body { display: block; }
   #bar, #banner, #palette, #overlay, #toast, #cross, #band, #sink, .pagebreak, .grip, .sizer, .preview, .popup,
-  .errpop, .flag, .pageframe.ahead { display: none !important; }
+  .errpop, .flag, .pageframe.ahead, .region.given .mark { display: none !important; }
   #work, #desk { display: block; overflow: visible; padding: 0; }
   #paper { width: 680px; margin: 0; padding: 0; box-shadow: none; zoom: 1 !important; }
   /* As long as what is on it, and no longer (sheet.js: drawBreaks). */

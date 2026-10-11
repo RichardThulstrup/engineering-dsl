@@ -55,6 +55,8 @@
       <hr>
       <button type="button" data-cmd="insert-space">Insert line at cursor<kbd>Ctrl+Enter</kbd></button>
       <button type="button" data-cmd="remove-space">Remove line at cursor<kbd>Ctrl+Backspace</kbd></button>
+      <hr>
+      <button type="button" data-cmd="take-values">Values from another sheet…</button>
     </div>
   </div>
   <div class="menu" id="arrange-menu">
@@ -130,6 +132,9 @@
   </button>
   <button class="tool" type="button" data-cmd="insert-picture" title="A picture from a file, at the cursor — or paste one (Ctrl+V), or drop its file on the page">
     <svg viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" d="M2 3h12v10H2zM3 4v6.3l3-3 2.5 2.5L11 7.3l2 2V4zM5.2 5.1a1.2 1.2 0 1 1 0 2.4 1.2 1.2 0 0 1 0-2.4z"/></svg><span>Picture</span>
+  </button>
+  <button class="tool" type="button" data-cmd="take-values" title="Values from another sheet, at the cursor: what its variables were when it was saved">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" d="M6 1.5h8.5v13H6V11h1v2.5h6.5v-11H7V5H6zM1 7.5h7.2L6.4 5.7l.7-.7L10.1 8l-3 3-.7-.7 1.8-1.8H1z"/></svg><span>Values</span>
   </button>
   <button class="tool" type="button" data-cmd="toggle-palette" title="Symbols, functions and units (F2) — Ctrl+E searches them">
     <span class="glyph">Ω</span><span>Symbols</span>

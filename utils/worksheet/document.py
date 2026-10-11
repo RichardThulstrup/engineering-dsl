@@ -8,12 +8,20 @@ cell's metadata (``edsl``), which other tools carry along untouched.
 A picture is kept the way JupyterLab keeps a pasted one: attached to
 the text cell that names it.
 
+A sheet delivers values to other sheets: what its variables were when
+it was saved is kept in the notebook's metadata, with the revision that
+save made (``values``), and a region that was given values by another
+sheet says in its cell's metadata where they are from (``given``).
+Both are text and data — see ``values.py`` — and nothing here reads
+more out of them than that they have the shape they should.
+
 Opening a sheet does not, by itself, run it: a notebook that was not
 last saved on this machine (Jupyter's own trust record decides) is
 shown typeset but uncalculated until the user asks.
 """
 from __future__ import annotations
 
+import keyword
 import os
 import re
 import uuid
@@ -21,7 +29,7 @@ from pathlib import Path
 
 from .protocol import PREAMBLE
 
-__all__ = ["load", "save", "trust", "listing", "Conflict", "resolve", "warm_up"]
+__all__ = ["load", "save", "trust", "listing", "published", "Conflict", "resolve", "warm_up"]
 
 # nbformat takes a second or two to import (its schema validator), which
 # the server would rather spend opening the page: it is imported when
@@ -158,6 +166,95 @@ def _attach(cell, offered):
     return len(offered)
 
 
+def _shown(shown) -> dict:
+    """How a value is displayed: its plain text and its LaTeX, no more."""
+    if not isinstance(shown, dict):
+        return {}
+    return {kind: shown[kind] for kind in ("text/plain", "text/latex") if isinstance(shown.get(kind), str)}
+
+
+def _name(name) -> bool:
+    """Is this the name of a variable a sheet hands on?  A name as a
+    sheet defines them: not one it keeps to itself (``_x``), which the
+    kernel's own are, too."""
+    return isinstance(name, str) and name.isidentifier() and not keyword.iskeyword(name) and not name.startswith("_")
+
+
+def _values(listed) -> list:
+    """Values by name, as far as they are that: each with its name as it
+    is typeset (``tex``), and with its text (``form``) and its display —
+    or with why it is not offered.  A name is there once."""
+    kept, seen = [], set()
+    for entry in listed if isinstance(listed, list) else []:
+        if not (isinstance(entry, dict) and _name(entry.get("name"))) or entry["name"] in seen:
+            continue
+        one = {"name": entry["name"]}
+        if isinstance(entry.get("tex"), str):
+            one["tex"] = entry["tex"]
+        if isinstance(entry.get("form"), str):
+            one.update(form=entry["form"], shown=_shown(entry.get("shown")))
+        elif isinstance(entry.get("why"), str):
+            one["why"] = entry["why"]
+        else:
+            continue
+        seen.add(one["name"])
+        kept.append(one)
+    return kept
+
+
+def _revision(value):
+    """A revision as it is counted or was typed: a number, or text — else ``None``."""
+    if isinstance(value, str) or (isinstance(value, int) and not isinstance(value, bool)):
+        return value
+    return None
+
+
+def _given(given):
+    """What a region says of the values it was given: the sheet they are
+    from (a path beside this sheet's own), that sheet's name and revision
+    then, and the values — or ``None`` for what is no such thing."""
+    if not (isinstance(given, dict) and isinstance(given.get("sheet"), str) and given["sheet"]):
+        return None
+    values = [entry for entry in _values(given.get("values")) if "form" in entry]
+    if not values:
+        return None
+    return {"sheet": given["sheet"], "name": given["name"] if isinstance(given.get("name"), str) else "",
+            "revision": _revision(given.get("revision")),
+            "saved": given["saved"] if isinstance(given.get("saved"), str) else "", "values": values}
+
+
+def _record(record):
+    """What a sheet's variables were at a revision, as it is kept in the
+    file — or ``None``."""
+    if not isinstance(record, dict):
+        return None
+    return {"revision": _revision(record.get("revision")),
+            "saved": record["saved"] if isinstance(record.get("saved"), str) else "",
+            "toolkit": record["toolkit"] if isinstance(record.get("toolkit"), str) else "",
+            "values": _values(record.get("values"))}
+
+
+def published(path: Path, brief: bool = False) -> dict:
+    """What the sheet in ``path`` delivers to other sheets: its name, its
+    revision, and the values its variables had when it was last saved
+    calculated (``values`` — ``None`` for a sheet that was never saved so).
+
+    ``brief`` leaves the values themselves out: enough to tell whether a
+    sheet has moved on since values were taken from it.  The file is
+    read as the text it is; nothing of it is run.
+    """
+    import json
+    meta = json.loads(path.read_text(encoding="utf-8")).get("metadata") or {}
+    sheet = meta.get("edsl_worksheet") if isinstance(meta.get("edsl_worksheet"), dict) else {}
+    settings = sheet.get("settings") if isinstance(sheet.get("settings"), dict) else {}
+    about = settings.get("about") if isinstance(settings.get("about"), dict) else {}
+    record = _record(sheet.get("values"))
+    if record is not None and brief:
+        record = {"revision": record["revision"], "saved": record["saved"], "count": sum("form" in e for e in record["values"])}
+    return {"name": path.stem, "revision": _revision(about.get("revision")),
+            "saved": about["saved"] if isinstance(about.get("saved"), str) else "", "values": record}
+
+
 def load(path: Path) -> dict:
     """Read a notebook as a worksheet document for the front end."""
     warm_up()
@@ -186,6 +283,9 @@ def load(path: Path) -> dict:
             saved = _saved_outputs(cell)
             if saved:
                 region["saved"] = saved
+            given = _given(place.get("given"))
+            if given:
+                region["given"] = given
         else:
             pictures = _pictures(cell.get("attachments"))
             if pictures:
@@ -272,6 +372,9 @@ def save(path: Path, doc: dict, *, expect_mtime=None, force=False) -> dict:
         cell.source = region.get("source", "")
         place = {k: region[k] for k in ("x", "y", "w")
                  if isinstance(region.get(k), (int, float))}
+        given = _given(region.get("given")) if want == "code" else None
+        if given:
+            place["given"] = given
         if place:
             cell.metadata["edsl"] = place
         else:
@@ -284,8 +387,22 @@ def save(path: Path, doc: dict, *, expect_mtime=None, force=False) -> dict:
             pictures += _attach(cell, region.get("attachments"))
         cells.append(cell)
     nb.cells = cells
+    # What the sheet's variables are at this save — or, said by a page that
+    # could not ask (the sheet is not calculated), what they were before.
+    before = nb.metadata.get("edsl_worksheet")
+    had = _record(before.get("values")) if isinstance(before, dict) else None
+    record = _record(doc["values"]) if "values" in doc else had
+    # What a revision delivers is what it delivered first.  A sheet that is
+    # saved again as it is — the same revision, of the same moment — keeps
+    # the values it has, whatever a calculation on another day makes of it
+    # (the time, a random number, a file that has changed): another sheet
+    # that names the revision gets what the sheets before it got.
+    if record and had and had["saved"] and (record["revision"], record["saved"]) == (had["revision"], had["saved"]):
+        record = had
     nb.metadata["edsl_worksheet"] = {"version": FORMAT_VERSION,
                                      "settings": doc.get("settings") or {}}
+    if record is not None:
+        nb.metadata["edsl_worksheet"]["values"] = record
     if nb.nbformat_minor < 5:
         nb.nbformat_minor = 5            # cell ids
     nbformat.validate(nb)
@@ -300,7 +417,8 @@ def save(path: Path, doc: dict, *, expect_mtime=None, force=False) -> dict:
     # one it sent was turned down — or when a server from before pictures
     # could be kept has answered it.)
     return {"mtime": _stamp(path), "name": path.stem,
-            "ids": [c.get("id") for c in cells], "pictures": pictures}
+            "ids": [c.get("id") for c in cells], "pictures": pictures,
+            "values": None if record is None else sum("form" in e for e in record["values"])}
 
 
 def trust(path: Path, expect_mtime=None) -> bool:

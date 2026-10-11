@@ -75,6 +75,7 @@ def page_and_folder(tmp_path):
             page = browser.new_page(viewport={"width": 1280, "height": 900})
             problems = []
             page.on("pageerror", lambda error: problems.append(str(error)))
+            page.problems = problems                # (a test that provokes an error looks for it here, and takes it out)
             page.goto(f"http://127.0.0.1:{port}/?token={TOKEN}")
             yield page, tmp_path
             browser.close()
@@ -2331,7 +2332,7 @@ def test_a_header_and_a_footer_on_every_page_take_their_room_from_the_page(page_
     assert page.evaluate(FRAMES) == [] and page.evaluate(TOPS) == [0, 1048, 945, 1009] and page.evaluate(DIRTY)
     save(page)
     assert "frame" not in saved_settings(folder, "framed.ipynb")
-    assert saved_settings(folder, "framed.ipynb")["about"]["revision"] == 1                           # (without one, a save is not counted)
+    assert saved_settings(folder, "framed.ipynb")["about"]["revision"] == 2                           # (counted all the same: a sheet has its revision, whatever it shows of it)
 
 
 def test_what_a_header_says_is_set_in_a_dialog_and_tried_out_there(page_and_folder):
@@ -2719,3 +2720,990 @@ def test_a_sheet_from_elsewhere_gets_no_more_of_a_frame_than_a_frame_is_and_prin
     page.goto(page.url.split("?")[0] + f"?token={TOKEN}&open=dated.ipynb")
     page.wait_for_selector("#content > .pageframe")
     assert page.evaluate(FRAMES)[0]["says"] == ["2021-03-04 10:05", "", ""]
+
+
+# ---- values from another sheet ------------------------------------------------
+
+# What the regions hold that were given values (without the blanks KaTeX sets), and the marks on them.
+GIVEN = "[...document.querySelectorAll('.region.given')].map((r) => r.innerText.replace(/[\\s\\u200b]+/g, ''))"
+MARKS = "[...document.querySelectorAll('.region.given .mark')].map((m) => [m.textContent, m.classList.contains('lost')])"
+# The dialog: each row's name, whether it is chosen (null: it cannot be), and what it says.
+ROWS = """[...document.querySelectorAll('.dialog.given .value')].map((row) => [row.dataset.name,
+          row.querySelector('input') ? row.querySelector('input').checked : null, row.innerText.replace(/[\\s\\u200b]+/g, '')])"""
+NOTES = "[...document.querySelectorAll('.dialog.given p.note')].map((note) => note.textContent)"
+TAKE = ".dialog.given .foot .btn.primary"
+SELECTED = "[...document.querySelectorAll('.region.selected')].map((r) => r.classList.contains('given'))"
+NOT_KEPT = "Saved. Its values are not kept with this revision: the sheet is not calculated."
+
+
+def typed(page, *lines):
+    for line in lines:
+        page.keyboard.type(line)
+        page.keyboard.press("Enter")
+
+
+def new_sheet(page):
+    page.keyboard.press("Alt+n")
+    page.wait_for_function("document.querySelector('#doc-name').textContent === 'Untitled' && !document.querySelector('.region')")
+    settled(page)
+
+
+def opened(page, name):
+    page.goto(page.url.split("?")[0] + f"?token={TOKEN}&open={name}")
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    settled(page)
+
+
+def named(page, name):
+    """The sheet has been saved under this name."""
+    page.wait_for_function("(name) => document.querySelector('#doc-name').textContent === name && document.querySelector('#doc-dirty').hidden", arg=name)
+
+
+def sheet_says(folder, name):
+    """What a sheet's file says of the sheet: its settings, and what its variables were."""
+    return json.loads((folder / name).read_text(encoding="utf-8"))["metadata"]["edsl_worksheet"]
+
+
+def handed_on(folder, name):
+    """The values a sheet's file keeps, briefly: its revision, and each name with how it is shown (or why it is not there)."""
+    record = sheet_says(folder, name).get("values")
+    return record and [record["revision"], {entry["name"]: entry.get("shown", {}).get("text/plain", entry.get("why")) for entry in record["values"]}]
+
+
+def given_cells(folder, name):
+    return [cell for cell in nbformat.read(str(folder / name), as_version=4).cells if "given" in cell.metadata.get("edsl", {})]
+
+
+def values_dialog(page, sheet):
+    """Edit > Values from another sheet…, and the sheet chosen."""
+    page.click("#edit-menu .menu-button")
+    page.click("#edit-menu [data-cmd='take-values']")
+    page.wait_for_selector(".dialog .files")
+    page.click(f".files div:has-text('{sheet}')")
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".dialog.given")
+
+
+def take(page, *names):
+    """Choose these names in the dialog, and take them."""
+    for name in names:
+        page.check(f".dialog.given .value[data-name='{name}'] input")
+    page.click(TAKE)
+    page.wait_for_selector(".dialog.given", state="detached")
+    settled(page)
+
+
+def test_a_sheet_takes_values_of_another_sheet_as_that_sheet_had_them(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    # The sheet that hands them on.  Saved, it keeps what its variables are
+    # with the revision that save made — as far as they are values.
+    typed(page, "U := 5.5 V", "R_tol := 10. k\u03a9 \u00b1 5%", "volts := [1.0, 2.0, 3.0] V", "f := x \u2192 x\u00b2 + 1", "n := 3")
+    settled(page)
+    save_as(page, "limits.ipynb")
+    named(page, "limits")
+    about = saved_settings(folder, "limits.ipynb")["about"]
+    record = sheet_says(folder, "limits.ipynb")["values"]
+    assert about["revision"] == 1 and {key: record[key] for key in ("revision", "saved")} == about
+    try:
+        from importlib.metadata import version
+        toolkit = version("engineering-dsl")
+    except Exception:
+        toolkit = ""                                            # (where the toolkit is not installed as a package)
+    assert record["toolkit"] == toolkit
+    assert handed_on(folder, "limits.ipynb") == [1, {"U": "5.5 V", "R_tol": "(9.50 k\u03a9 \u2025 10.5 k\u03a9)", "volts": "[1.0 V, 2.0 V, 3.0 V]",
+                                                    "f": "a function", "n": "3"}]
+    assert [sorted(entry) for entry in record["values"]] == [["form", "name", "shown", "tex"]] * 3 + [["name", "tex", "why"], ["form", "name", "shown", "tex"]]
+
+    # Another sheet takes some of them: the sheet is chosen, then what of it.
+    new_sheet(page)
+    page.mouse.click(420, 200)                                  # (the cursor is put somewhere on the page)
+    page.evaluate("() => { window.passes = 0; const send = WebSocket.prototype.send;"
+                  " WebSocket.prototype.send = function (text) { if (JSON.parse(text).op === 'calc') window.passes += 1; return send.call(this, text); }; }")
+    keys.type("k := 2")                                         # (still being written when the values are asked for: it is finished first)
+    page.click(".tool[data-cmd='take-values']")
+    page.wait_for_selector(".dialog .files")
+    assert page.inner_text(".dialog h3") == "Values from which sheet?" and page.locator(".region.editing").count() == 0
+    page.click(".files div:has-text('limits.ipynb')")
+    keys.press("Enter")
+    page.wait_for_selector(".dialog.given")
+    assert page.inner_text(".dialog.given h3") == "Values from another sheet"
+    assert page.evaluate("document.querySelector('.dialog.given .source').innerText.replace(/\\s+/g, ' ')").startswith("limits rev. 1 \u00b7 saved ")
+    assert page.evaluate(NOTES) == [] and page.locator(".dialog.given input[type=text]").count() == 0       # (so few need no finding)
+    page.wait_for_function("document.activeElement.getAttribute('aria-label') === 'U'")                     # (the keyboard is at the first of them)
+    assert page.evaluate(ROWS) == [["U", False, "U5.5V"], ["R_tol", False, "Rtol(9.50k\u03a9\u202510.5k\u03a9)"], ["volts", False, "volts[1.0V,2.0V,3.0V]"],
+                                   ["f", None, "fafunction:nothandedon"], ["n", False, "n3"]]
+    # Nothing is taken while nothing is chosen; the button says how much is.
+    assert page.inner_text(TAKE) == "Take values" and page.is_disabled(TAKE)
+    keys.press("Enter")
+    page.wait_for_timeout(100)
+    assert page.locator(".dialog.given").count() == 1
+    page.check(".dialog.given .value[data-name='U'] input")
+    assert page.inner_text(TAKE) == "Take 1 value" and page.is_enabled(TAKE)
+    page.click(".dialog.given .foot .btn:has-text('All')")
+    assert page.inner_text(TAKE) == "Take 4 values" and [row[1] for row in page.evaluate(ROWS)] == [True, True, True, None, True]
+    page.click(".dialog.given .foot .btn:has-text('None')")
+    assert page.inner_text(TAKE) == "Take values" and page.is_disabled(TAKE)
+    page.click(".dialog.given .value[data-name='volts'] .is")            # (a click anywhere on its row chooses a value)
+    assert page.inner_text(TAKE) == "Take 1 value"
+    settled(page)
+    passes = page.evaluate("window.passes")
+    take(page, "U", "R_tol")
+    assert page.evaluate("window.passes") == passes + 1         # (the sheet is calculated with them)
+    # They stand at the cursor — below what was being written — with where
+    # they are from, as definitions are written, in the other sheet's
+    # order.  The region is left selected.
+    assert page.evaluate(GIVEN) == ["Fromlimits\u00b7rev.1U:=5.5VRtol:=(9.50k\u03a9\u202510.5k\u03a9)volts:=[1.0V,2.0V,3.0V]"]
+    assert page.evaluate("document.querySelector('.region.given .whence span').title") == "limits.ipynb"
+    tops = page.evaluate(TOPS)
+    lefts = page.evaluate("[...document.querySelectorAll('.region')].map((r) => parseFloat(r.style.left))")
+    assert tops[1] == tops[0] + 40 > 100 and lefts[0] == lefts[1] > 100
+    assert page.evaluate(SELECTED) == [True] and page.evaluate(DIRTY) and page.evaluate(MARKS) == []
+    assert page.evaluate("document.querySelectorAll('.region.given .line .katex').length") == 6            # (names and values, typeset)
+    # Undo takes it off the page again, and redo puts it back.
+    keys.press("Control+z")
+    settled(page)
+    assert page.evaluate(GIVEN) == [] and len(shown(page)) == 1
+    keys.press("Control+y")
+    settled(page)
+    assert len(page.evaluate(GIVEN)) == 1 and page.evaluate(TOPS) == tops
+
+    # It is math like the rest: what follows calculates with what it holds.
+    # (The cursor waits below it.)
+    keys.press("Escape")
+    typed(page, "U \u00b7 k", "volts[1] / R_tol")
+    settled(page)
+    assert "= 11. V" in shown(page)[2] and "190. \u03bcA" in shown(page)[3]
+    assert page.evaluate("document.querySelectorAll('.region.has-error').length") == 0
+    below = page.evaluate("document.querySelector('.region.given').getBoundingClientRect().height") + tops[1]
+    assert below + 8 <= page.evaluate(TOPS)[2] <= below + 24 < page.evaluate(TOPS)[3]
+
+    # A click selects it — there is nothing in it to write — and a double
+    # click, or Enter, asks what it is to hold; Esc leaves it as it is.
+    box = page.locator(".region.given").bounding_box()
+    middle_of = (box["x"] + 60, box["y"] + 40)
+    page.mouse.click(*middle_of)
+    assert page.evaluate(SELECTED) == [True] and page.locator(".dialog").count() == 0 and page.locator(".region.editing").count() == 0
+    page.wait_for_timeout(600)
+    page.mouse.dblclick(*middle_of)
+    page.wait_for_selector(".dialog.given")
+    keys.press("Escape")
+    page.wait_for_selector(".dialog.given", state="detached")
+    page.mouse.click(*middle_of)                                # (a third click, close upon the two, is a click: not half of another two)
+    page.wait_for_timeout(150)
+    assert page.locator(".dialog").count() == 0 and page.evaluate(SELECTED) == [True]
+    page.wait_for_timeout(600)
+    page.mouse.dblclick(*middle_of)
+    page.wait_for_selector(".dialog.given")
+    assert [row[:2] for row in page.evaluate(ROWS)] == [["U", True], ["R_tol", True], ["volts", True], ["f", None], ["n", False]]
+    assert page.inner_text(TAKE) == "Take 3 values" and page.evaluate(NOTES) == []
+    keys.press("Escape")
+    page.wait_for_selector(".dialog.given", state="detached")
+    keys.press("Enter")
+    page.wait_for_selector(".dialog.given")
+    page.click(".dialog.given .foot .btn:has-text('Cancel')")
+    page.wait_for_selector(".dialog.given", state="detached")
+    assert len(page.evaluate(GIVEN)) == 1 and page.evaluate(SELECTED) == [True]
+    # Tab, which goes from region to region to write them, passes it by; it is not split into statements.
+    page.locator(".region.math").first.click()
+    keys.press("Escape")
+    keys.press("Tab")
+    assert page.evaluate(EDITOR) == "U \u00b7 k"
+    keys.press("Escape")
+    page.mouse.click(*middle_of)
+    page.click("#arrange-menu .menu-button")
+    page.click("#arrange-menu [data-cmd='split']")
+    assert len(page.evaluate(GIVEN)) == 1 and page.evaluate("document.querySelectorAll('.region').length") == 4
+    # Chosen anew, it holds what is chosen: less, here.  Undo gives it back; so does redo take it again.
+    page.wait_for_timeout(600)
+    page.mouse.dblclick(*middle_of)
+    page.wait_for_selector(".dialog.given")
+    page.uncheck(".dialog.given .value[data-name='volts'] input")
+    take(page)
+    assert page.evaluate(GIVEN) == ["Fromlimits\u00b7rev.1U:=5.5VRtol:=(9.50k\u03a9\u202510.5k\u03a9)"]
+    assert page.evaluate("document.querySelectorAll('.region.has-error').length") == 1          # (volts is no longer there to divide)
+    keys.press("Control+z")
+    settled(page)
+    assert page.evaluate(GIVEN)[0].endswith("volts:=[1.0V,2.0V,3.0V]") and page.evaluate("document.querySelectorAll('.region.has-error').length") == 0
+    keys.press("Control+y")
+    settled(page)
+    assert page.evaluate(GIVEN)[0].endswith("10.5k\u03a9)")
+    keys.press("Control+z")
+    settled(page)
+
+    # Copied and pasted, it is what it was; deleted, it is gone — and back with undo.
+    page.wait_for_timeout(600)
+    page.mouse.click(*middle_of)
+    keys.press("Control+c")
+    page.mouse.click(500, 700)
+    keys.press("Control+v")
+    settled(page)
+    assert page.evaluate(GIVEN) == ["Fromlimits\u00b7rev.1U:=5.5VRtol:=(9.50k\u03a9\u202510.5k\u03a9)volts:=[1.0V,2.0V,3.0V]"] * 2
+    assert page.evaluate(SELECTED) == [True]
+    keys.press("Delete")
+    settled(page)
+    assert len(page.evaluate(GIVEN)) == 1
+    keys.press("Control+z")
+    settled(page)
+    assert len(page.evaluate(GIVEN)) == 2
+    keys.press("Control+z")
+    settled(page)
+    assert len(page.evaluate(GIVEN)) == 1
+
+    # Saved, the sheet is a notebook any Jupyter runs: the region is a cell
+    # of code that holds the values, with what it shows as its output; and
+    # the cell says where they are from.
+    save_as(page, "uses.ipynb")
+    named(page, "uses")
+    cell, = given_cells(folder, "uses.ipynb")
+    taken = cell.metadata["edsl"]["given"]
+    assert {key: taken[key] for key in ("sheet", "name", "revision", "saved")} == {
+        "sheet": "limits.ipynb", "name": "limits", "revision": 1, "saved": about["saved"]}
+    assert taken["values"] == [entry for entry in record["values"] if entry["name"] in ("U", "R_tol", "volts")]
+    lines = cell.source.split("\n")
+    assert lines[0].startswith("# Values given by another sheet") and lines[1] == "from utils.worksheet.values import given as _given"
+    assert lines[2].startswith("(U, R_tol, volts,) = _given('{") and len(lines) == 3
+    assert [(out.output_type, out.get("text") or out.data["text/plain"]) for out in cell.outputs] == [
+        ("stream", "From limits \u00b7 rev. 1\n"), ("display_data", "U = 5.5 V"), ("display_data", "R_tol = (9.50 k\u03a9 \u2025 10.5 k\u03a9)"),
+        ("display_data", "volts = [1.0 V, 2.0 V, 3.0 V]")]
+    assert cell.outputs[2].data["text/latex"].startswith("$\\displaystyle R_{\\mathrm{tol}} = ")
+    # What it was given is the sheet's own now, and handed on with the rest: a third sheet can take it from here.
+    assert handed_on(folder, "uses.ipynb") == [1, {"k": "2", "U": "5.5 V", "R_tol": "(9.50 k\u03a9 \u2025 10.5 k\u03a9)", "volts": "[1.0 V, 2.0 V, 3.0 V]"}]
+
+    # Opened again, it is what it was.
+    opened(page, "uses.ipynb")
+    assert page.evaluate(GIVEN) == ["Fromlimits\u00b7rev.1U:=5.5VRtol:=(9.50k\u03a9\u202510.5k\u03a9)volts:=[1.0V,2.0V,3.0V]"]
+    assert "= 11. V" in shown(page)[2] and page.evaluate(MARKS) == [] and not page.evaluate(DIRTY)
+    new_sheet(page)
+    values_dialog(page, "uses.ipynb")
+    assert [row[0] for row in page.evaluate(ROWS)] == ["k", "U", "R_tol", "volts"]
+    take(page, "U")
+    assert page.evaluate(GIVEN) == ["Fromuses\u00b7rev.1U:=5.5V"]
+
+    # A sheet with many variables: a field in its dialog finds them by name.
+    many = [{"name": f"v_{k}", "tex": f"v_{{{k}}}", "form": f'["i","{k}"]', "shown": {"text/plain": str(k)}} for k in range(1, 10)]
+    many.append({"name": "Other", "form": '["i","0"]', "shown": {"text/plain": "0"}})
+    nb = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell("from utils.Engineer import *")])
+    nb.metadata["edsl_worksheet"] = {"version": 1, "settings": {"about": {"revision": "B", "saved": "2026-10-11T10:00:00.000Z"}},
+                                     "values": {"revision": "B", "saved": "2026-10-11T10:00:00.000Z", "toolkit": "", "values": many}}
+    nbformat.write(nb, str(folder / "many.ipynb"))
+    keys.press("Escape")
+    values_dialog(page, "many.ipynb")
+    in_sight = "[...document.querySelectorAll('.dialog.given .value')].filter((row) => row.getClientRects().length).map((row) => row.dataset.name)"
+    page.wait_for_function("document.activeElement.getAttribute('aria-label') === 'Find a name'")
+    assert len(page.evaluate(in_sight)) == 10
+    keys.type("V_1")                                            # (in capitals or not)
+    assert page.evaluate(in_sight) == ["v_1"]
+    page.click(".dialog.given .foot .btn:has-text('All')")      # (all that are in sight)
+    assert page.inner_text(TAKE) == "Take 1 value"
+    page.fill(".dialog.given input[type=text]", " oth ")
+    assert page.evaluate(in_sight) == ["Other"]
+    page.fill(".dialog.given input[type=text]", "")
+    assert len(page.evaluate(in_sight)) == 10 and [row[1] for row in page.evaluate(ROWS)] == [True] + [False] * 9
+    page.click(".dialog.given .foot .btn:has-text('All')")
+    page.fill(".dialog.given input[type=text]", "v_")
+    page.click(".dialog.given .foot .btn:has-text('None')")
+    assert page.inner_text(TAKE) == "Take 1 value"
+    keys.press("Enter")                                         # (on a button, Enter presses that button)
+    page.wait_for_timeout(100)
+    assert page.locator(".dialog.given").count() == 1 and page.inner_text(TAKE) == "Take 1 value"
+    page.focus(".dialog.given input[type=text]")
+    keys.press("Enter")                                         # (in the field, too, Enter takes what is chosen)
+    page.wait_for_selector(".dialog.given", state="detached")
+    settled(page)
+    assert page.evaluate(GIVEN)[-1] == "Frommany\u00b7rev.BOther:=0"
+
+
+# (values from another sheet: what changes)
+
+def rewritten(folder, name, change):
+    """Another program changes what a sheet's file says of the sheet."""
+    book = json.loads((folder / name).read_text(encoding="utf-8"))
+    change(book["metadata"]["edsl_worksheet"])
+    (folder / name).write_text(json.dumps(book), encoding="utf-8")
+
+
+def refocused(page):
+    """The user comes back to the window: the page looks at the other sheets again."""
+    page.evaluate("window.dispatchEvent(new Event('focus'))")
+
+
+def test_a_sheet_is_told_when_the_other_sheet_delivers_other_values(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    typed(page, "U := 5.5 V", "n := 3", "spare := 1")
+    settled(page)
+    save_as(page, "source.ipynb")
+    named(page, "source")
+    first = sheet_says(folder, "source.ipynb")["values"]
+    new_sheet(page)
+    values_dialog(page, "source.ipynb")
+    take(page, "U", "n")
+    keys.press("Escape")
+    typed(page, "U \u00b7 n")
+    settled(page)
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.1U:=5.5Vn:=3"] and "= 16. V" in shown(page)[1]
+    save_as(page, "top.ipynb")
+    named(page, "top")
+    assert page.evaluate(MARKS) == []
+    # (A server that does not answer says nothing about the other sheet: nothing is marked for that.)
+    asked_for_values = lambda url: "/api/values" in url                                    # noqa: E731
+    page.route(asked_for_values, lambda route: route.abort())
+    refocused(page)
+    page.wait_for_timeout(300)
+    page.unroute(asked_for_values)
+    assert page.evaluate(MARKS) == []
+
+    # The other sheet is changed, and saved while the change is still being
+    # written: the save waits for the calculation, and keeps the new values
+    # with the new revision.
+    opened(page, "source.ipynb")
+    page.locator(".region.math").first.click()
+    keys.press("Control+a")
+    keys.type("U := 6.0 V")
+    save(page)
+    assert saved_settings(folder, "source.ipynb")["about"]["revision"] == 2
+    assert handed_on(folder, "source.ipynb") == [2, {"U": "6.0 V", "n": "3", "spare": "1"}]
+
+    # The sheet that took them is as it was — and says that there is more.
+    opened(page, "top.ipynb")
+    page.wait_for_selector(".region.given .mark")
+    assert page.evaluate(MARKS) == [["rev. 2 is there", False]] and page.evaluate(GIVEN) == ["Fromsource\u00b7rev.1rev.2isthereU:=5.5Vn:=3"]
+    assert "= 16. V" in shown(page)[1] and not page.evaluate(DIRTY)
+    # One click on the mark shows what is different, and what this sheet has of it.
+    # (Meanwhile the page asks about the other sheet once more, and the answer is slow in coming.)
+    held = []
+    asked_briefly = lambda url: "/api/values" in url and "brief=1" in url                  # noqa: E731
+    page.route(asked_briefly, lambda route: held.append(route))
+    refocused(page)
+    for _ in range(100):
+        if held:
+            break
+        page.wait_for_timeout(50)
+    page.uncheck("#auto-calc")
+    page.click(".region.given .mark")
+    page.wait_for_selector(".dialog.given")
+    assert page.evaluate(NOTES) == ["This sheet has them as of rev. 1."]
+    assert page.evaluate(ROWS) == [["U", True, "U6.0Vhere:5.5V"], ["n", True, "n3"], ["spare", False, "spare1"]]
+    keys.press("Enter")                                         # (Enter takes what is chosen)
+    page.wait_for_selector(".dialog.given", state="detached")
+    page.wait_for_timeout(200)
+    # Until the sheet is calculated the region shows what was taken, as the
+    # other sheet's file has it — not what the kernel still holds.
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.2U:=6.0Vn:=3"] and "= 16. V" in shown(page)[1]
+    page.check("#auto-calc")
+    settled(page)
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.2U:=6.0Vn:=3"] and "= 18. V" in shown(page)[1]
+    assert page.evaluate(MARKS) == [] and page.evaluate(DIRTY) and page.evaluate(SELECTED) == [True]
+    # The slow answer was about what the region had: it marks nothing now.
+    held[0].continue_()
+    page.unroute(asked_briefly)
+    page.wait_for_timeout(300)
+    assert page.evaluate(MARKS) == []
+    # Undo gives back what it had — which is behind again; redo takes the new values again.
+    keys.press("Control+z")
+    settled(page)
+    page.wait_for_selector(".region.given .mark")
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.1rev.2isthereU:=5.5Vn:=3"] and "= 16. V" in shown(page)[1]
+    keys.press("Control+y")
+    settled(page)
+    page.wait_for_selector(".region.given .mark", state="detached")
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.2U:=6.0Vn:=3"]
+    # (What undo gave back is what the next undo remembers: the region is
+    # moved, the move taken back — and it still has what it had.)
+    keys.press("Control+z")
+    settled(page)
+    page.wait_for_selector(".region.given .mark")
+    page.wait_for_timeout(600)
+    box = page.locator(".region.given").bounding_box()
+    page.mouse.click(box["x"] + 40, box["y"] + 30)
+    keys.press("ArrowDown")
+    assert page.evaluate(TOPS)[0] == 8
+    keys.press("Control+z")
+    settled(page)
+    page.wait_for_timeout(300)
+    assert page.evaluate(TOPS)[0] == 0 and page.evaluate(GIVEN) == ["Fromsource\u00b7rev.1rev.2isthereU:=5.5Vn:=3"]
+    page.click(".region.given .mark")
+    page.wait_for_selector(".dialog.given")
+    take(page)
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.2U:=6.0Vn:=3"]
+    save(page)
+    cell, = given_cells(folder, "top.ipynb")
+    assert cell.metadata["edsl"]["given"]["revision"] == 2 and cell.outputs[0].text == "From source \u00b7 rev. 2\n"
+    assert cell.outputs[1].data["text/plain"] == "U = 6.0 V"
+
+    # The same values under another revision are taken without anything being calculated anew.
+    def counted(meta):
+        meta["values"]["revision"] = meta["settings"]["about"]["revision"] = "C"
+    rewritten(folder, "source.ipynb", counted)
+    refocused(page)
+    page.wait_for_selector(".region.given .mark")
+    assert page.evaluate(MARKS) == [["rev. C is there", False]]
+    page.click(".region.given .mark")
+    page.wait_for_selector(".dialog.given")
+    assert page.evaluate(NOTES) == ["This sheet has them as of rev. 2."] and [row[2] for row in page.evaluate(ROWS)] == ["U6.0V", "n3", "spare1"]
+    page.evaluate("() => { window.passes = 0; const send = WebSocket.prototype.send;"
+                  " WebSocket.prototype.send = function (text) { if (JSON.parse(text).op === 'calc') window.passes += 1; return send.call(this, text); }; }")
+    take(page)
+    page.wait_for_timeout(300)
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.CU:=6.0Vn:=3"] and page.evaluate(MARKS) == [] and page.evaluate(DIRTY)
+    assert page.evaluate("window.passes") == 0
+
+    # A value that is no longer handed on, and one that is no longer there, go when the new ones are taken.
+    def fewer(meta):
+        values = meta["values"]["values"]
+        values[1] = {"name": "n", "tex": "n", "why": "a function"}
+        del values[0]
+        meta["values"]["saved"] = "2030-01-02T03:04:05.000Z"
+    rewritten(folder, "source.ipynb", fewer)
+    refocused(page)
+    page.wait_for_selector(".region.given .mark")
+    page.click(".region.given .mark")
+    page.wait_for_selector(".dialog.given")
+    assert page.evaluate(ROWS) == [["n", None, "nafunction:nothandedonhere:3"], ["spare", False, "spare1"], ["U", None, "Unotthereanymorehere:6.0V"]]
+    assert page.is_disabled(TAKE)
+    take(page, "spare")
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.Cspare:=1"] and page.evaluate("document.querySelectorAll('.region.has-error').length") == 1
+
+    # A sheet that keeps no values (any more), and one that is not there: the region says so, and keeps what it has.
+    rewritten(folder, "source.ipynb", lambda meta: meta.pop("values"))
+    refocused(page)
+    page.wait_for_selector(".region.given .mark.lost")
+    assert page.evaluate(MARKS) == [["keeps no values", True]]
+    page.click(".region.given .mark")
+    page.wait_for_selector(".dialog.given")
+    assert page.evaluate(NOTES)[0].startswith("This sheet keeps no values yet. Open it and save it once it is calculated")
+    assert page.evaluate(ROWS) == [] and page.is_disabled(TAKE) and page.evaluate("document.querySelector('.dialog.given .values').hidden")
+    keys.press("Escape")
+    page.wait_for_selector(".dialog.given", state="detached")
+    assert page.evaluate(SELECTED) == [True]                    # (the region that was asked about)
+    (folder / "source.ipynb").rename(folder / "moved.ipynb")
+    rewritten(folder, "moved.ipynb", lambda meta: meta.update(values=dict(first, revision=7)))
+    refocused(page)
+    page.wait_for_function(f"JSON.stringify({MARKS}) === JSON.stringify([['not found', true]])")
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.Cnotfoundspare:=1"]
+    # Its dialog says what is the matter, and lets another sheet be chosen: the one it is now.
+    page.click(".region.given .mark")
+    page.wait_for_selector(".dialog.given")
+    assert page.evaluate(NOTES) == ["source.ipynb was not found"] and page.evaluate(ROWS) == [] and page.is_disabled(TAKE)
+    assert page.evaluate("document.querySelector('.dialog.given .source').innerText.replace(/\\s+/g, ' ')") == "source Other sheet\u2026"
+    page.click(".dialog.given .btn:has-text('Other sheet')")
+    page.wait_for_selector(".dialog .files")
+    page.click(".files div:has-text('moved.ipynb')")
+    keys.press("Enter")
+    page.wait_for_selector(".dialog.given")
+    assert page.evaluate(NOTES) == ["These are its values as of rev. 7: it has been saved since without being calculated.",
+                                    "This sheet has them as of rev. C."]
+    assert [row[:2] for row in page.evaluate(ROWS)] == [["U", False], ["n", False], ["spare", True]]
+    take(page, "U")
+    assert page.evaluate(GIVEN) == ["Frommoved\u00b7rev.7U:=5.5Vspare:=1"] and page.evaluate(MARKS) == []
+    save(page)
+    assert given_cells(folder, "top.ipynb")[0].metadata["edsl"]["given"]["sheet"] == "moved.ipynb"
+    # A sheet does not take values from itself.
+    page.wait_for_timeout(600)
+    box = page.locator(".region.given").bounding_box()
+    page.mouse.dblclick(box["x"] + 40, box["y"] + 30)
+    page.wait_for_selector(".dialog.given")
+    page.click(".dialog.given .btn:has-text('Other sheet')")
+    page.wait_for_selector(".dialog .files")
+    page.click(".files div:has-text('top.ipynb')")
+    keys.press("Enter")
+    page.wait_for_selector(".dialog.given")
+    assert page.evaluate(NOTES) == ["A sheet takes values from other sheets, not from itself."] and page.is_disabled(TAKE)
+    keys.press("Escape")
+    page.wait_for_selector(".dialog", state="detached")
+    assert page.evaluate(GIVEN) == ["Frommoved\u00b7rev.7U:=5.5Vspare:=1"]
+
+
+MEDDLE = """() => { const parse = JSON.parse;
+    JSON.parse = function (text, ...more) {
+        const made = parse.call(this, text, ...more);
+        return made && made.op === 'values' && window.meddle ? window.meddle(made) : made; }; }"""
+
+
+def test_saving_keeps_what_a_sheets_variables_are_with_the_revision_it_makes(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    typed(page, "aa := 2")
+    settled(page)
+    save_as(page, "kept.ipynb")
+    named(page, "kept")
+    stamp = lambda name="kept.ipynb": saved_settings(folder, name)["about"]             # noqa: E731
+    record = lambda: sheet_says(folder, "kept.ipynb")["values"]                         # noqa: E731
+    sources = lambda name="kept.ipynb": [cell.source for cell in nbformat.read(str(folder / name), as_version=4).cells[1:]]     # noqa: E731
+
+    def saved_saying():
+        """Ctrl+S: what the sheet says of it, and how long that took."""
+        page.evaluate("document.querySelector('#toast').hidden = true")
+        began = time.time()
+        keys.press("Control+s")
+        page.wait_for_function(f"{TOAST}.startsWith('Saved')")
+        return page.evaluate(TOAST), time.time() - began
+
+    # Every sheet counts the saves that changed it — it has no need of a header for that.
+    first = stamp()
+    assert first["revision"] == 1 and handed_on(folder, "kept.ipynb") == [1, {"aa": "2"}] and "frame" not in saved_settings(folder, "kept.ipynb")
+    save(page)
+    assert stamp() == first and record()["saved"] == first["saved"]
+    page.wait_for_timeout(600)
+    assert page.evaluate(TOAST) == "Saved"                      # (and nothing comes after it to say that it waits)
+
+    # Ctrl+S while a line is still being written: it is part of what is
+    # saved, and so is what it comes to — the save waits for that.
+    keys.type("bb := aa + 1")
+    said, took = saved_saying()
+    assert said == "Saved" and took < 2                         # (and no longer than the calculation takes)
+    assert stamp()["revision"] == 2 and handed_on(folder, "kept.ipynb") == [2, {"aa": "2", "bb": "3"}]
+    assert record()["saved"] == stamp()["saved"] != first["saved"]
+    assert sources() == ["aa := 2", "bb := aa + 1"]
+
+    # A sheet that is not calculated as it stands is saved all the same — at
+    # once: nothing is coming that could be waited for — and says that the
+    # values of this revision are not with it.  The file keeps the ones of
+    # the revision before, under that revision's name.
+    page.uncheck("#auto-calc")
+    page.locator(".region.math").first.click()
+    keys.press("Control+a")
+    keys.type("aa := 5")
+    keys.press("Enter")
+    page.wait_for_selector(".region.stale")
+    said, took = saved_saying()
+    assert said == NOT_KEPT and took < 1.5
+    assert stamp()["revision"] == 3 and handed_on(folder, "kept.ipynb") == [2, {"aa": "2", "bb": "3"}] and not page.evaluate(DIRTY)
+    # Calculated and saved again — nothing changed, so the revision is the same — it has them.
+    keys.press("F9")
+    settled(page)
+    third = stamp()
+    save(page)
+    assert stamp() == third and handed_on(folder, "kept.ipynb") == [3, {"aa": "5", "bb": "6"}] and record()["saved"] == third["saved"]
+    page.check("#auto-calc")
+
+    # A file that is written over keeps nothing of the sheet it was: the
+    # values of a sheet that is saved in its place uncalculated are not
+    # there — and the other sheet's are not either.
+    keys.press("Control+Shift+s")
+    page.fill(".dialog input[type=text]", "copy")
+    keys.press("Enter")
+    named(page, "copy")
+    assert handed_on(folder, "copy.ipynb") == [3, {"aa": "5", "bb": "6"}] and stamp("copy.ipynb") == third
+    opened(page, "kept.ipynb")
+    page.uncheck("#auto-calc")
+    page.locator(".region.math").first.click()
+    keys.press("Control+a")
+    keys.type("aa := 6")
+    keys.press("Enter")
+    page.wait_for_selector(".region.stale")
+    page.evaluate("document.querySelector('#toast').hidden = true")
+    keys.press("Control+Shift+s")
+    page.fill(".dialog input[type=text]", "copy")
+    keys.press("Enter")
+    page.wait_for_selector(".dialog h3:has-text('Overwrite?')")
+    page.click(".dialog .btn.primary")
+    page.wait_for_function(f"{TOAST} === {json.dumps(NOT_KEPT)}")
+    assert "values" not in sheet_says(folder, "copy.ipynb") and stamp("copy.ipynb")["revision"] == 4 and sources("copy.ipynb")[0] == "aa := 6"
+    assert handed_on(folder, "kept.ipynb") == [3, {"aa": "5", "bb": "6"}]
+
+    # A calculation that takes its time is waited for a moment, not for
+    # ever: the sheet is saved while it still runs, without its values —
+    # and at once when it has been running that long already.
+    opened(page, "kept.ipynb")
+    keys.type('nap := __import__("time").sleep(7)')
+    began = time.time()
+    keys.press("Enter")
+    page.wait_for_selector("#status[data-state='busy']")
+    page.evaluate("document.querySelector('#toast').hidden = true")
+    keys.press("Control+s")
+    page.wait_for_function(f"{TOAST} === 'Saving once this is calculated…'")
+    page.wait_for_function(f"{TOAST} === {json.dumps(NOT_KEPT)}")
+    waited = time.time() - began
+    assert 3 < waited < 6.5 and page.evaluate("document.querySelector('#status').dataset.state") == "busy"
+    assert stamp()["revision"] == 4 and handed_on(folder, "kept.ipynb")[0] == 3
+    said, took = saved_saying()
+    assert said == NOT_KEPT and took < 1.5 and time.time() - began < 7 and stamp()["revision"] == 4
+    settled(page)
+    save(page)
+    assert handed_on(folder, "kept.ipynb") == [4, {"aa": "5", "bb": "6", "nap": "None"}]
+    # A calculation that was stopped leaves the kernel with half a sheet: no values of that.
+    page.locator(".region.math").first.click()
+    keys.press("Control+a")
+    keys.type("aa := 7")
+    keys.press("Enter")
+    page.wait_for_selector("#status[data-state='busy']")
+    page.wait_for_timeout(500)
+    keys.press("Escape")
+    page.wait_for_function(f"{TOAST}.startsWith('Calculation stopped')")
+    said, took = saved_saying()
+    assert said == NOT_KEPT and took < 1.5 and stamp()["revision"] == 5 and handed_on(folder, "kept.ipynb")[0] == 4
+
+    # What is written while a save waits is part of the sheet that is
+    # saved — and the values, which were asked for before, are not its.
+    page.locator(".region.math").nth(2).click()                 # (the one that takes its time: less of it)
+    keys.press("Control+a")
+    keys.type('nap := __import__("time").sleep(2)')
+    keys.press("Enter")
+    page.wait_for_selector("#status[data-state='busy']")
+    page.evaluate("document.querySelector('#toast').hidden = true")
+    keys.press("Control+s")
+    keys.type("late := 1")
+    page.wait_for_function(f"{TOAST}.startsWith('Saved')")
+    assert page.evaluate(TOAST) == NOT_KEPT and sources() == ["aa := 7", "bb := aa + 1", 'nap := __import__("time").sleep(2)', "late := 1"]
+    assert stamp()["revision"] == 6 and handed_on(folder, "kept.ipynb")[0] == 4
+    settled(page)
+    page.locator(".region.math").nth(2).click()
+    keys.press("Escape")
+    keys.press("Delete")
+    settled(page)
+    save(page)
+    assert handed_on(folder, "kept.ipynb") == [7, {"aa": "7", "bb": "8", "late": "1"}]
+
+    # A sheet that has no revision yet gets its first one with any save —
+    # also one that is not calculated here, which has no values to keep.
+    place = lambda source, x, y: nbformat.v4.new_code_cell(source, metadata={"edsl": {"x": x, "y": y}})          # noqa: E731
+    words = nbformat.v4.new_markdown_cell("one line", metadata={"edsl": {"x": 0, "y": 0, "w": 200}})
+    nb = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell("from utils.Engineer import *"), words, place("q := 1", 0, 40),
+                                         place("q := 2", 304, 48), place("q", 0, 240)])
+    nb.metadata["edsl_worksheet"] = {"version": 1, "settings": {}}
+    nbformat.write(nb, str(folder / "order.ipynb"))
+    opened(page, "order.ipynb")
+    assert page.is_visible("#banner") and saved_saying()[0] == "Saved"
+    assert stamp("order.ipynb")["revision"] == 1 and "values" not in sheet_says(folder, "order.ipynb")
+    page.click("#banner .btn.primary")
+    settled(page)
+    assert "= 2" in shown(page)[3]
+    save(page)
+    assert stamp("order.ipynb")["revision"] == 1 and handed_on(folder, "order.ipynb") == [1, {"q": "2"}]
+    # Regions that were pushed into another order are calculated anew, in
+    # that order: the values the kernel had were of the order before, and
+    # are not kept with a file that has the new one.
+    page.locator(".region.text").click()
+    given_the_keyboard(page)
+    keys.press("Control+End")
+    for word in ("two", "three"):
+        keys.press("Enter")
+        keys.type(word)
+    keys.press("Escape")
+    page.wait_for_timeout(200)
+    tops = page.evaluate(TOPS)
+    assert tops[1] > tops[2] == 48 and "= 2" in shown(page)[3]
+    said, took = saved_saying()
+    assert said == NOT_KEPT and handed_on(folder, "order.ipynb") == [1, {"q": "2"}] and stamp("order.ipynb")["revision"] == 2
+    assert sources("order.ipynb")[1:] == ["q := 2", "q := 1", "q"]
+    settled(page)
+    assert "= 1" in shown(page)[3]
+    save(page)
+    assert handed_on(folder, "order.ipynb") == [2, {"q": "1"}]
+
+    # The kernel says which calculation its values are of, and is taken at
+    # its word: values of another pass than the one this page knows the
+    # sheet by are not kept; nor are values of a sheet that has been given
+    # something to calculate since they were asked for.
+    page.evaluate(MEDDLE)
+    keys.press("Escape")
+    typed(page, "rr := 4")
+    settled(page)
+
+    def meddled(how):
+        page.evaluate(f"() => {{ window.meddle = {how}; }}")
+        return saved_saying()
+
+    assert meddled("(said) => ({ ...said, pass: said.pass + 1 })")[0] == NOT_KEPT
+    assert stamp("order.ipynb")["revision"] == 3 and handed_on(folder, "order.ipynb")[0] == 2
+    assert meddled("(said) => { document.querySelector('.tool[data-cmd=\"calc\"]').click(); return said; }")[0] == NOT_KEPT
+    settled(page)
+    # A kernel that reports a fault instead is not waited for.
+    said, took = meddled("(said) => ({ op: 'fault', seq: said.seq, traceback: 'meddled with' })")
+    assert said == NOT_KEPT and took < 3 and handed_on(folder, "order.ipynb")[0] == 2
+    assert meddled("null")[0] == "Saved" and handed_on(folder, "order.ipynb") == [3, {"q": "1", "rr": "4"}]
+
+
+# (values from another sheet: files from elsewhere, folders, and servers of before)
+
+def test_what_a_file_says_a_region_was_given_gives_way_to_what_the_kernel_makes_of_it(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    code = lambda values: page.evaluate("async (values) => (await import('/static/js/given.js')).sourceOf({ values })", values)     # noqa: E731
+    place = lambda source, y, **more: nbformat.v4.new_code_cell(source, metadata={"edsl": dict({"x": 0, "y": y}, **more)})          # noqa: E731
+    # A sheet from elsewhere.  One region was given values, and the file
+    # says what they look like — which is not what they are; ...
+    values = [{"name": "U", "tex": "U", "form": '["f","5.5"]', "shown": {"text/plain": "999", "text/latex": "$\\displaystyle 999$"}},
+              {"name": "n", "form": '["i","3"]', "shown": {"text/plain": "three"}}]
+    given = {"sheet": "source.ipynb", "name": "source", "revision": 4, "saved": "2026-10-11T10:00:00.000Z", "values": values}
+    # ... one says that it was given values, but its text is more than the
+    # code that holds them; one says so of other names than its code has;
+    # ... and one holds what is no value.
+    forged = dict(given, values=[{"name": "w", "form": '["i","1"]', "shown": {"text/plain": "1"}}])
+    other = dict(given, values=[{"name": "v", "form": '["i","1"]', "shown": {"text/plain": "1"}}])
+    broken = dict(given, values=[{"name": "bad", "form": '["o","os:system",{},{}]', "shown": {"text/plain": "harmless"}}])
+    nb = nbformat.v4.new_notebook(cells=[
+        nbformat.v4.new_code_cell("from utils.Engineer import *"), place(code(values), 0, given=given), place("U \u00b7 n", 120),
+        place(code(forged["values"]) + "\nmore_than_that = 2", 200, given=forged), place(code(forged["values"]), 400, given=other),
+        place(code(broken["values"]), 600, given=broken)])
+    nb.cells[1].outputs = [nbformat.v4.new_output("stream", name="stdout", text="what the file showed\n")]
+    nb.metadata["edsl_worksheet"] = {"version": 1, "settings": {}}
+    nbformat.write(nb, str(folder / "theirs.ipynb"))
+    # It is opened in the place of a sheet that was calculated here.
+    keys = page.keyboard
+    typed(page, "mine := 7")
+    settled(page)
+    save_as(page, "mine.ipynb")
+    named(page, "mine")
+    page.evaluate("() => { window.typeset = []; const send = WebSocket.prototype.send;"
+                  " WebSocket.prototype.send = function (text) { const said = JSON.parse(text);"
+                  " if (said.op === 'render') window.typeset.push(said.regions.length); return send.call(this, text); }; }")
+    keys.press("Control+o")
+    page.wait_for_selector(".dialog .files")
+    page.click(".files div:has-text('theirs.ipynb')")
+    keys.press("Enter")
+    page.wait_for_selector("#banner:not([hidden])")
+    page.wait_for_function("document.querySelectorAll('.region.given .mark').length === 2")
+
+    # Not calculated here yet: what the file says is shown, as its outputs
+    # would be (and they are not shown beside it).  Nothing is typeset for
+    # it by the kernel; where the values are from was looked for all the same.
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.4notfoundU:=999n:=three", "Fromsource\u00b7rev.4notfoundbad:=harmless"]
+    assert page.evaluate("document.querySelectorAll('.region.given .outs, .region.given .eq').length") == 0
+    assert page.evaluate("[...document.querySelectorAll('.region.given .line')].map((line) => [line.dataset.name, line.querySelectorAll('.katex').length])") == [
+        ["U", 2], ["n", 0], ["bad", 0]]
+    # What is not the code for what it says is math like any other: it shows what it would run.
+    texts = shown(page)
+    assert len(texts) == 5 and all("given" in text and "From source" not in text for text in texts[2:4]) and "more" in texts[2]
+    assert page.evaluate("[...document.querySelectorAll('.region')].map((r) => r.classList.contains('given'))") == [True, False, False, False, True]
+    assert page.evaluate("window.typeset") == [3]               # (what was given is not typeset by the kernel: the page shows it)
+    # Saved as it is — not calculated — it keeps no values: what the kernel
+    # has is the sheet that was here before.
+    save(page)
+    assert "values" not in sheet_says(folder, "theirs.ipynb") and page.is_visible("#banner")
+    assert [out.get("text") or out.data["text/plain"] for out in given_cells(folder, "theirs.ipynb")[0].outputs] == [
+        "From source \u00b7 rev. 4\n", "U = 999", "n = three"]
+
+    # Calculated, a region that was given values shows what the kernel has:
+    # the file's word on how they look is gone.  What is no value is an
+    # error, and nothing of it is in force.
+    page.click("#banner .btn.primary")
+    settled(page)
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.4notfoundU:=5.5n:=3",
+                                    "Fromsource\u00b7rev.4notfoundbad:=harmlessValueError:astoredvalueofakindthistoolkitdoesnotknow:'os:system'"]
+    assert "= 16.5" in shown(page)[1]
+    assert page.evaluate("[...document.querySelectorAll('.region')].map((r) => r.classList.contains('has-error'))") == [False, False, False, False, True]
+    assert page.evaluate("getComputedStyle(document.querySelector('.region.given.has-error .line .res')).opacity") == "0.35"
+    assert page.evaluate("getComputedStyle(document.querySelector('.region.given:not(.has-error) .line .res')).opacity") == "1"
+    assert page.inner_text("#status-text") == "1 region with errors"
+    assert page.evaluate("typeof window.os") == "undefined"
+
+    # On paper: where it is from, and the values; not the mark, which is the screen's.
+    page.emulate_media(media="print")
+    assert page.evaluate("['.whence', '.mark', '.line'].map((part) => getComputedStyle(document.querySelector(`.region.given ${part}`)).display)") == [
+        "flex", "none", "flex"]
+    page.emulate_media(media="screen")
+    # Saved, the region is in the file as the kernel has it — and what was not that code is still not.
+    save(page)
+    cells_ = nbformat.read(str(folder / "theirs.ipynb"), as_version=4).cells
+    assert ["given" in cell.metadata["edsl"] for cell in cells_[1:]] == [True, False, False, False, True]
+    assert [out.get("text") or out.data["text/plain"] for out in cells_[1].outputs] == ["From source \u00b7 rev. 4\n", "U = 5.5", "n = 3"]
+    assert list(handed_on(folder, "theirs.ipynb")[1]) == ["U", "n", "w", "more_than_that"]       # (and nothing of the sheet before)
+
+    # What the clipboard says a region was given is taken as a file's word
+    # is: a text is given nothing; nor is math that is more than the code.
+    held = code(forged["values"])
+    regions = [{"kind": "text", "source": held, "x": 0, "y": 0, "w": 300, "given": forged},
+               {"kind": "math", "source": held + "\nmore = 1", "x": 0, "y": 120, "given": forged},
+               {"kind": "math", "source": held, "x": 0, "y": 300, "given": forged}]
+    assert page.evaluate(PASTE, [[], [["application/x-edsl-regions", json.dumps(regions)]]]) is True
+    page.wait_for_function("document.querySelectorAll('.region.given .mark').length === 3")
+    assert page.evaluate("[...document.querySelectorAll('.region')].slice(5).map((r) => [r.classList.contains('text'), r.classList.contains('given')])") == [
+        [True, False], [False, False], [False, True]]
+    assert page.evaluate(GIVEN)[2] == "Fromsource\u00b7rev.4notfoundw:=1"
+    page.locator(".region.text").last.click()                   # (that text is written like any text)
+    page.wait_for_selector(".region.text.editing")
+    assert page.locator(".dialog").count() == 0
+    keys.press("Escape")
+
+
+def test_the_other_sheet_is_named_as_it_is_reached_from_the_sheets_own_folder(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    (folder / "deep" / "er").mkdir(parents=True)
+    typed(page, "U := 5.5 V")
+    settled(page)
+    save_as(page, "source.ipynb")
+    named(page, "source")
+    new_sheet(page)
+    values_dialog(page, "source.ipynb")
+    take(page, "U")
+    reference = "document.querySelector('.region.given .whence span').title"
+    assert page.evaluate(reference) == "source.ipynb"
+
+    def save_into(name, *down, up=None):
+        """Save as `name`: in the folder that is reached from the one the dialog opens in — the sheet's own — by going
+        up to the folder `up` and then down these."""
+        keys.press("Control+Shift+s")
+        page.wait_for_selector(".dialog .files")
+        if up is not None:
+            page.click(f".dialog .crumbs a:has-text('{up}')")
+        for part in ([up] if up is not None else []) + list(down):
+            if part != up:
+                page.click(f".files div.dir:has-text('{part}')")
+            page.wait_for_function("(part) => document.querySelector('.dialog .crumbs').textContent.trim().endsWith(part)", arg=part)
+        page.fill(".dialog input[type=text]", name)
+        keys.press("Enter")
+        named(page, name)
+        settled(page)
+
+    # Saved two folders down, the sheet reaches the other one from there —
+    # in its file, and on the page that is still open.
+    save_into("below", "deep", "er")
+    assert given_cells(folder / "deep" / "er", "below.ipynb")[0].metadata["edsl"]["given"]["sheet"] == "../../source.ipynb"
+    assert page.evaluate(reference) == "../../source.ipynb" and page.evaluate(GIVEN) == ["Fromsource\u00b7rev.1U:=5.5V"]
+    assert "open=deep%2Fer%2Fbelow.ipynb" in page.url
+    # It finds it there: its dialog, and the mark when the other sheet has more.
+    box = page.locator(".region.given").bounding_box()
+    page.wait_for_timeout(600)
+    page.mouse.dblclick(box["x"] + 40, box["y"] + 30)
+    page.wait_for_selector(".dialog.given")
+    assert [row[:2] for row in page.evaluate(ROWS)] == [["U", True]] and page.evaluate(NOTES) == []
+    page.click(".dialog.given .btn:has-text('Other sheet')")    # (another sheet is looked for where this sheet is)
+    page.wait_for_selector(".dialog .files")
+    page.wait_for_function("document.querySelector('.dialog .crumbs').textContent.trim().endsWith('/ deep / er')")
+    keys.press("Escape")
+    page.wait_for_selector(".dialog", state="detached")
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.1U:=5.5V"]
+    rewritten(folder, "source.ipynb", lambda meta: meta["values"].update(revision=2))
+    refocused(page)
+    page.wait_for_selector(".region.given .mark")
+    assert page.evaluate(MARKS) == [["rev. 2 is there", False]]
+    # Undo remembers the other sheet as it is reached from here, too.
+    page.click(".region.given .mark")
+    page.wait_for_selector(".dialog.given")
+    take(page)
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.2U:=5.5V"]
+    save_into("between", up="deep")
+    assert page.evaluate(reference) == "../source.ipynb"
+    keys.press("Control+z")
+    settled(page)
+    page.wait_for_selector(".region.given .mark")
+    assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.1rev.2isthereU:=5.5V"] and page.evaluate(reference) == "../source.ipynb"
+
+    # A file from elsewhere that names a sheet outside the folder the worksheet was started in: not found, and said so.
+    book = json.loads((folder / "deep" / "between.ipynb").read_text(encoding="utf-8"))
+    for cell in book["cells"]:
+        if "given" in cell["metadata"].get("edsl", {}):
+            cell["metadata"]["edsl"]["given"]["sheet"] = "../../../elsewhere/source.ipynb"
+    (folder / "deep" / "between.ipynb").write_text(json.dumps(book), encoding="utf-8")
+    opened(page, "deep/between.ipynb")
+    page.wait_for_selector(".region.given .mark.lost")
+    assert page.evaluate(MARKS) == [["not found", True]]
+    page.click(".region.given .mark")
+    page.wait_for_selector(".dialog.given")
+    assert page.evaluate(NOTES) == ["../../../elsewhere/source.ipynb is outside the folder this worksheet was started in."]
+    assert page.is_disabled(TAKE)
+    keys.press("Escape")
+    page.wait_for_selector(".dialog", state="detached")
+    # Saved into another folder, a sheet that cannot be reached is named as it was.
+    save_into("above", up=folder.name)
+    assert given_cells(folder, "above.ipynb")[0].metadata["edsl"]["given"]["sheet"] == "../../../elsewhere/source.ipynb"
+    assert page.evaluate(reference) == "../../../elsewhere/source.ipynb" and page.evaluate(MARKS) == [["not found", True]]
+
+
+def test_a_sheet_is_not_left_while_it_is_being_saved(page_and_folder):
+    # A save takes a moment, and may wait for a calculation.  Another sheet
+    # that took this one's place in that moment would be given its name
+    # when the save is done — and be saved over its file the next time.
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    typed(page, "aa := 2")
+    settled(page)
+    save_as(page, "staying.ipynb")
+    named(page, "staying")
+    # (A save that trips over something says so, where a page's errors are
+    # said — and the next save is not held up by it.)
+    page.evaluate("() => { window.trip = true; const write = JSON.stringify;"
+                  " JSON.stringify = function (value, ...more) {"
+                  " if (window.trip && value && value.doc) { window.trip = false; throw new Error('tripped while saving'); }"
+                  " return write.call(this, value, ...more); }; }")
+    keys.press("Control+s")
+    for _ in range(100):
+        if page.problems:
+            break
+        page.wait_for_timeout(50)
+    assert len(page.problems) == 1 and "tripped while saving" in page.problems[0]
+    page.problems.clear()
+    save(page)
+    held = []
+    page.route("**/api/doc?*", lambda route: held.append(route) if route.request.method == "PUT" else route.continue_())
+    keys.press("Control+s")
+    for _ in range(100):
+        if held:
+            break
+        page.wait_for_timeout(50)
+    keys.press("Control+s")                                     # (a second save waits for the first: one at a time)
+    keys.press("Alt+n")
+    page.wait_for_timeout(400)
+    assert len(held) == 1 and page.inner_text("#doc-name") == "staying" and page.evaluate("document.querySelectorAll('.region').length") == 1
+    held[0].continue_()
+    for _ in range(100):
+        if len(held) == 2:
+            break
+        page.wait_for_timeout(50)
+    page.wait_for_timeout(200)
+    assert len(held) == 2 and page.inner_text("#doc-name") == "staying"          # (and the new sheet for the second)
+    held[1].continue_()
+    page.wait_for_function("document.querySelector('#doc-name').textContent === 'Untitled' && !document.querySelector('.region')")
+    page.unroute("**/api/doc?*")
+    page.wait_for_timeout(300)
+    assert page.inner_text("#doc-name") == "Untitled" and "open=" not in page.url
+    assert [cell.source for cell in nbformat.read(str(folder / "staying.ipynb"), as_version=4).cells[1:]] == ["aa := 2"]
+
+
+def test_a_sheet_is_saved_at_once_while_its_kernel_cannot_be_reached(page_and_folder):
+    # The page and the server talk about the kernel over a line of their
+    # own; the file is saved over another.  With the first one down, a save
+    # is not held up by a question nobody can be asked.
+    page, folder = page_and_folder
+    page.add_init_script("window.lines = []; window.WebSocket = class extends WebSocket {"
+                         " constructor(...given) { super(...given); window.lines.push(this); } };")
+    page.reload()
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    typed(page, "aa := 2")
+    settled(page)
+    save_as(page, "cut.ipynb")
+    named(page, "cut")
+    typed(page, "bb := 3")
+    settled(page)
+    page.evaluate("document.querySelector('#toast').hidden = true")
+    began = time.time()
+    page.evaluate("window.lines.at(-1).close()")
+    page.keyboard.press("Control+s")
+    page.wait_for_function(f"{TOAST}.startsWith('Saved')")
+    assert page.evaluate(TOAST) == NOT_KEPT and time.time() - began < 3
+    assert handed_on(folder, "cut.ipynb") == [1, {"aa": "2"}] and saved_settings(folder, "cut.ipynb")["about"]["revision"] == 2
+    # Connected again, and calculated, it is saved with its values.
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    settled(page)
+    save(page)
+    assert handed_on(folder, "cut.ipynb") == [2, {"aa": "2", "bb": "3"}]
+
+
+def test_a_server_started_before_sheets_handed_values_on_is_not_asked_to(page_and_folder):
+    # The page is read from the disk and is the new one at once; a server
+    # that has been running since before is not.  It would drop what a
+    # region was given when the sheet is saved, so nothing is given there.
+    page, folder = page_and_folder
+    page.route("**/api/info", lambda route: route.fulfill(json={"root": str(folder), "name": folder.name}))
+    page.reload()
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    page.evaluate("() => { window.asked = []; const send = WebSocket.prototype.send;"
+                  " WebSocket.prototype.send = function (text) { window.asked.push(JSON.parse(text).op); return send.call(this, text); }; }")
+    typed(page, "aa := 2")
+    settled(page)
+    save_as(page, "before.ipynb")
+    named(page, "before")
+    page.wait_for_function(f"{TOAST} === 'Saved'")
+    assert "values" not in sheet_says(folder, "before.ipynb") and "values" not in page.evaluate("window.asked") and "calc" in page.evaluate("window.asked")
+    page.click(".tool[data-cmd='take-values']")
+    page.wait_for_function(f"{TOAST}.startsWith('The worksheet server running here was started before sheets could hand values on')")
+    assert page.locator(".dialog").count() == 0

@@ -214,6 +214,86 @@ Results that depend on something outside the sheet and are *not* in
 that list — currency rates, a data file read by a function of yours —
 are refreshed by **Ctrl+F9**.
 
+## Values from another sheet
+
+A calculation that is too much for one sheet goes on several — the
+supply on one, the amplifier on the next, the thermal budget on a
+third — and each takes what it needs from the ones before it.
+
+**A sheet hands on what its variables are.** When a sheet is saved,
+the values its variables have are kept in its file, under the revision
+that save made. Nothing has to be marked for that: every variable the
+sheet defines is there, by its name.
+
+**Another sheet takes them.** *Values* in the bar (or *Edit → Values
+from another sheet…*) asks for the sheet, lists what it hands on, and
+puts what you tick at the cursor:
+
+```text
+From Supply · rev. 3
+V_bus := 24.0 V
+I_max := 2.5 A
+```
+
+From there down the names are defined as if they had been typed —
+with their units, their significant figures and their tolerances. The
+region says which sheet they are from, and at which revision. A click
+selects it (drag it to move it, Del deletes it); a double click, or
+Enter, opens the dialog again, for other values or another sheet.
+
+**They are the values of that revision, and stay that.** The region
+holds the values themselves, not a link that is followed whenever the
+sheet is calculated: opened a year later, on another computer, without
+the other sheet at hand, the sheet gives the same numbers. And what a
+revision hands on is settled when it is first saved calculated. Saving
+the other sheet again as it is does not change it, whatever a
+calculation would come to on that day — the time, a random number, a
+file that is another one now.
+
+**When the other sheet moves on, the region says so** — *rev. 4 is
+there* — when its sheet is opened, and whenever you come back to its
+window. A click on that mark opens the dialog with what is different
+(`here: 24.0 V` beside the new value); taking it brings the region to
+that revision, and the sheet follows. Until then nothing changes, and
+undo takes it back. A sheet that is gone, or keeps no values, is
+marked as well.
+
+**A chain.** What a sheet was given is its own from there on, and is
+handed on with the rest: a third sheet can take it from the second.
+Every step is taken by hand. A new revision of the first sheet marks
+the second; once the second has taken it and is saved, the third is
+marked.
+
+What is handed on: numbers, text, quantities with their unit and
+significant figures, tolerances and intervals, values shown in a unit
+or a radix, dates and durations; lists, tuples, sets, dicts, arrays and
+matrices of those. Not handed on: functions, symbolic values (a matrix
+with a symbol in it is one), modules, figures, and what is larger than
+a sheet should carry about — the dialog lists these too, greyed, with
+the reason.
+
+**When the values are kept.** A sheet is saved with its values when it
+is calculated as it stands. Ctrl+S straight after typing waits for the
+calculation (a few seconds at most), so what was just typed is in
+them. A sheet that is not calculated — *Automatic* is off, a
+calculation was stopped or takes its time, the sheet has not been
+calculated on this computer yet — is saved all the same, and says
+that its values are not kept with this revision: its file still has
+the ones of the revision before, under that revision's name. Saving it
+again once it is calculated completes it.
+
+**Where the other sheet is.** A region names the other sheet as it is
+reached from its own sheet's folder (`../common/Supply.ipynb`), so a
+folder of sheets can be moved or copied as a whole; saving a sheet
+into another folder puts that right. Sheets are found below the folder
+the worksheet was started in.
+
+**In the notebook** the region is a cell of code that holds the values
+as text, with what it shows as its output — so JupyterLab runs the
+sheet as it is, and GitHub shows it. That text is data. Reading it
+builds values out of a fixed set of kinds and runs nothing: taking
+values from somebody else's sheet does not run anything of that sheet.
+
 ## Typing the notation
 
 The source of a math region is ordinary DSL text; everything the symbol
@@ -381,6 +461,10 @@ A worksheet is saved as `.ipynb`:
 - the sheet's header and footer, with their logo, and its title, author
   and revision are in the notebook's own metadata (`edsl_worksheet`),
   beside its settings;
+- so is what its variables were when it was last saved calculated
+  (`values`): what other sheets take from it;
+- a region that holds values from another sheet is a cell of code that
+  any notebook runs, and its metadata says where they are from (`given`);
 - tags, attachments and other metadata of existing cells are preserved.
 
 If the file was changed by another program while open, saving asks
@@ -460,8 +544,10 @@ new sheet starts with. A sheet holds a copy of what it was given, so
 it looks the same on another computer, and changing a template later
 changes no sheet.
 
-Only a sheet with a header or a footer counts its saves and notes when
-it was saved; a sheet without them is saved as it always was.
+Every sheet counts the saves that changed it and notes when it was
+last saved so, whether it has a header to say it in or not: the
+revision is also what another sheet names the
+[values it takes](#values-from-another-sheet) by.
 
 ## Security
 
@@ -491,6 +577,15 @@ the folder the server was started in.
 - One sheet per browser tab; each has its own kernel. A second tab on
   the same address opens another sheet.
 - The page is A4 portrait.
+- A value from another sheet is taken, and brought up to a newer
+  revision, by hand and sheet by sheet: a chain of sheets is not
+  brought up to date in one go.
+- What a revision hands on is fixed; the sheet itself is not. Opened
+  again, a sheet that reads the clock, a random number or a file
+  calculates with what it finds then, and may show other values than
+  its revision handed on — until it is saved changed, as a new revision.
+- A value that is handed on is at most 400 000 characters of text (an
+  array of some 35 000 numbers), and all of a sheet's together 4 million.
 - Header and footer are the worksheet's: JupyterLab and `hardcopy()`,
   which show a sheet as a notebook, do not show them. They are the
   same on every page, the first included. A region that is higher
@@ -507,6 +602,7 @@ the folder the server was started in.
 | `utils/worksheet/fingerprint.py` | "same value as last time?" for the reuse rules |
 | `utils/worksheet/mathrender.py` | transformed-Python AST → LaTeX |
 | `utils/worksheet/document.py` | `.ipynb` ⇄ worksheet document, trust |
+| `utils/worksheet/values.py` | a value as text, and back: what a sheet hands on to other sheets. Data only — reading it runs nothing |
 | `utils/worksheet/prefs.py` | what the user chose for the page (grid, symbol panel, text as markdown, the template of a new sheet): a file in Jupyter's data folder, because a browser keeps its own storage per port |
 | `utils/worksheet/templates.py` | the headers and footers a user keeps by name: another file there |
 | `utils/worksheet/static/` | the front end: plain ES modules, no build step |

@@ -1,8 +1,10 @@
 // Drawing what a math region shows: typeset statements, their results,
-// printed output, plots and errors.
+// printed output, plots and errors — or the values it was given by
+// another sheet.
 
 import { el, escapeHtml } from "./util.js";
 import { renderMarkdown } from "./markdown.js";
+import { caption, markText } from "./given.js";
 
 const KATEX_OPTIONS = { throwOnError: false, strict: "ignore", trust: false, output: "html" };
 
@@ -197,6 +199,58 @@ export function renderItems(body, items, { mode, highlight, tail, results = true
     if (results && item.outputs && item.outputs.length) body.append(outputsNode(item.outputs));
   }
   if (results && tail && tail.length) body.append(outputsNode(tail));
+}
+
+// ---- values given by another sheet ------------------------------------------
+
+/** What the kernel said of a region that was given values: {told: [{name, latex, value}] | null, error}. */
+export function givenSaid(result) {
+  const items = result ? result.items : [];
+  return { told: items.find((item) => item.given)?.given ?? null, error: items.find((item) => item.error)?.error ?? null };
+}
+
+/** Each name a region was given with how it is typeset and shown: by the kernel's word (`told`) where there is one, else by the file's. */
+function givenRows(given, told) {
+  const live = new Map((told || []).map((entry) => [entry.name, entry]));
+  return given.values.map((entry) => {
+    const now = live.get(entry.name);
+    return { name: entry.name, tex: (now && now.latex) || entry.tex || "", shown: now ? now.value : entry.shown };
+  });
+}
+
+/**
+ * Fill `body` with what a region was given (see given.js): where it is
+ * from, then each name with its value, as a definition is written.
+ * @param {object} opts  {told, error}: the kernel's word on it (givenSaid);
+ *                       {mark}: how it stands to what the other sheet
+ *                       delivers now (given.js: standing) — null: it has that
+ */
+export function renderGiven(body, given, { told = null, error = null, mark = null } = {}) {
+  const head = el("div", { class: "whence" }, el("span", { text: caption(given), title: given.sheet }));
+  if (mark) {
+    head.append(el("span", { class: "mark" + (mark.lost ? " lost" : ""), text: markText(mark), role: "button",
+                             title: mark.lost ? "Choose the sheet again, or other values" : "See what has changed, and take the new values" }));
+  }
+  body.replaceChildren(head);
+  for (const row of givenRows(given, told)) {
+    const line = el("div", { class: "line", dataset: { name: row.name } });
+    // (As one formula with what follows it, ≔ would have room after it: the {} gives it that here.)
+    line.append(row.tex ? tex(`${row.tex} \\coloneqq{}`, "tex expr") : el("code", { class: "src", text: `${row.name} := ` }),
+                bundleNode(row.shown, null, { inline: true }));
+    body.append(line);
+  }
+  if (error) body.append(el("div", { class: "err" }, el("b", { text: error.ename }), ": " + (error.evalue || "")));
+}
+
+/** What a region was given, as the outputs of its notebook cell: where it is from, then each name with its value. */
+export function givenOutputs(given, told) {
+  const outs = [{ output_type: "stream", name: "stdout", text: caption(given) + "\n" }];
+  for (const row of givenRows(given, told)) {
+    const data = { "text/plain": `${row.name} = ${row.shown["text/plain"] ?? ""}` };
+    if (row.tex && row.shown["text/latex"]) data["text/latex"] = `$\\displaystyle ${row.tex} = ${cleanTex(row.shown["text/latex"])}$`;
+    outs.push({ output_type: "display_data", data, metadata: {} });
+  }
+  return outs;
 }
 
 /** Source text shown while a region waits for its first typeset form. */

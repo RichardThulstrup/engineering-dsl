@@ -259,6 +259,44 @@ def test_a_calculation_through_the_whole_stack(server):
     assert done["op"] == "done" and done["seq"] == 2 and done["names"] == ["p", "x"]
 
 
+def test_a_sheets_values_are_asked_of_its_kernel_and_handed_to_another_sheets_page(server):
+    # (A page asks whether the server it talks to does this: one started before it could does not say so.)
+    assert json.loads(fetch(server, "/api/info")[2])["values"] is True
+    # What the variables of a sheet are is the kernel's to say ...
+    replies = socket_session(server, [
+        {"op": "calc", "seq": 1, "regions": [{"id": "r1", "source": "x := 2 V\nf := t → t²"}]},
+        {"op": "values", "seq": 2}])
+    said = next(r for r in replies if r["op"] == "values")
+    assert [entry["name"] for entry in said["values"]] == ["x", "f"] and said["values"][1] == {"name": "f", "tex": "f", "why": "a function"}
+    assert said["values"][0]["shown"]["text/plain"] == "2 V" and replies[-1] == {"op": "done", "seq": 2}
+    # ... and what they were when it was saved is the file's, which the
+    # server reads for the page of a sheet that wants them.
+    assert fetch(server, "/api/values?path=a.ipynb", cookie=False)[0] == 403
+    assert json.loads(fetch(server, "/api/values?path=a.ipynb")[2]) == {"name": "a", "revision": None, "saved": "", "values": None}
+    record = {"revision": 1, "saved": "2026-10-11T10:00:00.000Z", "toolkit": said["toolkit"], "values": said["values"]}
+    doc = {"regions": [{"id": "r1", "kind": "math", "source": "x := 2 V\nf := t → t²", "x": 0, "y": 0}],
+           "settings": {"about": {"revision": 1, "saved": record["saved"]}}, "values": record}
+    (server.folder / "deep").mkdir()
+    status, _, text = fetch(server, "/api/doc?path=deep/source.ipynb", method="PUT", body={"doc": doc, "create": True})
+    assert status == 200 and json.loads(text)["values"] == 1
+    try:
+        status, _, text = fetch(server, "/api/values?path=deep/source.ipynb")
+        assert status == 200 and json.loads(text) == {"name": "source", "revision": 1, "saved": record["saved"], "values": record}
+        brief = json.loads(fetch(server, "/api/values?path=deep/source.ipynb&brief=1")[2])
+        assert brief["values"] == {"revision": 1, "saved": record["saved"], "count": 1} and brief["revision"] == 1
+        # Only notebooks in the folder, and only ones that can be read.
+        assert fetch(server, "/api/values?path=../outside.ipynb")[0] == 403
+        assert fetch(server, "/api/values?path=deep/source.txt")[0] == 400
+        assert fetch(server, "/api/values?path=missing.ipynb")[0] == 404
+        (server.folder / "deep" / "broken.ipynb").write_text("{ not a notebook", encoding="utf-8")
+        status, _, text = fetch(server, "/api/values?path=deep/broken.ipynb")
+        assert status == 422 and "not a readable notebook" in json.loads(text)["error"]
+    finally:
+        for name in ("source.ipynb", "broken.ipynb"):
+            (server.folder / "deep" / name).unlink(missing_ok=True)
+        (server.folder / "deep").rmdir()
+
+
 # ---------------------------------------------------------------------------
 # kernels: one is started ahead, so a sheet is calculated sooner
 # ---------------------------------------------------------------------------

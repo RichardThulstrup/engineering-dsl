@@ -12,6 +12,8 @@ import { NEEDED } from "./arrange.js";
 import { LIMITS, megabytes, weight } from "./pictures.js";
 import { band, BUILT_IN, heights, normal } from "./pageframe.js";
 import { frameDialog } from "./framedialog.js";
+import { relative, resolve, standing, taken } from "./given.js";
+import { givenDialog } from "./givendialog.js";
 
 const DEFAULTS = { showResults: "auto" };          // of a sheet: saved with it
 
@@ -32,9 +34,20 @@ const state = {
   kernel: "none",
   online: false,
   vocab: null,
-  calc: null,               // the pass in flight: {seq, sources: Map(id → source)}
+  calc: null,               // the pass in flight: {seq, sources: Map(id → source), wanted, at}
   renders: new Map(),       // seq → Map(id → source) of typesetting requests
   wantCalc: false,
+  // Does the kernel have the sheet as it stands?  Every time a calculation
+  // is asked for counts (`wanted`): what the kernel has may then no longer
+  // be what the sheet says.  It may be that again once the pass which was
+  // asked for last has come to its end (`passed`) — whether that pass got
+  // to the end of the sheet, the kernel says with its values.
+  wanted: 0,
+  passed: null,             // {seq, wanted} of the last pass that came to its end
+  pending: false,           // a pass is about to be asked for (calcSoon)
+  waiting: new Set(),       // what is woken when a pass comes to its end (a save: ownValues)
+  asked: new Map(),         // seq → what takes the kernel's word on the sheet's values
+  values: false,            // the server hands a sheet's values on (one started before it could does not)
   settling: 0,
   greet: false,
   lastPass: "",
@@ -50,6 +63,8 @@ const sheet = new Sheet({
   changed: ({ calc }) => {
     setDirty(true);
     if (calc) scheduleCalc();
+    // What another sheet gave has come, or come back: how does it stand to what that sheet delivers now?
+    if (sheet.givenRegions().some((region) => region.mark === undefined)) checkGiven();
   },
   selection: (count) => {
     // Each arranging command is there once enough regions are selected.
@@ -59,6 +74,7 @@ const sheet = new Sheet({
   },
   preview: (region, source) => requestPreview(region, source),
   frame: () => run("page-frame"),
+  given: (region) => takeValues(region),
 });
 
 const session = sessionStorage.getItem("edsl-session") || uid();
@@ -284,16 +300,136 @@ async function editFrame() {
 
 /**
  * What a sheet says of itself once it is saved now — or null, where a
- * save leaves that as it is.  A sheet that has a header or a footer says
- * when it was last saved with something `changed`, and counts those
- * saves: its revision — unless that was typed as text, which stays as it
- * was typed.
+ * save leaves that as it is.  A sheet says when it was last saved with
+ * something `changed`, and counts those saves: its revision — unless
+ * that was typed as text, which stays as it was typed.  (A header says
+ * it; and it is what another sheet names the values by that it takes
+ * from this one — so a sheet that has no revision yet gets its first
+ * one with any save.)
  */
 function stamp(settings, changed) {
-  if (!changed || !normal(settings.frame)) return null;
-  const about = { ...(settings.about || {}), saved: new Date().toISOString() };
+  const had = settings.about || {};
+  if (!changed && had.revision !== undefined) return null;
+  const about = { ...had, saved: new Date().toISOString() };
   if (typeof (about.revision ?? 0) === "number") about.revision = (about.revision ?? 0) + 1;
   return about;
+}
+
+// ---------------------------------------------------------------------------
+// values: what the sheet hands on to other sheets, and what it is given
+// ---------------------------------------------------------------------------
+
+const PATIENCE = 4000;      // ms a save waits for a calculation that is under way
+
+/** Has the pass that was asked for last come to its end? */
+const passed = () => state.passed !== null && state.passed.wanted === state.wanted;
+
+/** Is a pass under way, or about to be asked for? */
+const calculating = () => state.calc !== null || state.pending;
+
+/**
+ * Ask the kernel what the sheet's variables are: its word {values,
+ * toolkit, pass} — or null, where none comes (it reports a fault, or is
+ * gone and says nothing for ten seconds).
+ */
+function kernelValues() {
+  return new Promise((resolve) => {
+    const seq = conn.send({ op: "values" });
+    if (!seq) { resolve(null); return; }
+    const answer = (said) => { clearTimeout(timer); state.asked.delete(seq); resolve(said); };
+    const timer = setTimeout(() => answer(null), 10000);
+    state.asked.set(seq, answer);
+  });
+}
+
+/**
+ * What the sheet's variables are, for its file to keep with the revision
+ * a save makes: {wanted, toolkit, values} — or null, where the kernel
+ * does not have the sheet as it stands (it is not calculated; the
+ * calculation was stopped, or takes its time).  A calculation that is
+ * under way is waited for a moment, so that what was typed just before
+ * Ctrl+S is in the values as it is in the file.
+ */
+async function ownValues() {
+  if (!state.values) return null;
+  const until = (state.calc ? state.calc.at : Date.now()) + PATIENCE;
+  const slow = setTimeout(() => toast("Saving once this is calculated…"), 400);
+  while (!passed() && calculating() && Date.now() < until) {
+    await new Promise((wake) => {
+      const done = () => { clearTimeout(timer); state.waiting.delete(done); wake(); };
+      const timer = setTimeout(done, until - Date.now());
+      state.waiting.add(done);
+    });
+  }
+  clearTimeout(slow);
+  if (!passed()) return null;
+  const wanted = state.wanted;
+  const said = await kernelValues();
+  // The kernel says which pass they are the values of: the one this page
+  // knows the sheet by (and it got to the end of the sheet), or they are
+  // not kept.
+  if (!said || said.pass !== state.passed.seq) return null;
+  return { wanted, toolkit: said.toolkit, values: said.values };
+}
+
+/** The name of a sheet by its path. */
+const sheetName = (path) => path.replace(/^.*\//, "").replace(/\.ipynb$/i, "");
+
+/**
+ * Values from another sheet: choose the sheet, and which of its values —
+ * they are put on the page at the cursor.  For a `region` that holds
+ * such values, what it holds is chosen anew: other values, another
+ * sheet, or the same values as a newer revision has them.
+ */
+async function takeValues(region = null) {
+  // (What is being written is finished when a dialog takes the keyboard: the values go below it.)
+  const writing = sheet.editing ? sheet.editing.region : null;
+  if (!state.values) {
+    toast("The worksheet server running here was started before sheets could hand values on: " +
+          "close the worksheet and start it again.", "error");
+    return;
+  }
+  const home = folder(state.path);
+  let path = region ? resolve(home, region.given.sheet) : undefined;
+  for (;;) {
+    if (path === undefined) {
+      path = await browse({ title: "Values from which sheet?", action: "Choose", dir: home });
+      if (!path) return;
+    }
+    let source;
+    if (path === null) {
+      source = { name: region.given.name, missing: `${region.given.sheet} is outside the folder this worksheet was started in.` };
+    } else if (path === state.path) {
+      source = { name: state.name, missing: "A sheet takes values from other sheets, not from itself." };
+    } else {
+      const { ok, data } = await api("GET", `/api/values?path=${encodeURIComponent(path)}`);
+      source = ok ? data : { name: sheetName(path), missing: data.error };
+    }
+    const made = await givenDialog({ source, taken: region ? region.given : null });
+    if (made === "other") { path = undefined; continue; }
+    if (!made) return;
+    const given = taken(source, relative(home, path), made.names);
+    if (region) sheet.regive(region, given); else sheet.addGiven(given, writing);
+    return;
+  }
+}
+
+/** See how what the regions were given stands to what their sheets deliver now, and mark those that have not got that. */
+function checkGiven() {
+  const home = folder(state.path);
+  const asked = new Map();                  // path → what the server says of that sheet
+  for (const region of sheet.givenRegions()) {
+    const given = region.given;
+    const path = resolve(home, given.sheet);        // (null: outside the folder the server has — which it says is not there)
+    if (!asked.has(path)) asked.set(path, api("GET", `/api/values?path=${encodeURIComponent(path ?? "")}&brief=1`));
+    asked.get(path).then(({ ok, status, data }) => {
+      // A server that does not answer says nothing of the sheet: the mark
+      // stays as it is.  Nor is an answer that comes after the region was
+      // given something else an answer about what it has.
+      if (!ok && status === 0) return;
+      if (region.given === given) sheet.setMark(region, standing(given, ok ? data : null));
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +492,11 @@ function receive(message) {
       } else if (state.calc && state.calc.seq === message.seq) finishPass(message);
       break;
     }
+    case "values":
+      state.asked.get(message.seq)?.(message);
+      break;
     case "fault":
+      state.asked.get(message.seq)?.(null);           // (no values will come of that)
       toast("The worksheet engine reported a fault — see the browser console.", "error");
       console.error(message.traceback);
       break;
@@ -374,6 +514,8 @@ const relayout = debounce(() => sheet.layout(), 16);
 function finishPass(message) {
   const pass = state.calc;
   state.calc = null;
+  state.passed = { seq: pass.seq, wanted: pass.wanted };
+  for (const wake of [...state.waiting]) wake();
   // Regions a stopped (or failed) pass never reached keep their old
   // values — dimmed, so that they are not taken for current ones.
   const partial = Boolean(message.interrupted || message.failed);
@@ -410,6 +552,7 @@ function settle(calculated) {
 const calcSoon = debounce(() => runCalc(false), 30);
 
 function scheduleCalc({ now = false, fresh = false } = {}) {
+  state.wanted += 1;
   if (!state.trusted) return;
   if (!now && !$("#auto-calc").checked) {
     for (const region of sheet.mathRegions()) {
@@ -417,10 +560,11 @@ function scheduleCalc({ now = false, fresh = false } = {}) {
     }
     return;
   }
-  if (fresh) { calcSoon.cancel(); runCalc(true); } else calcSoon();
+  if (fresh) { calcSoon.cancel(); runCalc(true); } else { state.pending = true; calcSoon(); }
 }
 
 function runCalc(fresh) {
+  state.pending = false;
   if (!conn.online || state.kernel === "dead") { state.wantCalc = true; return; }
   if (state.kernel === "none" || state.kernel === "starting") { state.wantCalc = true; return; }
   state.wantCalc = false;
@@ -430,10 +574,12 @@ function runCalc(fresh) {
     op: "calc", fresh,
     regions: regions.map((r) => ({
       id: r.id, source: r.source,
-      have: r.result && r.result.source === r.source ? r.result.rev : null })),
+      have: r.result && r.result.source === r.source ? r.result.rev : null,
+      // (What another sheet gave is run, and shown by the page itself.)
+      given: r.given ? true : undefined })),
   });
   if (!seq) { state.wantCalc = true; return; }
-  const pass = { seq, sources, seen: new Set() };
+  const pass = { seq, sources, seen: new Set(), wanted: state.wanted, at: Date.now() };
   state.calc = pass;
   // Dim what is still waiting to be recalculated — but only if the pass
   // takes long enough to notice.
@@ -446,7 +592,7 @@ function runCalc(fresh) {
 }
 
 function typesetAll() {
-  const regions = sheet.mathRegions();
+  const regions = sheet.mathRegions().filter((r) => !r.given);        // (what another sheet gave is not typeset: the page shows it)
   if (!regions.length) return;
   const seq = conn.send({ op: "render", reset: true,
                           regions: regions.map((r) => ({ id: r.id, source: r.source })) });
@@ -474,6 +620,7 @@ function restartKernel() {
 // ---------------------------------------------------------------------------
 
 async function discardOk() {
+  await saving;                             // (a save under way is of this sheet: it is done before another takes its place)
   if (!state.dirty) return true;
   const choice = await ask("Unsaved changes", `"${state.name}" has changes that are not saved.`, [
     { label: "Cancel", value: null }, { label: "Discard", value: "discard" },
@@ -495,9 +642,11 @@ function adopt(doc) {
   if (!Object.keys(state.settings.about).length) delete state.settings.about;
   state.calc = null;
   state.renders.clear();
+  state.passed = null;                  // (what the kernel has is another sheet)
   sheet.calculated = state.trusted;
   showFrame();
   sheet.load(doc);
+  checkGiven();
   applySettings();
   setTitle();
   setDirty(false);
@@ -535,7 +684,17 @@ async function openDialog() {
   if (path) await openPath(path);
 }
 
-async function save(as = false) {
+let saving = Promise.resolve();
+
+/** Save the sheet — `as`: under a name that is asked for.  One save at a time: the next waits for the one under way. */
+function save(as = false) {
+  const turn = saving.then(() => write(as));
+  // (The next save does not wait for one that tripped — whose error is the page's to report all the same.)
+  saving = turn.catch((error) => { setTimeout(() => { throw error; }); });
+  return turn;
+}
+
+async function write(as) {
   sheet.commitEdit();
   let path = state.path;
   let create = false;
@@ -545,11 +704,30 @@ async function save(as = false) {
     if (!path) return false;
     create = path !== state.path;
   }
-  sheet.settle();
+  // What the sheet's variables are is kept with the revision this save
+  // makes, for other sheets to take: asked of the kernel, which may take
+  // a moment — and what is done to the sheet in that moment is not in them.
+  const said = await ownValues();
+  sheet.commitEdit();
+  if (sheet.settle()) scheduleCalc({ now: true });      // (regions were moved into another order: calculated anew)
+  const values = said && said.wanted === state.wanted ? said : null;
   const changes = state.changes;            // (what is changed from here on is not in what is saved)
   const about = stamp(state.settings, state.dirty);
+  // In another folder, the sheets it was given values by are reached another way.
+  const home = folder(state.path), there = folder(path);
+  const reached = (given) => {
+    const whole = resolve(home, given.sheet);
+    return whole === null ? given : { ...given, sheet: relative(there, whole) };
+  };
   const doc = { settings: about ? { ...state.settings, about } : state.settings, trusted: state.trusted && sheet.calculated,
-                preamble: state.preamble, regions: sheet.serialize(state.settings.showResults) };
+                preamble: state.preamble,
+                regions: sheet.serialize(state.settings.showResults).map((r) => (r.given ? { ...r, given: reached(r.given) } : r)) };
+  if (values) {
+    const now = about || state.settings.about;      // (what the sheet says of itself once it is saved)
+    doc.values = { revision: now.revision, saved: now.saved, toolkit: values.toolkit, values: values.values };
+  } else if (create) {
+    doc.values = null;                      // (a file that is written over keeps no values of the sheet it was)
+  }
   if (weight(doc.regions) > LIMITS.sheet) {
     toast(`The pictures on this sheet take ${megabytes(weight(doc.regions))} MB: more than the ` +
           `${megabytes(LIMITS.sheet)} MB a sheet is saved with.`, "error");
@@ -571,6 +749,7 @@ async function save(as = false) {
       const url = new URL(location.href);
       url.searchParams.set("open", state.path);
       history.replaceState(null, "", url);
+      if (moved) sheet.rebase(home, there);
       if (moved) restartKernel();           // the kernel works in the sheet's own folder
       // The server says how many pictures it stored.  One that turned
       // some down — or was started before pictures could be kept, and
@@ -583,7 +762,10 @@ async function save(as = false) {
               "They are still on this page — copy them into a sheet of a freshly started worksheet.", "error");
         return false;
       }
-      toast("Saved");
+      // Without its values, a sheet that could have had them says so:
+      // another sheet gets the ones of the revision before.
+      toast(values || !state.values || !state.trusted ? "Saved"
+        : "Saved. Its values are not kept with this revision: the sheet is not calculated.");
       return true;
     }
     if (status === 409) {
@@ -668,6 +850,7 @@ const COMMANDS = {
   "insert-math": () => sheet.create("math"),
   "insert-text": () => sheet.create("text"),
   "insert-picture": () => $("#picture-file").click(),
+  "take-values": () => takeValues(),
   "toggle-palette": () => togglePalette(),
   "search-symbols": searchSymbols,
   "toggle-grid": () => setPref("grid", !state.prefs.grid),
@@ -712,6 +895,13 @@ const HELP = [
     ["Picture (in the bar), or a file dropped on the page", "a picture from a file: PNG, JPEG, GIF, WebP, BMP, or an SVG drawing"],
     ["click a picture", "select it: drag it to move it, its right edge to resize it, Del deletes it"],
     ["Ctrl+V while writing text", "the picture goes into the text, at the caret"],
+  ]],
+  ["Values from other sheets", [
+    ["Values (in the bar)   Edit ▸ Values from another sheet…", "variables of another sheet, as they were when it was saved: held here with that sheet's name and revision"],
+    ["click what another sheet gave", "select it: drag it to move it, Del deletes it"],
+    ["double-click it", "choose other values, or another sheet"],
+    ["a mark such as “rev. 4 is there”", "the other sheet has been saved with other values since: a click shows what is different, for you to take"],
+    ["saving a sheet", "keeps what its variables are with the revision that makes — once it is calculated"],
   ]],
   ["Calculating", [
     ["top to bottom, left to right", "a name must be defined above (or to the left of) its use"],
@@ -860,6 +1050,8 @@ function bindChrome() {
     fitStrokes();
   });
   window.addEventListener("afterprint", restoreStrokes);
+  // Back from another window — where another sheet may have been saved.
+  window.addEventListener("focus", () => checkGiven());
   document.fonts?.ready.then(() => sheet.layout());
 }
 
@@ -895,6 +1087,7 @@ async function start() {
   }
   if (own.ok) state.templates = templatesOf(own.data);
   if (where.ok) state.root = String(where.data.root || "");
+  state.values = where.ok && where.data.values === true;
   // A sheet that is new starts with the template chosen for new sheets.
   if (state.path === null && !state.settings.frame) Object.assign(state.settings, usualFrame());
   showFrame();

@@ -447,6 +447,7 @@ class Engine:
         self.pass_no = 0
         self.executed = self.reused = 0
         self.interrupted = False
+        self.calculated = None      # the pass (its ``seq``) whose values the namespace holds, once it got to its end
         self._registered = set()
 
     # ---- transport -----------------------------------------------------
@@ -741,7 +742,23 @@ class Engine:
         elif self._shows_value(result.result):
             out["result"] = [self._format(result.result)]
 
-    def _execute(self, item, out):
+    def _brief(self, value, most=2000):
+        """How a value is displayed, in brief — for the list another sheet
+        chooses from, which is kept in the sheet's file at every save: its
+        LaTeX where that is short, and the beginning of its plain text."""
+        shown = self._format(value)
+        latex, plain = shown.get("text/latex"), shown.get("text/plain", "")
+        brief = {"text/plain": plain if len(plain) <= most else plain[:most] + " …"}
+        if isinstance(latex, str) and len(latex) <= most:
+            brief["text/latex"] = latex
+        return brief
+
+    def _name_latex(self, name):
+        """A name as the sheet typesets it where it stands alone ("" where it has no such form)."""
+        rendered = mathrender.render_statement(ast.parse(name).body[0], name, self.names)
+        return rendered["latex"] if rendered else ""
+
+    def _execute(self, item, out, given=False):
         ns = self.ns
         rendered = None
         if len(item.nodes) == 1:
@@ -768,17 +785,24 @@ class Engine:
             except BaseException as exc:        # SystemExit too: report it, carry on
                 out["error"] = self._error(exc, item)
         out["outputs"] = cap.events
-        if "error" not in out:
-            if item.mode == "eval":
-                if self._shows_value(value):
-                    out["result"] = [self._format(value)]
-            elif len(item.nodes) == 1:
-                names = self._assigned_names(item.nodes[0])
-                values = [ns.get(n, MISSING) for n in names]
-                if names and all(v is not MISSING and self._shows_value(v) for v in values):
-                    out["result"] = [self._format(v) for v in values]
-                    if "kind" in out and out["kind"] == "other":
-                        out["kind"] = "assign"
+        if "error" in out:
+            return
+        if given:
+            # What the names it binds are now, for the page to show: each
+            # name as the sheet typesets it, each value as it is displayed.
+            names = self._assigned_names(item.nodes[0]) if len(item.nodes) == 1 else []
+            if names:
+                out["given"] = [{"name": n, "latex": self._name_latex(n), "value": self._format(ns[n])} for n in names]
+        elif item.mode == "eval":
+            if self._shows_value(value):
+                out["result"] = [self._format(value)]
+        elif len(item.nodes) == 1:
+            names = self._assigned_names(item.nodes[0])
+            values = [ns.get(n, MISSING) for n in names]
+            if names and all(v is not MISSING and self._shows_value(v) for v in values):
+                out["result"] = [self._format(v) for v in values]
+                if "kind" in out and out["kind"] == "other":
+                    out["kind"] = "assign"
 
     def _reusable(self, entry):
         ns, fp = self.ns, self.fp
@@ -798,8 +822,15 @@ class Engine:
             return result
         return dict(result, lines=lines, gap=item.gap)
 
-    def run_item(self, item, use_memo=True):
-        """Result for one item — replayed if nothing it reads has changed."""
+    def run_item(self, item, use_memo=True, given=False):
+        """Result for one item — replayed if nothing it reads has changed.
+
+        ``given`` runs a statement of a region that holds values given
+        by another sheet, which the page draws by itself: what the
+        statement binds is said name by name (``given``: ``[{name,
+        latex, value}]``), as the kernel has it.  (The statement has no
+        typeset form: it is a call with text in it.)
+        """
         if item.kind == "comment":
             return {"t": "comment", "text": item.src, "gap": item.gap,
                     "lines": [item.first, item.last], "h": _digest(item.src)}
@@ -810,7 +841,7 @@ class Engine:
             base["h"] = _digest([item.src, item.error])
             return base
 
-        key = (item.key, _state_token())
+        key = (item.key, given, _state_token())
         memoizable = (use_memo and item.kind == "stmt" and not item.volatile
                       and not self._impure(item))
         if memoizable:
@@ -831,7 +862,7 @@ class Engine:
             out["suppress"] = True
 
         ns, fp = self.ns, self.fp
-        state_before = key[1]
+        state_before = key[-1]
         if memoizable:
             inputs = {name: fp.of_name(name) for name in item.reads}
             seen = {name: ns.get(name, MISSING) for name in item.reads}
@@ -842,7 +873,7 @@ class Engine:
             if item.kind == "magic":
                 self._run_magic(item, out)
             else:
-                self._execute(item, out)
+                self._execute(item, out, given)
         finally:
             ms = round((time.perf_counter() - t0) * 1000, 2)
             self.executed += 1
@@ -895,6 +926,10 @@ class Engine:
         ``have`` is the revision the front end already shows for a
         region; when the new result is the same, only that is said.
 
+        A region marked ``given`` holds values from another sheet, which
+        the page shows by itself: its reply says what each of its names
+        is now (see ``run_item``).
+
         ``fresh`` forgets every earlier result first ("recalculate
         everything").  ``reuse: false`` runs every statement without
         consulting or touching what is remembered — the reference run
@@ -903,6 +938,7 @@ class Engine:
         seq = request.get("seq")
         self.pass_no += 1
         self.executed = self.reused = 0
+        self.calculated = None                  # (until this pass has got to its end)
         if request.get("fresh"):
             self.memo.clear()
         use_memo = bool(request.get("reuse", True))
@@ -914,7 +950,7 @@ class Engine:
             started = time.perf_counter()
             try:
                 for item in self.parse(region.get("source", "")).items:
-                    results.append(self.run_item(item, use_memo))
+                    results.append(self.run_item(item, use_memo, bool(region.get("given"))))
                     if self.interrupted:
                         break
                 tail = self._close_region()
@@ -933,6 +969,8 @@ class Engine:
             if self.interrupted:
                 break                           # the regions below keep what they showed
         self.memo.prune(self.pass_no)
+        if not self.interrupted:
+            self.calculated = seq
         self._publish({
             "op": "done", "seq": seq, "interrupted": self.interrupted,
             "ms": round((time.perf_counter() - t0) * 1000, 1),
@@ -974,6 +1012,49 @@ class Engine:
             _state_set(saved)
         self._publish({"op": "done", "seq": seq, "rendered": True})
 
+    def op_values(self, request):
+        """What the sheet's variables are now, to be kept with its revision
+        and offered to other sheets: one ``values`` message, then ``done``.
+
+        For each name, in the order the sheet defines them (a name of
+        the toolkit's that the sheet gives a value of its own stands
+        where the toolkit has it: first): ``tex`` (the name, typeset),
+        ``form`` (the value as text, see :mod:`values`) and ``shown``
+        (how it is displayed, in brief) — or ``why``, for a value that
+        cannot be offered.
+
+        ``pass`` names the calculation these are the values of: the
+        ``seq`` of the last pass that got to its end — ``None`` in a
+        kernel that has calculated nothing, or was stopped at it.  The
+        page keeps values only of the pass it knows the sheet by.
+        """
+        import keyword
+
+        from . import values
+        seq = request.get("seq")
+        listed, room = [], values.SHEET
+        for name, value in self.ns.items():
+            if not (isinstance(name, str) and name.isidentifier()) or keyword.iskeyword(name):
+                continue                        # (what no sheet could define, another sheet could not name)
+            if name.startswith("_") or self.baseline.get(name, MISSING) is value:
+                continue
+            if isinstance(value, (types.ModuleType, type)):
+                continue                        # (what a sheet imports for itself is no variable of it)
+            entry = {"name": name, "tex": self._name_latex(name)}
+            try:
+                form = values.dump(value, self.fp._base)
+                if len(form) > room:
+                    raise values.NotOffered("more than a sheet hands on")
+            except values.NotOffered as why:
+                entry["why"] = str(why)
+            else:
+                room -= len(form)
+                entry.update(form=form, shown=self._brief(value))
+            listed.append(entry)
+        self._publish({"op": "values", "seq": seq, "values": listed, "toolkit": _toolkit_version(),
+                       "pass": self.calculated})
+        self._publish({"op": "done", "seq": seq})
+
     def user_names(self):
         """Names the sheet has defined, for completion in the editor."""
         return sorted(name for name, value in self.ns.items()
@@ -1000,6 +1081,15 @@ class Engine:
             "syntax_mode": _runtime.get_syntax_mode(),
         })
         self._publish({"op": "done", "seq": seq})
+
+
+def _toolkit_version() -> str:
+    """The toolkit's version, as installed ("" where it is not installed as a package)."""
+    try:
+        from importlib.metadata import version
+        return version("engineering-dsl")
+    except Exception:
+        return ""
 
 
 def install(preamble: str = PREAMBLE):

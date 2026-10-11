@@ -16,6 +16,11 @@
 // width is the picture's, and a click selects it instead of opening its
 // text.
 //
+// A math region may hold values another sheet gave (see given.js).  Its
+// text is the code that holds them, which nobody writes: the region says
+// where they are from and what they are, a click selects it, and what it
+// holds is chosen in a dialog (the `given` hook).
+//
 // The sheet is one strip, from its top down, and a page takes PAGE_H of
 // it.  With a header and a footer (pageframe.js) a page takes less: they
 // stand between the pages' parts of the strip, on screen as on paper.
@@ -28,9 +33,10 @@ import { aligned, distributed, NEEDED } from "./arrange.js";
 import { SourceEditor } from "./editor.js";
 import { formatted, pastedText, RichEditor } from "./richtext.js";
 import { renderMarkdown } from "./markdown.js";
-import { notebookOutputs, outputsNode, renderItems, renderSource } from "./mathview.js";
+import { givenOutputs, givenSaid, notebookOutputs, outputsNode, renderGiven, renderItems, renderSource } from "./mathview.js";
 import { bringsFiles, carried, collect, KINDS_SAID, lonePicture, named, reference } from "./pictures.js";
 import { paged } from "./pageframe.js";
+import { normal as normalGiven, relative, resolve, sourceOf } from "./given.js";
 
 // Page geometry — mirrored in css/worksheet.css.
 export const CONTENT_W = 680;          // A4 less 15 mm margins, at 96 dpi
@@ -51,6 +57,14 @@ class Region {
     this.source = data.source ?? "";
     this.attachments = data.attachments || {};    // of a text region: {name: {type: base64}}
     this.saved = data.saved || null;    // outputs stored in the file (shown until calculated)
+    // What another sheet gave it (given.js) — where its text is the code
+    // that holds exactly that, and nothing else.
+    const given = this.kind === "math" ? normalGiven(data.given) : null;
+    this.given = given && sourceOf(given) === this.source ? given : null;
+    // Of what it was given: how that stands to what the other sheet
+    // delivers now (given.js: standing) — undefined until that is known.
+    this.mark = undefined;
+    this.gift = 0;                      // of what it was given: the number a snapshot for undo names it by
     this.result = null;                 // {items, tail, rev} from the kernel
     this.typeset = null;                // {source, items}: typeset without results
     this.stale = false;
@@ -74,6 +88,7 @@ export class Sheet {
    *   settings()               {showResults}
    *   prefs()                  {markdown}: text is written as its markdown, not as it looks
    *   frame()                  the header or the footer of a page was double-clicked
+   *   given(region)            what this region was given by another sheet is to be chosen anew
    */
   constructor(hooks) {
     this.hooks = hooks;
@@ -88,6 +103,10 @@ export class Sheet {
     // Pictures of every region there has been, by region: a snapshot for
     // undo holds a region's text, not the megabytes attached to it.
     this.attic = new Map();
+    // What regions were given by other sheets, by number: a snapshot
+    // names it, too, and does not hold it again.
+    this.gifts = new Map();             // number → {source, given}
+    this.gifted = 0;
     this.selected = new Set();
     this.editing = null;                // {region, editor, original, fresh}
     this.cross = { x: 0, y: 0 };
@@ -126,6 +145,7 @@ export class Sheet {
     this.commitEdit();
     for (const region of this.regions) region.el.remove();
     this.attic.clear();
+    this.gifts.clear();
     this.regions = (doc.regions || []).map((data) => new Region(data));
     this.flow = this.regions.some((r) => r.y === null || r.x === null);
     this.selected.clear();
@@ -154,6 +174,16 @@ export class Sheet {
     return this.order().filter((r) => r.kind === "math");
   }
 
+  /** The regions that hold what other sheets gave. */
+  givenRegions() {
+    return this.regions.filter((r) => r.given);
+  }
+
+  /** The kernel's word on a region that was given values, as far as it is of the region as it stands: {told, error}. */
+  said(region) {
+    return givenSaid(region.result && region.result.source === region.source ? region.result : null);
+  }
+
   find(id) {
     return this.regions.find((r) => r.id === id) || null;
   }
@@ -172,9 +202,11 @@ export class Sheet {
     return this.order().map((r) => ({
       id: r.id, kind: r.kind, source: r.source,
       x: r.x, y: r.y, w: r.kind === "text" ? r.w : null,
-      outputs: r.kind === "math" && r.result ? notebookOutputs(r.result, mode) : [],
+      outputs: r.given ? givenOutputs(r.given, this.said(r).told)
+        : r.kind === "math" && r.result ? notebookOutputs(r.result, mode) : [],
       // The pictures a text still names; one it has let go of is not kept.
       attachments: r.kind === "text" ? named(r.source, r.attachments) : undefined,
+      given: r.given || undefined,
     }));
   }
 
@@ -184,8 +216,9 @@ export class Sheet {
 
   // ---- undo ------------------------------------------------------------
   snapshot() {
+    // (What a region was given is named by its number, not held again: see `gifts`.)
     return JSON.stringify(this.regions.map((r) => (
-      { id: r.id, kind: r.kind, x: r.x, y: r.y, w: r.w, source: r.source, rank: r.rank })));
+      { id: r.id, kind: r.kind, x: r.x, y: r.y, w: r.w, source: r.given ? "" : r.source, gift: r.gift || undefined, rank: r.rank })));
   }
 
   /** Call before a change the user may want to take back. */
@@ -201,14 +234,18 @@ export class Sheet {
     const known = new Map(this.regions.map((r) => [r.id, r]));
     const next = [];
     for (const data of JSON.parse(state)) {
+      const gift = this.gifts.get(data.gift) || null;
+      const source = gift ? gift.source : data.source;
+      const given = gift ? gift.given : null;
       let region = known.get(data.id);
       if (region && region.kind === data.kind) {
         known.delete(data.id);
-        if (region.source !== data.source) { region.source = data.source; region.typeset = null; region.result = null; }
+        if (region.source !== source) { region.source = source; region.typeset = null; region.result = null; }
+        if (region.given !== given) Object.assign(region, { given, gift: data.gift, mark: undefined });
         Object.assign(region, { x: data.x, y: data.y, w: data.w, rank: data.rank });
         this.draw(region);
       } else {
-        region = new Region({ ...data, attachments: this.attic.get(data.id) });
+        region = new Region({ ...data, source, given, attachments: this.attic.get(data.id) });
         region.rank = data.rank;
         this.mount(region);
       }
@@ -245,8 +282,15 @@ export class Sheet {
     if (region.kind === "text") region.el.append(el("div", { class: "sizer", title: "Drag to change the width" }));
     this.byEl.set(region.el, region);
     this.attic.set(region.id, region.attachments);
+    if (region.given) this.keep(region);
     this.content.append(region.el);
     this.draw(region);
+  }
+
+  /** Remember what a region was given under a number of its own: a snapshot for undo names it by that. */
+  keep(region) {
+    region.gift = ++this.gifted;
+    this.gifts.set(region.gift, { source: region.source, given: region.given });
   }
 
   draw(region) {
@@ -264,6 +308,15 @@ export class Sheet {
       for (const img of region.body.querySelectorAll("img")) {
         if (!img.complete) img.addEventListener("load", () => this.layout(), { once: true });
       }
+      return;
+    }
+    node.classList.toggle("given", Boolean(region.given));
+    if (region.given) {
+      // What another sheet gave: as the kernel has it once it is
+      // calculated, and until then as the file says it was.
+      const said = this.said(region);
+      renderGiven(region.body, region.given, { ...said, mark: region.mark });
+      node.classList.toggle("has-error", Boolean(said.error));
       return;
     }
     const settings = this.hooks.settings();
@@ -574,6 +627,12 @@ export class Sheet {
    * be written as markdown (prefs().markdown).
    */
   edit(region, { line = null, fresh = false, point = null } = {}) {
+    if (region.given) {
+      // (Nobody writes the code that holds what a region was given: what it holds is chosen.)
+      this.select([region]);
+      this.hooks.given?.(region);
+      return;
+    }
     this.commitEdit();
     this.select([]);
     this.editing = { region, editor: null, original: region.source, fresh, preview: null, items: null };
@@ -839,6 +898,66 @@ export class Sheet {
   }
 
   // ====================================================================
+  // values given by another sheet
+  // ====================================================================
+  /**
+   * A new region that holds what another sheet gives (given.js): at the
+   * cursor — or, asked for while the region `below` was being written,
+   * under that one.  It is left selected.
+   */
+  addGiven(given, below = null) {
+    this.checkpoint();
+    this.freeze();
+    const at = below && this.regions.includes(below) ? { x: below.dx, y: Sheet.under(below) } : this.cross;
+    const region = new Region({ kind: "math", x: at.x, y: at.y, source: sourceOf(given), given });
+    region.rank = -(++this.rankCounter);
+    this.regions.push(region);
+    this.mount(region);
+    this.layout();
+    this.placeCross(region.dx, Sheet.under(region), { scroll: false });
+    this.select([region]);
+    this.reveal(region.el);
+    this.hooks.changed({ calc: true });
+  }
+
+  /** Give a region that holds values of another sheet other ones — or the same ones as they are at another revision. */
+  regive(region, given) {
+    const made = new Region({ kind: "math", source: sourceOf(given), given });
+    this.checkpoint();
+    const calc = made.source !== region.source;
+    // (It has what the other sheet delivers now: that is where it was taken from.)
+    Object.assign(region, { given: made.given, source: made.source, mark: null });
+    this.keep(region);
+    this.draw(region);
+    this.layout();
+    this.hooks.changed({ calc });
+  }
+
+  /** Say on a region how what it was given stands to what the other sheet delivers now (given.js: standing). */
+  setMark(region, mark) {
+    const same = JSON.stringify(region.mark ?? null) === JSON.stringify(mark);
+    region.mark = mark;
+    if (same) return;
+    this.draw(region);
+    this.layout();
+  }
+
+  /**
+   * The sheet's file is in folder `to` now, and was in `from`: the
+   * sheets its regions were given values by are named as they are
+   * reached from there (in what undo remembers, too).  (Nothing is
+   * drawn for it: the kernel moves to the new folder, and the page is
+   * drawn anew when it has.)
+   */
+  rebase(from, to) {
+    for (const gift of this.gifts.values()) {
+      const path = resolve(from, gift.given.sheet);
+      if (path !== null) gift.given = { ...gift.given, sheet: relative(to, path) };
+    }
+    for (const region of this.givenRegions()) region.given = this.gifts.get(region.gift).given;
+  }
+
+  // ====================================================================
   // pictures
   // ====================================================================
   /**
@@ -1001,7 +1120,7 @@ export class Sheet {
 
   /** One region per statement, stacked where the region stood. */
   split() {
-    const targets = [...this.selected].filter((r) => r.kind === "math" && r.result
+    const targets = [...this.selected].filter((r) => r.kind === "math" && !r.given && r.result
       && r.result.source === r.source && r.result.items.length > 1);
     if (!targets.length) return false;
     this.checkpoint();
@@ -1040,7 +1159,7 @@ export class Sheet {
       html: group.map((r) => (r.kind === "text" ? formatted(r.source, r.attachments) : el("pre", { text: r.source }).outerHTML)).join("\n"),
       json: JSON.stringify(group.map((r) => (
         { kind: r.kind, source: r.source, w: r.w, x: r.dx - x0, y: r.dy - y0,
-          attachments: r.kind === "text" ? named(r.source, r.attachments) : undefined }))),
+          attachments: r.kind === "text" ? named(r.source, r.attachments) : undefined, given: r.given || undefined }))),
     };
   }
 
@@ -1056,7 +1175,9 @@ export class Sheet {
         x: clamp(this.cross.x + (item.x || 0), 0, CONTENT_W - GRID), y: this.cross.y + (item.y || 0),
         w: item.w ?? null,
         // (Shown only as far as they are pictures: see pictureUrl.)
-        attachments: item.attachments && typeof item.attachments === "object" ? { ...item.attachments } : {} });
+        attachments: item.attachments && typeof item.attachments === "object" ? { ...item.attachments } : {},
+        // (Kept only where the text is the code that holds exactly this: see Region.)
+        given: item.given });
       region.rank = -(this.rankCounter + items.length - i);
       this.regions.push(region);
       this.mount(region);
@@ -1206,7 +1327,8 @@ export class Sheet {
     }
     const rowNode = event.target.closest("[data-line]");
     this.press = { kind: "region", region, start: point, moved: false, dragging: false,
-                   line: rowNode ? Number(rowNode.dataset.line) : null, grip: onGrip };
+                   line: rowNode ? Number(rowNode.dataset.line) : null, grip: onGrip,
+                   mark: Boolean(event.target.closest(".mark")) };
   }
 
   pointerMove(event) {
@@ -1276,10 +1398,13 @@ export class Sheet {
     if (!press.dragging) {
       // A click on a picture selects it — there is no text in it to edit;
       // a double click opens the text that names it (for a caption, say).
+      // So for what another sheet gave: a double click asks what it is to
+      // hold — and one click does, on the mark that says there is more.
       const again = this.clicked && this.clicked.region === press.region
         && event.timeStamp - this.clicked.at < 500;
-      this.clicked = { region: press.region, at: event.timeStamp };
-      if (press.grip || (this.isPicture(press.region) && !again)) { this.select([press.region]); this.focus(); }
+      this.clicked = again ? null : { region: press.region, at: event.timeStamp };      // (a third click is a first one)
+      const whole = this.isPicture(press.region) || Boolean(press.region.given);
+      if (press.grip || (whole && !again && !press.mark)) { this.select([press.region]); this.focus(); }
       else this.edit(press.region, { line: press.line, point: { x: event.clientX, y: event.clientY } });
       return;
     }
@@ -1330,10 +1455,10 @@ export class Sheet {
     if (mod && key.toLowerCase() === "v") this.shiftPaste = event.shiftKey;      // (the paste that follows asks)
   }
 
-  /** Tab: edit the next (or previous) region in reading order — pictures are passed by. */
+  /** Tab: edit the next (or previous) region in reading order — pictures, and what other sheets gave, are passed by. */
   step(direction) {
     const chosen = this.selected.size === 1 ? [...this.selected][0] : null;
-    const order = this.order().filter((r) => r === chosen || !this.isPicture(r));
+    const order = this.order().filter((r) => r === chosen || !(this.isPicture(r) || r.given));
     if (!order.length) return;
     const here = this.selected.size === 1 ? order.indexOf([...this.selected][0]) : -1;
     let index;

@@ -181,7 +181,9 @@ class _Info(_Base):
     def get(self):
         self.require_auth()
         config = self.config
-        self.json({"root": str(config.root), "name": config.root.name})
+        # (``values``: this server hands a sheet's values to another sheet,
+        # and keeps what a region was given — a page asks before it relies on that.)
+        self.json({"root": str(config.root), "name": config.root.name, "values": True})
 
 
 class _Prefs(_Base):
@@ -284,6 +286,21 @@ class _Doc(_Base):
         self.json(saved)
 
 
+class _Values(_Doc):
+    """What another sheet delivers: the values its variables had when it was saved (see ``document.published``)."""
+
+    def get(self):
+        self.require_auth()
+        path = self._path()
+        if not path.is_file():
+            raise tornado.web.HTTPError(404, f"{path.name} was not found")
+        try:
+            said = document.published(path, brief=self.get_argument("brief", "") == "1")
+        except Exception as exc:
+            raise tornado.web.HTTPError(422, f"{path.name} is not a readable notebook: {exc}")
+        self.json(said)
+
+
 class _Trust(_Doc):
     """The user chose to calculate a sheet: remember it as trusted."""
 
@@ -381,7 +398,7 @@ class _Socket(tornado.websocket.WebSocketHandler):
         kernel = session.kernel
         # Each request runs as its own task: ``on_message`` must return at
         # once, or "stop" would wait behind the calculation it is to stop.
-        if op in ("calc", "render", "hello"):
+        if op in ("calc", "render", "hello", "values"):
             _spawn(kernel.request(message))
         elif op == "interrupt":
             _spawn(kernel.interrupt())
@@ -425,6 +442,7 @@ def make_app(config: Config) -> tornado.web.Application:
         (r"/api/templates", _Templates),
         (r"/api/list", _List),
         (r"/api/doc", _Doc),
+        (r"/api/values", _Values),
         (r"/api/trust", _Trust),
         (r"/ws", _Socket),
         (r"/static/(.*)", _Static, {"path": str(STATIC)}),
