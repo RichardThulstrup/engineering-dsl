@@ -136,6 +136,25 @@ def _resolve_file(notebook):
     )
 
 
+def made_in_worksheet(nb):
+    """True when the notebook file was saved by the worksheet
+    (``python -m utils.worksheet``), which marks its files in the
+    notebook's metadata.
+
+    Such a sheet is not to be run again for a hardcopy.  The worksheet
+    shows the value of every definition and saves that as the cell's
+    output; run as a notebook, the same cell shows nothing for a
+    definition, so a fresh run takes the results out of the file.
+    """
+    import json
+
+    try:
+        meta = json.loads(pathlib.Path(nb).read_text(encoding="utf-8"))["metadata"]
+        return "version" in meta["edsl_worksheet"]
+    except Exception:
+        return False
+
+
 _EXPORTER_CACHE = {}
 
 
@@ -239,9 +258,18 @@ def hardcopy(notebook=None, to=None, timeout=600, execute=False):
     exist only in the live session are invisible to it.  Pass
     ``execute=True`` to run the notebook fresh as part of the export
     (slower: the DSL import runs again), which guarantees outputs
-    regardless of what was saved.
+    regardless of what was saved.  A sheet made in the worksheet is
+    exported as saved all the same: see ``made_in_worksheet``.
     """
     nb = _resolve_file(notebook)
+
+    sheet = made_in_worksheet(nb)
+    if execute and sheet:
+        print("Note: this sheet was made in the worksheet, so it is exported "
+              "as saved and not run fresh: run as a notebook, a definition "
+              "shows no value.  To renew its results, calculate and save it "
+              "in the worksheet.")
+        execute = False
 
     if not execute:
         # The most common "my PDF is empty" cause: the saved file holds
@@ -254,7 +282,11 @@ def hardcopy(notebook=None, to=None, timeout=600, execute=False):
                               if c.get("cell_type") == "code")
         except Exception:
             has_outputs = True
-        if not has_outputs:
+        if not has_outputs and sheet:
+            print("Note: the saved sheet contains no results, so the hardcopy "
+                  "will show code only.  Calculate and save it in the "
+                  "worksheet first.")
+        elif not has_outputs:
             print("Note: the saved notebook file contains no cell outputs, so "
                   "the hardcopy will show code only.  Save after running the "
                   "cells (Ctrl+S), or call hardcopy(execute=True) to run the "

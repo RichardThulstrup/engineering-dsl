@@ -262,7 +262,9 @@ A worksheet is saved as `.ipynb`:
 - the `from utils.Engineer import *` cell is kept as the first cell
   (the worksheet itself does not show it);
 - what a region shows is saved as the cell's output, so results are
-  visible in JupyterLab and on GitHub without running anything;
+  visible in JupyterLab and on GitHub without running anything (run
+  there, a cell shows what a notebook shows — nothing, for a
+  definition);
 - tags, attachments and other metadata of existing cells are preserved.
 
 If the file was changed by another program while open, saving asks
@@ -284,7 +286,11 @@ JupyterLab agrees — and it opens calculated from then on.
 *File → Print* (Ctrl+P) prints the page as you see it — A4, 15 mm
 margins, no grid or controls. Choose "Save as PDF" in the browser's
 dialog for a PDF. For the linear notebook rendering instead, the
-existing `print_view()` / `hardcopy()` work on the same file.
+existing `print_view()` / `hardcopy()` work on the same file. They show
+a sheet as it was saved: `hardcopy(execute=True)` and
+`python hardcopy.py`, which run a notebook fresh before exporting it,
+do not run a sheet, because a notebook shows no value for a definition
+and the results would be gone.
 
 While a page is printed, the bar of every root sign (and the shaft of
 every stretchy arrow and brace) is drawn only as long as its box.

@@ -317,7 +317,9 @@ ships two replacements that work out of the box:
 - **`hardcopy()`** — renders the notebook's last-saved state to a PDF
   next to it (`hardcopy('DSL_Manual.ipynb')` to pick another). It warns
   when the saved file has no outputs; `hardcopy(execute=True)` runs the
-  notebook fresh during export instead of relying on what was saved.
+  notebook fresh during export instead of relying on what was saved
+  (a sheet made in the [worksheet](docs/WORKSHEET.md#printing) is
+  exported as saved either way).
   PDF output needs a browser to print with, fetched once and again
   whenever Playwright has been upgraded:
 

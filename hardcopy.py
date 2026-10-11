@@ -39,6 +39,11 @@ cleared and ``ENGINEER_HEADLESS=1`` set so a batch build never pops up
 the symbol palette, and with inline matplotlib figures switched to SVG
 (vector plots in the PDFs; disable with ``--no-svg``).
 
+A sheet made in the worksheet (``python -m utils.worksheet``) is not
+executed: it is exported as saved.  The worksheet shows the value of
+every definition and saves that with the sheet; run as a notebook, the
+same cells show nothing for a definition, so the results would be gone.
+
 If ``qpdf`` is on PATH, produced PDFs are linearized in place
 (fast-web-view); disable with ``--no-qpdf``.
 
@@ -60,6 +65,8 @@ import shutil
 import subprocess
 import sys
 import time
+
+from utils.hardcopy_helpers import made_in_worksheet
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent
 DEFAULT_OUT = REPO_ROOT / "hardcopy"
@@ -205,7 +212,11 @@ def build_notebook(nb_path: pathlib.Path, opts: argparse.Namespace,
     tmp = REPO_ROOT / f"{TMP_PREFIX}{stem}.ipynb"
 
     try:
-        if opts.execute:
+        execute = opts.execute
+        if execute and made_in_worksheet(nb_path):
+            print(f"[{tag}] made in the worksheet: exported as saved, not executed")
+            execute = False
+        if execute:
             t0 = time.perf_counter()
             if opts.svg:
                 inject_svg_setup(nb_path, tmp)
