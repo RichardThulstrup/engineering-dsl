@@ -22,7 +22,7 @@ const state = {
   settings: { ...DEFAULTS },
   // How the user likes the page: kept by the server for this computer,
   // not in the sheet (and not in the browser, whose storage goes by port).
-  prefs: { grid: false, symbols: false },
+  prefs: { grid: false, symbols: false, markdown: false },
   dirty: false,
   kernel: "none",
   online: false,
@@ -41,6 +41,7 @@ let highlighter = makeHighlighter(null);
 const sheet = new Sheet({
   highlight: (text, caret) => highlighter(text, caret),
   settings: () => state.settings,
+  prefs: () => state.prefs,
   changed: ({ calc }) => {
     setDirty(true);
     if (calc) scheduleCalc();
@@ -471,6 +472,7 @@ function applySettings() {
     $(`[data-cmd="results-${mode}"]`).setAttribute("aria-checked", String(state.settings.showResults === mode));
   }
   $('.menu-list [data-cmd="toggle-grid"]').setAttribute("aria-checked", String(state.prefs.grid));
+  $('.menu-list [data-cmd="toggle-markdown"]').setAttribute("aria-checked", String(state.prefs.markdown));
 }
 
 /** A choice about the page itself: applied, and remembered for this computer. */
@@ -530,6 +532,7 @@ const COMMANDS = {
   "toggle-palette": () => togglePalette(),
   "search-symbols": searchSymbols,
   "toggle-grid": () => setPref("grid", !state.prefs.grid),
+  "toggle-markdown": () => setPref("markdown", !state.prefs.markdown),
   "results-auto": () => setResults("auto"),
   "results-all": () => setResults("all"),
   "results-explicit": () => setResults("explicit"),
@@ -549,7 +552,7 @@ const HELP = [
   ["The page", [
     ["click on empty paper", "put the cursor (the red cross) there"],
     ["just type", "a new math region at the cursor"],
-    ['"', "a new text region (markdown, with $math$)"],
+    ['"', "a new text region, written as it looks"],
     ["Enter", "finish the region; the cursor moves below it"],
     ["Shift+Enter", "another line in the same region"],
     ["Esc", "leave a math region unchanged / finish a text region"],
@@ -587,11 +590,22 @@ const HELP = [
     ["\\bode  \\plot  \\hex", "the library is also listed after a backslash; Tab or Enter picks an entry"],
   ]],
   ["Writing text", [
-    ['"', "a text region: markdown, with $…$ for a formula and $$…$$ for one on its own line"],
-    ["Formula tab (F2)", "a formula editor: a/b, ^, _ and \\names are drawn as you type; Enter puts the $…$ into the text"],
-    ["Table tab (F2)", "a table to write over"],
-    ["Tab / Shift+Tab", "in a table: the next / previous cell; after the last cell, a new row"],
+    ['"', "a text region.  It is written as it looks; the bar above it — or these keys — set the formatting"],
+    ["Ctrl+B   Ctrl+I   Ctrl+U", "bold, italic, underlined"],
+    ["Ctrl+Shift+X   Ctrl+,   Ctrl+.   Ctrl+<", "struck through, lowered (H₂O), raised (x²), code"],
+    ["Ctrl+Shift+1 … 6   Ctrl+Shift+0", "a heading of that level / ordinary text again"],
+    ["Ctrl+Shift+8   Ctrl+Shift+9   Ctrl+'", "a bulleted list, a numbered list, a quotation.  Tab moves an item in, Shift+Tab out"],
+    ["Ctrl+K", "a link on the selected text"],
+    ["#   -   1.   >   ```   **bold**   *italic*   $x^2$", "markdown's marks work as they are typed; Backspace takes one back"],
+    ["Shift+Enter", "a new line in the same paragraph; out of a block of code"],
+    ["Ctrl+V", "formatted text keeps the formatting markdown has; plain text is read as markdown (Ctrl+Shift+V: just as it is)"],
+    ["Ctrl+V on the page", "formatted text from another program becomes a text region; plain text, and code, is taken as typed (so is all with Ctrl+Shift+V)"],
+    ["Formula tab (F2)", "a formula editor: a/b, ^, _ and \\names are drawn as you type; Enter puts the formula into the text"],
+    ["click a formula   double click it", "select it (the Formula tab takes it up) / write its LaTeX where it stands"],
+    ["Table tab (F2)", "a table to write over.  Tab / Shift+Tab: the next / previous cell; after the last cell, a new row"],
+    ["↑ or ↓ out of a table the text begins or ends with", "room to write above or below it (so for a formula, a list, code)"],
     ["Esc", "finish the text region (Ctrl+Enter too)"],
+    ["Markdown (in the bar)   View ▸ Write text as Markdown", "go on with this text as its markdown / write all text that way"],
   ]],
 ];
 
@@ -655,8 +669,8 @@ function bindChrome() {
     refocus: () => sheet.refocus(),
     text: {
       insertMarkdown: (text, options) => sheet.insertMarkdown(text, options),
-      textCaret: () => sheet.textCaret(),
-      replaceText: (start, end, text) => sheet.replaceText(start, end, text),
+      formula: () => sheet.formula(),
+      putFormula: (latex, display, found, replace) => sheet.putFormula(latex, display, found, replace),
       refocus: () => sheet.refocus(),
     },
   });
@@ -665,7 +679,9 @@ function bindChrome() {
   loadLibrary().then(() => palette.refresh(), () => {});
 
   document.addEventListener("keydown", (event) => {
-    if (!$("#overlay").hidden) return;
+    // (A key the text being written has taken for itself — Ctrl+Shift+0 for
+    // plain text, say — is not the page's as well.)
+    if (!$("#overlay").hidden || event.defaultPrevented) return;
     const mod = event.ctrlKey || event.metaKey;
     const key = event.key.toLowerCase();
     let command = null;

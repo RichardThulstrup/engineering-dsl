@@ -19,10 +19,10 @@
 import { $, clamp, el, snap, toast, uid } from "./util.js";
 import { aligned, distributed, NEEDED } from "./arrange.js";
 import { SourceEditor } from "./editor.js";
+import { formatted, pastedText, RichEditor } from "./richtext.js";
 import { renderMarkdown } from "./markdown.js";
 import { notebookOutputs, outputsNode, renderItems, renderSource } from "./mathview.js";
 import { bringsFiles, carried, collect, KINDS_SAID, lonePicture, named, reference } from "./pictures.js";
-import { blockPadding } from "./textaids.js";
 
 // Page geometry — mirrored in css/worksheet.css.
 export const CONTENT_W = 680;          // A4 less 15 mm margins, at 96 dpi
@@ -64,6 +64,7 @@ export class Sheet {
    *   preview(region, source)  typeset this source (reply via setTypeset)
    *   highlight                (text, caret) => html
    *   settings()               {showResults}
+   *   prefs()                  {markdown}: text is written as its markdown, not as it looks
    */
   constructor(hooks) {
     this.hooks = hooks;
@@ -495,23 +496,60 @@ export class Sheet {
   // ====================================================================
   // editing
   // ====================================================================
-  edit(region, { line = null, fresh = false } = {}) {
+  /**
+   * Open a region for writing.  A math region is written as its text,
+   * with the caret at the end of source line `line`; a text region as it
+   * looks, with the caret at `point` of the window — unless text is to
+   * be written as markdown (prefs().markdown).
+   */
+  edit(region, { line = null, fresh = false, point = null } = {}) {
     this.commitEdit();
     this.select([]);
-    let caret;
-    if (line !== null) {
-      const lines = region.source.split("\n");
-      caret = lines.slice(0, line).join("\n").length;      // end of that source line
+    this.editing = { region, editor: null, original: region.source, fresh, preview: null, items: null };
+    region.el.classList.add("editing");
+    region.el.classList.remove("has-error", "stale");
+    region.drawn = null;                 // the editor takes the place of what was drawn
+    this.crossEl.hidden = true;
+    if (region.kind === "text" && !this.hooks.prefs().markdown) {
+      this.open(new RichEditor({
+        value: region.source,
+        pictures: region.attachments,
+        onCommit: (value, how) => this.finishEdit(value, how),
+        onInput: () => this.typing(""),
+        onSource: (text, why) => { this.asMarkdown(text); if (why) toast(why, "error"); },
+      })).focus(point);
+    } else {
+      let caret;
+      if (line !== null) {
+        const lines = region.source.split("\n");
+        caret = lines.slice(0, line).join("\n").length;      // end of that source line
+      }
+      this.asMarkdown(region.source, caret);
     }
-    const editor = new SourceEditor({
-      kind: region.kind,
-      value: region.source,
+    this.layout();
+    // (A text has its bar of tools above it: that is to be on the paper, and in view as well.)
+    this.editing.editor.place?.();
+    this.reveal(region.el, region.kind === "text" ? 30 + 44 * this.zoom : 30);
+    if (region.kind === "math" && region.source.trim()) this.typing(region.source);
+  }
+
+  /** Put an editor into the region being written. */
+  open(editor) {
+    this.editing.editor = editor;
+    this.editing.region.body.replaceChildren(editor.el);
+    return editor;
+  }
+
+  /** Write the open region as its text: a math region always, a text region as markdown. */
+  asMarkdown(value, caret) {
+    const editor = this.open(new SourceEditor({
+      kind: this.editing.region.kind,
+      value,
       highlight: this.hooks.highlight,
-      onCommit: (value, how) => this.finishEdit(value, how),
+      onCommit: (text, how) => this.finishEdit(text, how),
       onCancel: () => this.cancelEdit(),
-      onInput: (value) => this.typing(value),
-    });
-    this.editing = { region, editor, original: region.source, fresh, preview: null, items: null };
+      onInput: (text) => this.typing(text),
+    }));
     // Moving the caret to another line shows that line's statement.
     const follow = () => {
       const editing = this.editing;
@@ -519,15 +557,8 @@ export class Sheet {
     };
     editor.area.addEventListener("keyup", follow);
     editor.area.addEventListener("pointerup", follow);
-    region.el.classList.add("editing");
-    region.el.classList.remove("has-error", "stale");
-    region.drawn = null;                 // the editor takes the place of what was drawn
-    region.body.replaceChildren(editor.el);
-    this.crossEl.hidden = true;
     editor.focus(caret);
     this.layout();
-    this.reveal(region.el);
-    if (region.kind === "math" && region.source.trim()) this.typing(region.source);
   }
 
   /** Source as it will be kept: "x =" (Mathcad's way to ask for a value)
@@ -676,7 +707,7 @@ export class Sheet {
   insertText(text, caret = text.length) {
     if (this.editing) {
       this.editing.editor.insert(text, caret);
-      this.editing.editor.area.focus({ preventScroll: true });
+      this.editing.editor.refocus();
     } else {
       this.create("math", text, caret);
     }
@@ -688,36 +719,33 @@ export class Sheet {
    * set apart from the text around it by blank lines; `select`, as
    * [offset, length] in the text, is what is left selected to type over.
    */
-  insertMarkdown(text, { block = false, select = null } = {}) {
-    if (!this.editing || this.editing.region.kind !== "text") this.create("text");
-    const { editor } = this.editing;
-    const area = editor.area;
-    const { lead, tail } = block
-      ? blockPadding(area.value.slice(0, area.selectionStart), area.value.slice(area.selectionEnd))
-      : { lead: "", tail: "" };
-    if (select) editor.insert(lead + text + tail, lead.length + select[0], select[1]);
-    else editor.insert(lead + text + tail, lead.length + text.length);
-    area.focus({ preventScroll: true });
+  insertMarkdown(text, options = {}) {
+    if (!this.writing()) this.create("text");
+    this.editing.editor.insertMarkdown(text, options);
   }
 
-  /** The text region being written, and where its caret is — or null. */
-  textCaret() {
-    const editing = this.editing;
-    if (!editing || editing.region.kind !== "text") return null;
-    return { value: editing.editor.area.value, caret: editing.editor.area.selectionStart };
+  /** The editor of the text region being written — or null. */
+  writing() {
+    return this.editing && this.editing.region.kind === "text" ? this.editing.editor : null;
   }
 
-  /** Put `text` in place of [start, end) of the text region being written. */
-  replaceText(start, end, text) {
-    const { editor } = this.editing;
-    editor.area.setSelectionRange(start, end);
-    editor.insert(text);
-    editor.area.focus({ preventScroll: true });
+  /** In the text being written, the formula the caret is in (or that is selected) — or null. */
+  formula() {
+    return this.writing() ? this.writing().formula() : null;
+  }
+
+  /**
+   * A formula into the text being written (or into a new text region):
+   * in place of the one `found` when `replace`, beside it, or at the caret.
+   */
+  putFormula(latex, display, found, replace) {
+    if (this.writing()) this.writing().putFormula(latex, display, found, replace);
+    else this.insertMarkdown(display ? `$$${latex}$$` : `$${latex}$`, { block: display });
   }
 
   /** Give the keyboard back to the sheet: the open editor, or the cursor. */
   refocus() {
-    if (this.editing) this.editing.editor.area.focus({ preventScroll: true });
+    if (this.editing) this.editing.editor.refocus();
     else this.focus();
   }
 
@@ -765,9 +793,8 @@ export class Sheet {
     if (region && editing && editing.region === region) {
       for (const picture of made) {
         region.attachments[picture.name] = picture.bundle;
-        editing.editor.insert(reference(picture));
+        editing.editor.insertMarkdown(reference(picture));
       }
-      editing.editor.area.focus({ preventScroll: true });
       return;
     }
     // Onto the page: where the cursor was — or, asked for while a region
@@ -775,6 +802,23 @@ export class Sheet {
     this.commitEdit();
     const above = writing && this.regions.includes(writing) ? writing : null;
     this.addPictures(made, above ? { x: above.dx, y: Sheet.under(above) } : cursor);
+  }
+
+  /** Text pasted on the page as a text region of its own, at the cursor: left
+   *  selected, as a pasted picture is, and the cursor waits below it. */
+  addText({ text, pictures }) {
+    this.checkpoint();
+    this.freeze();
+    const region = new Region({ kind: "text", x: this.cross.x, y: this.cross.y, w: Math.max(160, CONTENT_W - this.cross.x),
+                                source: text, attachments: pictures });
+    region.rank = -(++this.rankCounter);
+    this.regions.push(region);
+    this.mount(region);
+    this.layout();
+    this.placeCross(region.dx, Sheet.under(region), { scroll: false });
+    this.select([region]);
+    this.reveal(region.el);
+    this.hooks.changed({ calc: false });
   }
 
   /** New pictures at a place on the page, one under the other and at
@@ -921,6 +965,8 @@ export class Sheet {
     const y0 = Math.min(...group.map((r) => r.dy));
     return {
       text: group.map((r) => r.source).join("\n\n"),
+      // For another program: text regions as formatted text, math regions as their text.
+      html: group.map((r) => (r.kind === "text" ? formatted(r.source, r.attachments) : el("pre", { text: r.source }).outerHTML)).join("\n"),
       json: JSON.stringify(group.map((r) => (
         { kind: r.kind, source: r.source, w: r.w, x: r.dx - x0, y: r.dy - y0,
           attachments: r.kind === "text" ? named(r.source, r.attachments) : undefined }))),
@@ -980,6 +1026,7 @@ export class Sheet {
         const clip = this.clip();
         if (!clip) return;
         event.clipboardData.setData("text/plain", clip.text);
+        event.clipboardData.setData("text/html", clip.html);
         event.clipboardData.setData("application/x-edsl-regions", clip.json);
         this.lastClip = clip;
         event.preventDefault();
@@ -1016,6 +1063,8 @@ export class Sheet {
     const data = event.clipboardData;
     const editing = this.editing;
     const text = data.getData("text/plain");
+    const asTyped = this.shiftPaste;                 // Ctrl+Shift+V: the words, whatever came with them
+    this.shiftPaste = false;
     if (!editing) {
       // Regions travel in a format of their own; a browser that will not
       // carry it still hands back the plain text we put beside it.
@@ -1031,6 +1080,18 @@ export class Sheet {
     // beside it (and words that are an SVG drawing are a picture); into a
     // text being written it goes only when there are no words to paste.
     const offer = carried(data);
+    if (!offer && !editing && !asTyped) {
+      // Formatted text from another program — a word processor, a web
+      // page — is text, whatever its words would be as a calculation: a
+      // text region of its own.  (Not code that was copied in an editor,
+      // which is formatted as well: that is taken as it is typed.)
+      const words = pastedText(data.getData("text/html"));
+      if (words) {
+        event.preventDefault();
+        this.addText(words);
+        return;
+      }
+    }
     if (!offer || (editing && text)) return;         // plain text arrives as an input event
     event.preventDefault();
     if (editing && editing.region.kind !== "text") {
@@ -1140,7 +1201,7 @@ export class Sheet {
         && event.timeStamp - this.clicked.at < 500;
       this.clicked = { region: press.region, at: event.timeStamp };
       if (press.grip || (this.isPicture(press.region) && !again)) { this.select([press.region]); this.focus(); }
-      else this.edit(press.region, { line: press.line });
+      else this.edit(press.region, { line: press.line, point: { x: event.clientX, y: event.clientY } });
       return;
     }
     const dx = point.x - press.start.x, dy = point.y - press.start.y;
@@ -1187,6 +1248,7 @@ export class Sheet {
     if (key === "Home" && !mod) { event.preventDefault(); this.placeCross(0, this.cross.y); return; }
     if (key === "Tab") { event.preventDefault(); this.step(event.shiftKey ? -1 : 1); return; }
     if (mod && key.toLowerCase() === "a") { event.preventDefault(); this.selectAll(); }
+    if (mod && key.toLowerCase() === "v") this.shiftPaste = event.shiftKey;      // (the paste that follows asks)
   }
 
   /** Tab: edit the next (or previous) region in reading order — pictures are passed by. */

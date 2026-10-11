@@ -113,6 +113,96 @@ const started = Date.now();
 for (const source of sources) renderMarkdown(source);
 assert.ok(Date.now() - started < 5000, "markdown rendering is too slow");
 
+// ---- markdown: the few tags that say what it cannot --------------------------
+// Underlined, lowered and raised text has no mark in markdown: it is kept
+// as HTML's own tag — those tags, bare, and no others.
+assert.equal(md("H<sub>2</sub>O, x<sup>2</sup>, <u>under</u>, <b>bold</b>, <i>slanted</i>, <s>struck</s>"),
+             "<p>H<sub>2</sub>O, x<sup>2</sup>, <u>under</u>, <strong>bold</strong>, <em>slanted</em>, <del>struck</del></p>");
+assert.equal(md("<u>a **b** $x$</u>"), '<p><u>a <strong>b</strong> <span class="tex">[math:x]</span></u></p>');
+const tagged = renderMarkdown('<u onclick="x">a</u> <font color="red">c</font> <U>d</U> <u>e <sub>f <span>g</span> <style>h</style>');
+assert.equal(["u", "sub", "font", "span", "style"].map((tag) => tagged.find(tag).length).join(), "0,0,0,0,0");
+assert.ok(tagged.html.includes("&lt;u onclick") && tagged.html.includes("&lt;style&gt;"));        // shown as text
+
+// ---- markdown, read and written again -------------------------------------
+// The formatted editor writes a text back as markdown (mdtree.js).  What
+// is written must read as what was shown: for everything the reading
+// knows — and for every text cell in the repo's notebooks.
+const { address, parseMarkdown, sameReading, written, writeMarkdown } = await import(js("mdtree.js"));
+const rewritten = (source) => writeMarkdown(parseMarkdown(source));
+const KNOWN = [
+  "# Title\n\n## Second ##\n\nplain *emph* **strong** `code` ~~gone~~ <u>u</u> H<sub>2</sub>O x<sup>2</sup>",
+  "The **SOT-223 and *more*** package, __bold__ and _slanted_, a\\*b, 2\\*3\\*4, \\$5 and \\$6, \\<u>not\\</u>",
+  "below $125\\,^\\circ\\mathrm{C}$ and $$\\frac{a}{b}$$ in the line\n\n$$\nx = 1\n$$\n\n$$y$$",
+  "- a\n- b\n  - nested\n    1. deeper\n- c\n  wrapped\n\n1. one\n2. two\n\n* star\n+ plus",
+  "| a | b | c |\n|:--|:-:|--:|\n| 1 | `x\\|y` | **3** |\n| only |",
+  "```python\nx = 1\n\n  y = 2\n```\n\n~~~\ntilde\n~~~\n\n````\n```\n````",
+  "> quoted **text**\n> - with a list\n>\n> and more\n\n---\n\nafter the rule",
+  "[link](https://example.com/a_(b%29) and https://example.com/bare, ![pic](attachment:a%20b.png) ![](https://example.com/p.png)",
+  "line one  \nline two\\\nline three<br>line four",
+  "1\\. not a list\n\\# not a heading\n\\- not an item\n\\> not a quotation\n\\--- not a rule",
+];
+for (const source of [...KNOWN, ...sources]) {
+  const again = rewritten(source);
+  assert.ok(again.ok && sameReading(parseMarkdown(again.text), parseMarkdown(source)), `written anew, this reads differently:\n${source}`);
+  assert.equal(rewritten(again.text).text, again.text, `written twice, this is spelled two ways:\n${source}`);
+}
+assert.ok(!sameReading(parseMarkdown("a **b** c"), parseMarkdown("a *b* c")));
+assert.ok(!sameReading(parseMarkdown("- a\n- b"), parseMarkdown("1. a\n2. b")));
+assert.ok(sameReading(parseMarkdown("a  **b**\nc"), parseMarkdown("a __b__ c")));          // however it is spelled and spaced
+
+// How it is spelled.  Plainly, where nobody would misread it …
+const one = (block) => written(block).text;
+const p = (...c) => ({ t: "p", c });
+const text = (v) => ({ t: "text", v });
+assert.equal(one(p(text("V_out is 5 V, a_b_c, 100 % (about) [1]"))), "V_out is 5 V, a_b_c, 100 % (about) [1]");
+// … a backslash doubled where it would be read as holding a mark back …
+assert.equal(one(p(text("C:\\new\\*.txt and a_b_c, \\alpha"))), "C:\\new\\\\*.txt and a_b_c, \\alpha");
+// … with a backslash before whatever would be read as a mark …
+assert.equal(one(p(text("2*3*4 and $5 or $6, a <u>tag</u>"))), "2\\*3\\*4 and \\$5 or \\$6, a \\<u>tag\\</u>");
+// … and with tags where marks touch (markdown's own would run together).
+assert.equal(one(p({ t: "strong", c: [text("a")] }, { t: "em", c: [text("b")] })), "<b>a</b><i>b</i>");
+// Blanks at the ends of what is marked go outside the mark.
+assert.equal(one(p(text("a"), { t: "strong", c: [text(" b ")] }, text("c"))), "a **b** c");
+// A line of a paragraph that would begin something else is held back.
+for (const [line, held] of [["1. not a list", "1\\. not a list"], ["# not a heading", "\\# not a heading"],
+                            ["- not an item", "\\- not an item"], ["> not a quotation", "\\> not a quotation"],
+                            ["--- not a rule", "--- not a rule"], ["---", "\\---"]]) {
+  assert.equal(one(p(text(line))), held);
+}
+// An address is as markdown can hold it between its brackets.
+assert.equal(address(" https://example.org/a b(c) "), "https://example.org/a%20b(c%29");
+assert.equal(one(p({ t: "link", href: "https://example.org/a%20b(c%29", c: [text("a ] b")] })),
+             "[a \\] b](https://example.org/a%20b(c%29)");
+assert.equal(one(p({ t: "img", src: "attachment:my%20plot.png", alt: "a [1]" })), "![a \\[1\\]](attachment:my%20plot.png)");
+// A fence is longer than any in the code; a table holds its pipes back and
+// sets its columns by its rule; a list numbers its items and indents the
+// lists within them.
+assert.equal(one({ t: "code", v: "```\nx\n```", info: "python" }), "````python\n```\nx\n```\n````");
+assert.equal(one({ t: "table", align: [null, "right"], head: [[text("a|b")], [text("n")]],
+                   rows: [[[text("x")], [text("1")]], [[text("y")]]] }),
+             "| a\\|b | n |\n| --- | --: |\n| x | 1 |\n| y |  |");
+assert.equal(one({ t: "list", ordered: true, items: [
+  { c: [text("one"), { t: "list", ordered: false, items: [{ c: [text("in")] }] }] }, { c: [text("two")] }] }),
+             "1. one\n   - in\n2. two");
+// A new line within a paragraph; within a heading, which is one line; a
+// heading that ends in a hash (hashes there are read as closing it).
+assert.equal(one(p(text("a"), { t: "br" }, text("b"))), "a\\\nb");
+assert.equal(one({ t: "h", n: 2, c: [text("a"), { t: "br" }, text("b")] }), "## a<br>b");
+assert.equal(one({ t: "h", n: 2, c: [text("C#")] }), "## C# ##");
+assert.equal(one(p(text("so "), { t: "math", v: "x^2", block: false }, text(" and "), { t: "math", v: "y", block: true })),
+             "so $x^2$ and $$y$$");
+// What cannot be written so that it reads the same is said to be so.
+assert.equal(written(p({ t: "math", v: "a$b", block: false })).ok, false);
+
+// A block nobody touched is written back as it stood, letter for letter,
+// and blocks that stood together stay as far apart as they were.
+const odd = "__bold__ and _it_\n* a\n* b\n\n\n\nLast   line";
+const blocks = parseMarkdown(odd);
+const stood = new Map(blocks.map((block) => [block, { from: block.from, to: block.to }]));
+assert.equal(writeMarkdown(blocks, stood, odd).text, odd);
+stood.delete(blocks[1]);                                       // the list was changed
+assert.equal(writeMarkdown(blocks, stood, odd).text, "__bold__ and _it_\n\n- a\n- b\n\nLast   line");
+
 // ---- pictures ---------------------------------------------------------------
 // A text shows the pictures attached to its region — a drawing before the
 // bitmap copy kept beside it for JupyterLab — whatever their names look like.
@@ -134,6 +224,7 @@ const everywhere = renderMarkdown([
 assert.deepEqual(["h1", "em", "del", "strong", "li", "th", "td", "blockquote"].map((tag) => everywhere.find(tag)
   .filter((node) => node.find("img").length).length), [1, 1, 1, 1, 2, 1, 1, 1]);
 assert.equal(everywhere.find("img").length, 10);
+assert.equal(renderMarkdown("[![a](attachment:a.png)](https://example.com)", attached).find("a")[0].find("img").length, 1);
 
 // What is no picture is not shown as one: a name with nothing attached, an
 // attachment of another kind, data that is not base64, a name every object has.
@@ -424,5 +515,102 @@ for (const formula of FORMULAS) {
 }
 assert.ok(drawings >= 30, `only ${drawings} long drawings were checked`);
 assert.equal(shortenStroke("M95,702c-2.7,0,-7.17,-2.7,-13.5,-8H400000v40H845z", 400000), "M95,702c-2.7,0,-7.17,-2.7,-13.5,-8H400000v40H845z");
+
+// ---- a text as the formatted editor holds it --------------------------------
+// The editor's document (richdoc.js) is made from a region's markdown and
+// written back as markdown.  It asks for ProseMirror by name, as the page
+// does through its import map: every name there must be a file that is there.
+const page = fs.readFileSync(path.join(here, "..", "utils", "worksheet", "static", "index.html"), "utf8");
+const imports = JSON.parse(/<script type="importmap">([\s\S]*?)<\/script>/.exec(page)[1]).imports;
+const vendored = (name) => path.join(here, "..", "utils", "worksheet", imports[name].replace(/^\//, ""));
+assert.equal(Object.keys(imports).length, 13);
+for (const name of Object.keys(imports)) {
+  assert.ok(fs.existsSync(vendored(name)), `${name} is not where the page looks for it`);
+  assert.ok(fs.existsSync(path.join(path.dirname(vendored(name)), `LICENSE-${name}.txt`)), `${name} has no licence beside it`);
+}
+const { registerHooks } = await import("node:module");
+if (!registerHooks) console.log("(richdoc.js is not checked here: this node cannot be told where modules are)");
+else {
+  registerHooks({
+    resolve: (specifier, context, next) => (specifier in imports
+      ? { url: pathToFileURL(vendored(specifier)).href, shortCircuit: true, format: "module" } : next(specifier, context)),
+  });
+  // (ProseMirror asks the browser what kind it is when it is loaded: the
+  // stand-in document above is none it would know.)
+  const standIn = globalThis.document;
+  delete globalThis.document;
+  const rich = await import(js("richdoc.js"));
+  const { Fragment, Slice } = await import("prosemirror-model");
+  globalThis.document = standIn;
+  const { schema } = rich;
+  const N = schema.nodes;
+
+  // Every text goes into the document — one its schema allows — and comes
+  // back: untouched, as it stood; written anew, reading the same.
+  for (const source of [...KNOWN, ...sources]) {
+    const { doc, kept } = rich.toDoc(source);
+    doc.check();
+    const tidy = (written_) => written_.replace(/\r\n?/g, "\n").replace(/^\s*\n/, "").replace(/\s+$/, "");
+    assert.equal(tidy(rich.toMarkdown(doc, kept, source).text), tidy(source));
+    const anew = rich.toMarkdown(doc);
+    assert.ok(anew.ok && sameReading(parseMarkdown(anew.text), parseMarkdown(source)), `through the editor, this reads differently:\n${source}`);
+  }
+  // A block changed and changed back — another node that says the same — is as it stood.
+  const spelled = "__bold__ text\n\n* item";
+  const first = rich.toDoc(spelled);
+  const retyped = N.doc.create(null, [N.paragraph.create(null, first.doc.child(0).content), first.doc.child(1)]);
+  assert.ok(retyped.child(0) !== first.doc.child(0));
+  assert.equal(rich.toMarkdown(retyped, first.kept, spelled).text, spelled);
+
+  // What only the editor can make is written as markdown can say it.
+  const say = (...nodes) => {
+    const made = rich.toMarkdown(N.doc.create(null, nodes));
+    assert.ok(made.ok, `this does not read as what is shown: ${made.text}`);
+    return made.text;
+  };
+  const para = (...content) => N.paragraph.create(null, content);
+  const marked = (words, ...marks) => schema.text(words, marks.map((mark) => (typeof mark === "string" ? schema.marks[mark].create() : mark)));
+  assert.equal(say(para(marked("a`b`c", "code"))), "a\\`b\\`c");                            // code cannot hold a backtick
+  assert.equal(say(para(marked("x = 1", "code"))), "`x = 1`");
+  assert.equal(say(para(marked("x", "strong", "em", "u"))), "***<u>x</u>***");
+  assert.equal(say(para(schema.text("see https://example.org/x."))), "see https://example.org/x.");
+  const there = schema.marks.link.create({ href: "https://example.org/x" });
+  assert.equal(say(para(marked("https://example.org/x", there))), "https://example.org/x");  // a link that shows its own address
+  assert.equal(say(para(marked("there", there))), "[there](https://example.org/x)");
+  // A formula on a line of its own stands on a line of its own; what is empty is nothing.
+  assert.equal(say(para(N.math.create({ tex: "x", big: true }), schema.text(" then"))), "$$x$$\n\nthen");
+  assert.equal(say(para(), N.heading.create({ level: 2 }), para(schema.text("x")), N.math_block.create({ tex: " " }), para()), "x");
+  assert.equal(say(N.blockquote.create(null, para()), N.bullet_list.create(null, N.list_item.create(null, para()))), "");
+
+  // Text brought in line by line (pasted) keeps its lines.
+  const brought = (source, options) => say(...rich.blockContent(source, options));
+  assert.equal(brought("a\nb *c*\n\n- d\n  e"), "a b *c*\n\n- d e");
+  assert.equal(brought("a\nb *c*\n\n- d\n  e\n\n> f\n> g", { lines: true }), "a\\\nb *c*\n\n- d e\n\n> f\\\n> g");
+
+  // A piece cut out of a text (what is copied), as markdown: the bare text
+  // from inside a block, code as it is, lists and tables as what they are.
+  const { doc } = rich.toDoc("# Head **bold**\n\n- one\n- two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```\nx*y*z\n```");
+  const find = (words) => {
+    let at = -1;
+    doc.descendants((node, pos) => { if (at < 0 && node.isText && node.text.includes(words)) at = pos + node.text.indexOf(words); });
+    return at;
+  };
+  const cut = (from, to) => rich.sliceMarkdown(doc.slice(from, to, true));       // (cut as a selection is: with all around it)
+  assert.equal(cut(find("ead"), find("bold") + 2), "ead **bo**");
+  assert.equal(cut(find("ne"), find("two") + 2), "- ne\n- tw");
+  assert.equal(rich.sliceMarkdown(doc.slice(find("ne"), find("two") + 2)), "- ne\n- tw");       // (or with no more than it needs)
+  assert.equal(cut(find("x*y"), find("x*y") + 5), "x*y*z");
+  assert.equal(cut(0, doc.content.size), "# Head **bold**\n\n- one\n- two\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n```\nx*y*z\n```");
+  const row = doc.child(2).child(1);
+  assert.equal(rich.sliceMarkdown(new Slice(Fragment.from(row), 1, 1)), "| 1 | 2 |\n| --- | --- |");      // cells picked in a table
+  assert.equal(rich.sliceMarkdown(new Slice(Fragment.from(N.table_row.create(null, row.child(0))), 1, 1)), "1");
+  assert.equal(rich.sliceMarkdown(Slice.empty), "");
+
+  // A link goes where it is safe to go; a picture is shown from where one may be shown.
+  assert.deepEqual(rich.linkTo(" https://example.org/a b(c) "), { href: "https://example.org/a%20b(c%29" });
+  for (const bad of ["javascript:alert(1)", "data:text/html,x", "vbscript:x", "file:///C:/x", "", null]) assert.equal(rich.linkTo(bad), false);
+  assert.ok(rich.pictureAllowed("attachment:a.png") && rich.pictureAllowed("https://example.org/a.png"));
+  assert.ok(!rich.pictureAllowed("javascript:alert(1)") && !rich.pictureAllowed("file:///C:/a.png"));
+}
 
 console.log("FRONTEND_OK");

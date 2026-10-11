@@ -10,7 +10,7 @@
 import { el, ZWSP } from "./util.js";
 import { complete, GLYPH, SUPERSCRIPT, SUPERSCRIPT_CHARS } from "./symbols.js";
 import { nextSlot, slot, snippets } from "./library.js";
-import { tableCell, tableRow } from "./textaids.js";
+import { blockPadding, formulaAt, tableCell, tableRow } from "./textaids.js";
 
 const LIST = 12;          // rows in the backslash list
 
@@ -107,6 +107,42 @@ export class SourceEditor {
     this.area.setSelectionRange(a + caret, a + caret + select);
     this.superscripting = false;
     this.changed();
+  }
+
+  /** The keyboard, back to where the caret is. */
+  refocus() {
+    this.area.focus({ preventScroll: true });
+  }
+
+  /**
+   * Markdown at the caret of a text.  A `block` (a table, a displayed
+   * formula) is set apart from the text around it by blank lines;
+   * `select`, as [offset, length] in the markdown, is what is left
+   * selected to type over.
+   */
+  insertMarkdown(text, { block = false, select = null } = {}) {
+    const area = this.area;
+    const { lead, tail } = block
+      ? blockPadding(area.value.slice(0, area.selectionStart), area.value.slice(area.selectionEnd))
+      : { lead: "", tail: "" };
+    if (select) this.insert(lead + text + tail, lead.length + select[0], select[1]);
+    else this.insert(lead + text + tail, lead.length + text.length);
+    this.refocus();
+  }
+
+  /** The formula the caret is in: {start, end, latex, display} — or null. */
+  formula() {
+    return formulaAt(this.area.value, this.area.selectionStart);
+  }
+
+  /** Put a formula in place of the one `found` (when `replace`), beside it, or at the caret. */
+  putFormula(latex, display, found, replace) {
+    const formula = display ? `$$${latex}$$` : `$${latex}$`;
+    if (!found) { this.insertMarkdown(formula, { block: display }); return; }
+    const [start, text] = replace ? [found.start, formula] : [found.end, " " + formula];      // beside it, never inside
+    this.area.setSelectionRange(start, found.end);
+    this.insert(text);
+    this.refocus();
   }
 
   refresh() {

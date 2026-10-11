@@ -20,6 +20,20 @@ def test_the_labextension_and_the_kernel_are_installed_with_the_package():
     assert all((ROOT / source).is_file() for sources in placed.values() for source in sources)
 
 
+def test_every_file_of_the_worksheets_page_is_installed_with_the_package():
+    # The page is files: scripts, styles, the libraries it brings along.  One
+    # in a folder that the package's data does not name would be missing from
+    # every install but an editable one.
+    named = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["setuptools"]["package-data"]["utils.worksheet"]
+    assert all(pattern.endswith("/*") for pattern in named)
+    folders = {pattern[:-2] for pattern in named}
+    package = ROOT / "utils" / "worksheet"
+    files = [path.relative_to(package) for path in (package / "static").rglob("*") if path.is_file()]
+    assert len(files) > 50                                      # (the search itself finds them)
+    assert sorted(path.as_posix() for path in files if path.parent.as_posix() not in folders) == []
+    assert all((package / folder).is_dir() for folder in folders)              # and no folder is named that is not there
+
+
 def test_the_icon_file_holds_a_picture_for_every_size_windows_asks_for():
     # static/icon.ico is made by utils.worksheet.make_icon; a shortcut, the
     # page and the app window all show it.

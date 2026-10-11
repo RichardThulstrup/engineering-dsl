@@ -289,6 +289,43 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .md .katex-display { margin: 6px 0; }
 .md .empty { color: #a3a8ae; font-style: italic; }
 
+/* A text region being written as it looks (richtext.js): the text is
+   set as it is when shown; above the region, the bar of formatting
+   tools. */
+.rich { position: relative; }
+.rich .ProseMirror { outline: none; min-height: 21px; }
+.rich .formula { cursor: pointer; border-radius: 3px; }
+.rich .formula:hover { background: var(--accent-soft); }
+.rich .ProseMirror-selectednode { outline: 2px solid var(--accent); }
+.rich div.formula.ProseMirror-selectednode { outline-offset: 3px; }
+.rich .tex-source { font: 12.5px var(--mono); padding: 1px 4px; border: 1px solid var(--accent); border-radius: 3px; outline: none; }
+.rich td, .rich th { position: relative; min-width: 30px; }
+.rich .selectedCell::after { content: ""; position: absolute; inset: 0; background: rgba(31, 95, 191, .12); pointer-events: none; }
+.formatbar {
+  position: absolute; left: -6px; bottom: calc(100% + 8px); z-index: 45;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 2px; width: max-content; max-width: 640px; padding: 3px 5px;
+  background: #fff; border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, .14);
+  font: 13px/1 var(--ui); white-space: nowrap; user-select: none; cursor: default;
+}
+.formatbar .fmt {
+  min-width: 24px; height: 24px; padding: 0 5px; border: 1px solid transparent; border-radius: 4px;
+  background: none; cursor: pointer;
+}
+.formatbar .fmt:hover { background: #e9ecef; }
+.formatbar .fmt.on { background: var(--accent-soft); border-color: #b9cdf0; }
+.formatbar .strong { font-weight: 700; }
+.formatbar .em { font-style: italic; font-family: Georgia, "Times New Roman", serif; }
+.formatbar .u { text-decoration: underline; }
+.formatbar .del { text-decoration: line-through; }
+.formatbar .code { font: 11px var(--mono); }
+.formatbar .gap { width: 1px; height: 16px; margin: 0 4px; background: var(--line); }
+.formatbar select { height: 24px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+.formatbar .link {
+  flex-basis: 100%; height: 24px; margin-top: 3px; padding: 0 6px;
+  border: 1px solid var(--accent); border-radius: 4px; outline: none;
+}
+.formatbar .link.bad { border-color: var(--danger); background: var(--danger-soft); }
+
 /* ---- editors ---------------------------------------------------------- */
 .ed { display: inline-grid; position: relative; vertical-align: top; }
 .ed > * { grid-area: 1 / 1; margin: 0; padding: 2px 0; border: 0; min-width: 12px; }

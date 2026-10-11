@@ -59,7 +59,7 @@ The white area is an A4 page. A red cross marks the cursor.
 |---|---|
 | click on empty paper | the cursor goes there |
 | just type | a math region starts at the cursor |
-| `"` | a text region starts (markdown, with `$math$`) |
+| `"` | a text region starts; it is written as it looks — see [Writing text](#writing-text) |
 | **Enter** | the region is finished; the cursor moves below it |
 | **Shift+Enter** | another line in the same region |
 | **Esc** | leave a math region as it was / finish a text region |
@@ -71,6 +71,7 @@ The white area is an A4 page. A red cross marks the cursor.
 | **Ctrl+Z** / **Ctrl+Y** | undo / redo |
 | drag the right edge of a text region | change its width |
 | **Ctrl+V** with a picture on the clipboard | the picture is put at the cursor — see [Pictures](#pictures) |
+| **Ctrl+V** with formatted text on the clipboard | it becomes a text region at the cursor — see [Writing text](#writing-text) |
 
 A region that grows pushes the regions under it down rather than
 overlap them, and a region that fits on a page is never split across
@@ -97,9 +98,9 @@ calculated in the order they are read, so arranging can change that
 order; the sheet then recalculates.
 
 *View → Grid* shows a dotted grid to place regions by (it is never
-printed). Whether it is shown, and whether the symbol panel is open,
-is remembered on this computer for every sheet — it is your way of
-working, not part of a worksheet.
+printed). Whether it is shown, whether the symbol panel is open, and
+whether text is written as its markdown, is remembered on this computer
+for every sheet — it is your way of working, not part of a worksheet.
 
 A notebook that was never laid out — any existing notebook — opens with
 its cells one under the other and keeps flowing like that, growing and
@@ -263,6 +264,66 @@ that says what it is for.
 The entries are the palette's, not a copy to keep up by hand: see
 *For developers*.
 
+### Writing text
+
+A text region is written as it looks: what is bold is bold while you
+type it, a list is a list, a formula is drawn. A bar above the region
+has the formatting, and the keys do the same.
+
+| Do this | and this happens |
+|---|---|
+| **Ctrl+B**, **Ctrl+I**, **Ctrl+U** | bold, italic, underlined — what is selected, or what is typed next |
+| **Ctrl+Shift+X**, **Ctrl+,**, **Ctrl+.**, **Ctrl+<** | struck through, lowered (H₂O), raised (x²), code |
+| the list in the bar, or **Ctrl+Shift+1** … **6** and **Ctrl+Shift+0** | a heading of that level, or ordinary text again (Backspace at the start of a heading does that, too) |
+| **Ctrl+Shift+8**, **Ctrl+Shift+9**, **Ctrl+'** | a bulleted list, a numbered list, a quotation — and out of it again. **Enter** goes on with the next item, and an empty item ends the list; **Tab** and **Shift+Tab** move an item in and out |
+| **Ctrl+K** | a field for the address the selected text is to link to. With the caret in a link it shows where the link goes; emptied, it takes the link off |
+| **Shift+Enter** | a new line in the same paragraph. (In code, where Enter is a new line, it leaves the code) |
+| **↑** or **↓** out of a table, a formula, a list or code that the text begins or ends with | a paragraph is made there, to write above or below it |
+| **Esc**, **Ctrl+Enter**, or a click elsewhere | the text is finished |
+
+Markdown's own marks work as they are typed: `# ` begins a heading
+(`## ` a smaller one), `- ` a list, `1. ` a numbered list, `> ` a
+quotation and three backticks a block of code; `**bold**`, `*italic*`,
+`~~struck~~` and `` `code` `` format what is between them, `$x^2$`
+becomes a formula and `$$…$$` one on a line of its own. Backspace
+right after takes such a mark back, and the characters stand as typed.
+
+**Copy and paste.** Formatted text pasted from another program — a word
+processor, a web page, a mail — keeps what a text region has: headings,
+bold, italic, underlined, struck, lowered and raised text, code, links,
+lists, tables, and pictures that come with it as data (they are
+attached to the region, like any picture). Colours, fonts and sizes
+stay behind, a table's first row becomes its header, and cells that
+span several become single cells. Nothing that is pasted is ever run,
+and a link that would run something is no link. Plain text is read as
+the markdown it may be, each of its lines a line; **Ctrl+Shift+V** puts
+it in exactly as it is. What is copied out of a text goes on the
+clipboard twice: as formatted text for programs that take that (a
+formula as its LaTeX between dollars, a picture as what it shows), and
+as markdown for those that take plain text.
+
+**Pasted on the page** — with the cursor on the paper, not in a text —
+formatted text becomes a text region of its own: left selected, as a
+pasted picture is, with the cursor below it. Text without formatting
+is taken as it is typed, a math region: nothing on the clipboard says
+whether it is prose or a calculation, so start a text region with `"`
+first when it is prose. Code copied in an editor of programs is
+formatted as well — in a `<pre>`, or with its line ends kept by its
+style — and is taken as typed, too. So is anything pasted with
+**Ctrl+Shift+V**.
+
+**In the file a text region is markdown**, as in every notebook. What
+markdown has no mark for is kept as the HTML tag for it — `<u>`,
+`<sub>`, `<sup>` — which JupyterLab and `hardcopy()` show as the
+worksheet does. A paragraph, list or table that you do not change is
+written back exactly as it stood, so working on one part of a text
+that someone spelled by hand does not respell the rest.
+
+To see or write the markdown itself, press **Markdown** in the bar:
+the text goes on as its markdown, in the editor math regions have.
+*View → Write text as Markdown* makes that the way every text region
+opens — on this computer, like the grid, until you turn it off.
+
 ### Formulas and tables in text
 
 The panel's last two tabs are the palette's two tools for text, and
@@ -276,17 +337,22 @@ shown underneath.
 
 | Do this | and this happens |
 |---|---|
-| **Enter** (or *Insert in the line*) | the formula goes into the text as `$…$`, and you go on writing |
-| **Shift+Enter** (or *Insert on its own line*) | it goes in as a displayed formula, `$$…$$`, set apart by blank lines |
-| put the caret inside a formula of the text, then click the editor | the editor takes that formula up; Enter puts the changed one in its place |
+| **Enter** (or *Insert in the line*) | the formula goes into the text, drawn, and you go on writing after it |
+| **Shift+Enter** (or *Insert on its own line*) | it goes in on a line of its own, and you go on writing below it |
+| click a formula in the text, then click the editor | the editor takes that formula up; Enter puts the changed one in its place — or, with the other button, as the other kind |
+| double-click a formula in the text (or **Enter** when it is selected) | its LaTeX opens where it stands; Enter puts it back, Esc leaves it as it was |
 | tick *On-screen keyboard* | MathLive's keyboard of symbols is shown while the editor has the focus |
 
 **Table** makes a table to write over: choose the number of columns
 and rows and how the columns are set (left, centred, right), and
 *Insert the table*. Its first header is selected, ready to be typed
 over. In any table of a text region, **Tab** goes to the next cell
-(Shift+Tab to the previous one) with its text selected, and after the
-last cell adds a row. Outside a table, Tab indents.
+(Shift+Tab to the previous one) and after the last cell adds a row;
+**↑** and **↓** go to the cell above and below.
+
+With text written as its markdown, the tools write markdown: `$…$`,
+`$$…$$` set apart by blank lines, and a table of pipes and dashes in
+which Tab goes from cell to cell as well.
 
 The built-up form is drawn from the code that will actually run, so it
 shows how your input was understood: `12 V / 3 A` appears as one
@@ -307,6 +373,8 @@ A worksheet is saved as `.ipynb`:
   visible in JupyterLab and on GitHub without running anything (run
   there, a cell shows what a notebook shows — nothing, for a
   definition);
+- a text region is a markdown cell, formatted as markdown formats
+  (with `<u>`, `<sub>` and `<sup>` for what markdown has no mark for);
 - a picture is a text cell with the picture attached to it; pictures
   that a notebook brings along (pasted in JupyterLab, say) are shown,
   and one that no text names any more is not saved again;
@@ -356,14 +424,18 @@ the folder the server was started in.
 
 ## Limits
 
-- Editing is by source text with a live typeset preview; the built-up
-  formula itself is not edited in place.
+- A math region is edited as source text with a live typeset preview;
+  the built-up formula itself is not edited in place.
+- A text region holds what markdown can say. There are no colours,
+  fonts or sizes, no cells that span several, and a table's first row
+  is always its header.
 - A picture is part of the sheet's file. One that a text only points to
   — `![plot](figures/plot.png)`, a file beside the notebook — is not
   shown (the text is kept as it is).
-- A picture cannot be cropped or turned, and copying one puts its
-  region on the clipboard, for this or another sheet — not a picture
-  that another program could paste.
+- A picture cannot be cropped or turned. Copying one puts its region
+  on the clipboard, for this or another sheet; another program gets
+  formatted text with the picture in it, which not every program takes
+  as a picture.
 - Interactive widgets (`ipywidgets`) and top-level `await` are not
   supported; output is text, typeset math, images and tables.
 - One sheet per browser tab; each has its own kernel. A second tab on
@@ -380,7 +452,7 @@ the folder the server was started in.
 | `utils/worksheet/fingerprint.py` | "same value as last time?" for the reuse rules |
 | `utils/worksheet/mathrender.py` | transformed-Python AST → LaTeX |
 | `utils/worksheet/document.py` | `.ipynb` ⇄ worksheet document, trust |
-| `utils/worksheet/prefs.py` | what the user chose for the page (grid, symbol panel): a file in Jupyter's data folder, because a browser keeps its own storage per port |
+| `utils/worksheet/prefs.py` | what the user chose for the page (grid, symbol panel, text as markdown): a file in Jupyter's data folder, because a browser keeps its own storage per port |
 | `utils/worksheet/static/` | the front end: plain ES modules, no build step |
 | `utils/worksheet/make_library.py` | writes `static/data/library.json` — the symbol panel's library — from the Windows palette's list |
 | `utils/worksheet/make_icon.py` | writes `static/icon.ico` from the drawings `static/icon.svg` and `static/icon-small.svg` (needs Playwright and a Chromium) |
@@ -406,6 +478,26 @@ editor is [MathLive](https://mathlive.io) 0.109.2 (MIT), the very file
 the symbol palette ships, vendored with its licence in
 `static/vendor/mathlive/`; it draws with KaTeX's fonts and is only
 fetched when the Formula tab is first opened.
+
+Text regions are edited with [ProseMirror](https://prosemirror.net)
+(MIT): `prosemirror-model` 1.25.12, `-state` 1.4.4, `-view` 1.42.6,
+`-transform` 1.12.2, `-commands` 1.7.2, `-keymap` 1.2.3, `-history`
+1.5.1, `-inputrules` 1.5.1, `-schema-list` 1.5.1 and
+`prosemirror-tables` 1.8.5, with the three small modules they need
+(`orderedmap` 2.1.1, `rope-sequence` 1.3.4, `w3c-keyname` 2.2.8). They
+are vendored unchanged, as the ES modules the npm registry publishes
+(the file each package names as its `module`, and the view's style
+sheet), each with its licence, in `static/vendor/prosemirror/`; they
+ask for each other by name, and the import map in `static/index.html`
+tells the browser where each one is.
+
+A text is read in one place, `static/js/mdtree.js`: markdown → a tree
+→ markdown again. The page draws the tree (`markdown.js`), the
+editor's document is made from it (`richdoc.js`, which allows in a
+document only what the tree can say), and `richtext.js` is the editor.
+What was edited is written back from the tree — plainly where nobody
+would misread it, with backslashes or tags where it must — and every
+block written is read once more to see that it says what was shown.
 
 ```bash
 python -m pytest tests/test_worksheet_render.py tests/test_worksheet_engine.py \

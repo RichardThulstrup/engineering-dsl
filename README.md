@@ -154,6 +154,10 @@ type, and the line becomes a typeset formula with its value beside it.
 - **Results in place** — a calculated definition shows `= value` after
   it; `x ▸ mV` shows a value in the unit you ask for; errors are flagged
   on the statement that failed without stopping the rest.
+- **Text written as it looks** — headings, bold, lists, tables, links
+  and formulas are formatted as you type, with a bar and the usual
+  keys; formatted text can be pasted in from, and copied out to, other
+  programs. In the file it is the markdown every notebook has.
 - **Pictures** — Ctrl+V puts a screenshot or a copied picture at the
   cursor; picture files can be chosen or dropped on the page. SVG
   drawings stay drawings. They are stored in the sheet's file.
@@ -516,7 +520,9 @@ the worksheet with `--palette` to have the palette as well.
 `launch_palette()` starts it by hand.
 
 The palette vendors [MathLive](https://cortexjs.io/mathlive/) (MIT) and
-the KaTeX fonts (MIT) for its formula editor.
+the KaTeX fonts (MIT) for its formula editor. The worksheet vendors
+KaTeX, MathLive and [ProseMirror](https://prosemirror.net) (all MIT);
+their licences are beside them in `utils/worksheet/static/vendor/`.
 
 ## Running the tests
 

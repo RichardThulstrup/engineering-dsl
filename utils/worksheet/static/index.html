@@ -6,7 +6,27 @@
 <title>Worksheet</title>
 <link rel="icon" href="/static/icon.ico">
 <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="/static/vendor/prosemirror/prosemirror.css">
 <link rel="stylesheet" href="/static/css/worksheet.css">
+<!-- ProseMirror (the formatted editor of text regions) is vendored as the
+     modules it is published as; they ask for each other by name. -->
+<script type="importmap">
+{ "imports": {
+  "orderedmap": "/static/vendor/prosemirror/orderedmap.js",
+  "rope-sequence": "/static/vendor/prosemirror/rope-sequence.js",
+  "w3c-keyname": "/static/vendor/prosemirror/w3c-keyname.js",
+  "prosemirror-model": "/static/vendor/prosemirror/prosemirror-model.js",
+  "prosemirror-transform": "/static/vendor/prosemirror/prosemirror-transform.js",
+  "prosemirror-state": "/static/vendor/prosemirror/prosemirror-state.js",
+  "prosemirror-view": "/static/vendor/prosemirror/prosemirror-view.js",
+  "prosemirror-commands": "/static/vendor/prosemirror/prosemirror-commands.js",
+  "prosemirror-keymap": "/static/vendor/prosemirror/prosemirror-keymap.js",
+  "prosemirror-history": "/static/vendor/prosemirror/prosemirror-history.js",
+  "prosemirror-inputrules": "/static/vendor/prosemirror/prosemirror-inputrules.js",
+  "prosemirror-schema-list": "/static/vendor/prosemirror/prosemirror-schema-list.js",
+  "prosemirror-tables": "/static/vendor/prosemirror/prosemirror-tables.js"
+} }
+</script>
 </head>
 <body>
 
@@ -64,6 +84,7 @@
       <button type="button" data-cmd="results-explicit" role="menuitemradio">Only where asked</button>
       <hr>
       <button type="button" data-cmd="toggle-grid" role="menuitemcheckbox">Grid</button>
+      <button type="button" data-cmd="toggle-markdown" role="menuitemcheckbox">Write text as Markdown</button>
       <button type="button" data-cmd="toggle-palette" role="menuitemcheckbox">Symbols<kbd>F2</kbd></button>
       <button type="button" data-cmd="search-symbols">Search symbols and functions<kbd>Ctrl+E</kbd></button>
       <hr>

@@ -1,29 +1,33 @@
-// Markdown for text regions, rendered straight to DOM nodes.
+// Markdown for text regions, drawn straight to DOM nodes.
 //
 // Text regions are notebook markdown cells, so a sheet may have been
-// written by someone else.  Nothing here ever assigns markup: every
-// piece of the source ends up in a text node (or in KaTeX, which is
-// given `trust: false`), and raw HTML in the source is shown as text.
-// Link and image addresses are restricted to harmless schemes; a picture
+// written by someone else.  Nothing here ever assigns markup: the text
+// is read into a tree (mdtree.js), and every piece of the tree ends up
+// in a text node, in an element made here, or in KaTeX (which is given
+// `trust: false`).  HTML in the source is shown as text, but for the
+// few tags that say what markdown cannot (<u>, <sub>, <sup>, …).  Link
+// and image addresses are restricted to harmless schemes; a picture
 // attached to the region (`attachment:name`) is shown from what is attached.
 
 import { el } from "./util.js";
+import { ATTACHED, parseMarkdown, SAFE_IMAGE } from "./mdtree.js";
 import { pictureUrl } from "./pictures.js";
 
-const SAFE_LINK = /^(https?:|mailto:|#|\.{0,2}\/|[\w.-]+(\/|$))/i;
-const SAFE_IMAGE = /^(https?:|data:image\/(png|jpeg|gif|webp);|\.{0,2}\/|[\w.-]+(\/|$))/i;
-
-const ATTACHED = "attachment:";
-
 /** The address of the attached picture a text names — null if there is none of that name. */
-function attached(name, pictures) {
+export function attached(name, pictures) {
   const all = pictures || {};
   let plain = name;
   try { plain = decodeURIComponent(name); } catch (error) { /* not an encoded name */ }
   return pictureUrl(all[name]) || pictureUrl(all[plain]);       // (what is no picture gets no address)
 }
 
-function math(source, display) {
+/** The address a picture is shown from, or null where it must not be shown. */
+export function pictureSource(src, pictures) {
+  if (src.startsWith(ATTACHED)) return attached(src.slice(ATTACHED.length), pictures);
+  return SAFE_IMAGE.test(src) ? src : null;
+}
+
+export function math(source, display) {
   const span = el("span", { class: display ? "tex block" : "tex" });
   try {
     window.katex.render(source, span, { displayMode: display, throwOnError: false,
@@ -34,89 +38,55 @@ function math(source, display) {
   return span;
 }
 
-// One alternative per inline construct; the first match in the text wins.
-const INLINE = new RegExp([
-  /\\([\\`*_{}\[\]()#+\-.!$~|<>])/.source,                   // 1  escaped character
-  /`([^`\n]+)`/.source,                                       // 2  code
-  /\$\$([^$]+?)\$\$/.source,                                  // 3  display math
-  /\$((?:\\.|[^$\\\n])+?)\$/.source,                          // 4  inline math
-  /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/.source,         // 5,6 image
-  /\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/.source,          // 7,8 link
-  /\*\*(.+?)\*\*(?!\*)|__(.+?)__(?!_)/.source,                // 9,10 strong (may end in nested *em*)
-  /\*([^*\s](?:[^*]*[^*\s])?)\*|(?<![\w])_([^_\s](?:[^_]*[^_\s])?)_(?![\w])/.source,  // 11,12 emphasis
-  /~~(.+?)~~/.source,                                         // 13 strike
-  /<br\s*\/?>/.source,                                        // line break
-  /(https?:\/\/[^\s<>)]+[^\s<>).,;:!?])/.source,              // 14 bare link
-  /( {2,}|\\)\n/.source,                                      // 15 hard break
-].join("|"), "g");
+const ELEMENT = { strong: "strong", em: "em", del: "del", u: "u", sub: "sub", sup: "sup" };
 
-function inline(text, parent, pictures) {
-  let last = 0;
-  // matchAll works on a private copy of the pattern: this function
-  // calls itself for nested emphasis, and a shared `lastIndex` would
-  // send the outer scan back to the start.
-  for (const m of text.matchAll(INLINE)) {
-    if (m.index > last) parent.append(text.slice(last, m.index));
-    last = m.index + m[0].length;
-    if (m[1] !== undefined) parent.append(m[1]);
-    else if (m[2] !== undefined) parent.append(el("code", { text: m[2] }));
-    else if (m[3] !== undefined) parent.append(math(m[3], true));
-    else if (m[4] !== undefined) parent.append(math(m[4], false));
-    else if (m[6] !== undefined) {
-      const src = m[6].startsWith(ATTACHED) ? attached(m[6].slice(ATTACHED.length), pictures)
-        : SAFE_IMAGE.test(m[6]) ? m[6] : null;
-      if (src) parent.append(el("img", { src, alt: m[5] || "", draggable: "false" }));
-      else parent.append(m[0]);
-    } else if (m[8] !== undefined) {
-      if (SAFE_LINK.test(m[8])) {
-        const a = el("a", { href: m[8], target: "_blank", rel: "noopener noreferrer" });
-        inline(m[7], a);
-        parent.append(a);
-      } else parent.append(m[0]);
-    } else if (m[9] !== undefined || m[10] !== undefined) {
-      inline(m[9] ?? m[10], parent.appendChild(el("strong")), pictures);
-    } else if (m[11] !== undefined || m[12] !== undefined) {
-      inline(m[11] ?? m[12], parent.appendChild(el("em")), pictures);
-    } else if (m[13] !== undefined) {
-      inline(m[13], parent.appendChild(el("del")), pictures);
-    } else if (m[14] !== undefined) {
-      parent.append(el("a", { href: m[14], target: "_blank", rel: "noopener noreferrer", text: m[14] }));
-    } else parent.append(el("br"));
+function inline(nodes, parent, pictures) {
+  for (const node of nodes) {
+    if (node.t === "text") parent.append(node.v);
+    else if (node.t === "code") parent.append(el("code", { text: node.v }));
+    else if (node.t === "math") parent.append(math(node.v, node.block));
+    else if (node.t === "br") parent.append(el("br"));
+    else if (node.t === "img") {
+      const src = pictureSource(node.src, pictures);
+      if (src) parent.append(el("img", { src, alt: node.alt, draggable: "false" }));
+      else parent.append(node.raw);
+    } else if (node.t === "link" || node.t === "auto") {
+      // (The reading only makes a link of an address it found harmless.)
+      const a = parent.appendChild(el("a", { href: node.href, target: "_blank", rel: "noopener noreferrer" }));
+      if (node.t === "auto") a.textContent = node.href; else inline(node.c, a, pictures);
+    } else if (node.t === "list") list(node, parent, pictures);
+    else if (ELEMENT[node.t]) inline(node.c, parent.appendChild(el(ELEMENT[node.t])), pictures);
   }
-  if (last < text.length) parent.append(text.slice(last));
   return parent;
 }
 
-const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
-const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
-
-function cells(line) {
-  return line.trim().replace(/^\||\|$/g, "").split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|"));
+function list(node, parent, pictures) {
+  const made = parent.appendChild(el(node.ordered ? "ol" : "ul"));
+  for (const item of node.items) inline(item.c, made.appendChild(el("li")), pictures);
 }
 
-function list(lines, start, parent, pictures) {
-  // Items of one list share the indentation of its first marker;
-  // deeper-indented markers open a nested list inside the last item.
-  const first = LIST_ITEM.exec(lines[start]);
-  const indent = first[1].length;
-  const node = el(/\d/.test(first[2]) ? "ol" : "ul");
-  let i = start, item = null;
-  while (i < lines.length) {
-    const m = LIST_ITEM.exec(lines[i]);
-    if (m && m[1].length === indent) {
-      item = node.appendChild(el("li"));
-      inline(m[3], item, pictures);
-      i += 1;
-    } else if (m && m[1].length > indent && item) {
-      i = list(lines, i, item, pictures);
-    } else if (lines[i].trim() && /^\s+/.test(lines[i]) && item) {
-      item.append(" ");
-      inline(lines[i].trim(), item, pictures);          // a wrapped line of the item
-      i += 1;
-    } else break;
+function blocks(tree, root, pictures) {
+  for (const block of tree) {
+    if (block.t === "code") root.append(el("pre", {}, el("code", { text: block.v })));
+    else if (block.t === "math") root.append(el("div", { class: "katex-display" }, math(block.v, true)));
+    else if (block.t === "h") inline(block.c, root.appendChild(el("h" + block.n)), pictures);
+    else if (block.t === "hr") root.append(el("hr"));
+    else if (block.t === "quote") blocks(block.c, root.appendChild(el("blockquote")), pictures);
+    else if (block.t === "list") list(block, root, pictures);
+    else if (block.t === "table") {
+      const set = block.align.map((side) => (side ? `al-${side}` : null));
+      const table = root.appendChild(el("table"));
+      const head = table.appendChild(el("thead")).appendChild(el("tr"));
+      block.head.forEach((c, k) => inline(c, head.appendChild(el("th", { class: set[k] })), pictures));
+      const body = table.appendChild(el("tbody"));
+      for (const cells of block.rows) {
+        const row = body.appendChild(el("tr"));
+        cells.forEach((c, k) => inline(c, row.appendChild(el("td", { class: set[k] })), pictures));
+      }
+    } else inline(block.c, root.appendChild(el("p")), pictures);
   }
-  parent.append(node);
-  return i;
+  if (!root.childNodes.length) root.append(el("p", { class: "empty", text: "empty text region" }));
+  return root;
 }
 
 /**
@@ -125,66 +95,5 @@ function list(lines, start, parent, pictures) {
  * text names.
  */
 export function renderMarkdown(source, pictures = null) {
-  const root = el("div", { class: "md" });
-  const lines = source.replace(/\r\n?/g, "\n").split("\n");
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (!line.trim()) { i += 1; continue; }
-
-    let m = /^(\s*)(```+|~~~+)\s*(\S*)\s*$/.exec(line);
-    if (m) {                                             // fenced code
-      const body = [];
-      for (i += 1; i < lines.length && !lines[i].trim().startsWith(m[2]); i += 1) body.push(lines[i]);
-      i += 1;
-      root.append(el("pre", {}, el("code", { text: body.join("\n") })));
-      continue;
-    }
-    if (line.trim().startsWith("$$")) {                  // display math block
-      const body = [line.trim().slice(2)];
-      while (!/\$\$\s*$/.test(body[body.length - 1]) && i + 1 < lines.length) body.push(lines[++i]);
-      i += 1;
-      root.append(el("div", { class: "katex-display" }, math(body.join("\n").replace(/\$\$\s*$/, ""), true)));
-      continue;
-    }
-    m = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
-    if (m) {
-      inline(m[2], root.appendChild(el("h" + m[1].length)), pictures);
-      i += 1;
-      continue;
-    }
-    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { root.append(el("hr")); i += 1; continue; }
-    if (/^\s*>/.test(line)) {
-      const body = [];
-      for (; i < lines.length && /^\s*>/.test(lines[i]); i += 1) body.push(lines[i].replace(/^\s*>\s?/, ""));
-      const quote = el("blockquote");
-      quote.append(...renderMarkdown(body.join("\n"), pictures).childNodes);
-      root.append(quote);
-      continue;
-    }
-    if (LIST_ITEM.test(line)) { i = list(lines, i, root, pictures); continue; }
-    if (line.includes("|") && i + 1 < lines.length && TABLE_RULE.test(lines[i + 1])
-        && cells(lines[i + 1]).length === cells(line).length) {
-      // The rule under the header — a cell of dashes for each column —
-      // also says how the column is set: :--- left, :---: centred, ---: right.
-      const set = cells(lines[i + 1]).map((rule) => (
-        rule.endsWith(":") ? (rule.startsWith(":") ? "al-center" : "al-right") : rule.startsWith(":") ? "al-left" : null));
-      const table = el("table");
-      const head = table.appendChild(el("thead")).appendChild(el("tr"));
-      cells(line).forEach((c, k) => inline(c, head.appendChild(el("th", { class: set[k] })), pictures));
-      const body = table.appendChild(el("tbody"));
-      for (i += 2; i < lines.length && lines[i].includes("|") && lines[i].trim(); i += 1) {
-        const row = body.appendChild(el("tr"));
-        cells(lines[i]).forEach((c, k) => inline(c, row.appendChild(el("td", { class: set[k] })), pictures));
-      }
-      root.append(table);
-      continue;
-    }
-    const para = [lines[i++]];          // always consumes a line: the loop must advance
-    for (; i < lines.length && lines[i].trim() && !/^(#{1,6}\s|\s*>|\s*(```|~~~)|\s*\$\$)/.test(lines[i])
-           && !LIST_ITEM.test(lines[i]); i += 1) para.push(lines[i]);
-    inline(para.join("\n"), root.appendChild(el("p")), pictures);
-  }
-  if (!root.childNodes.length) root.append(el("p", { class: "empty", text: "empty text region" }));
-  return root;
+  return blocks(parseMarkdown(source), el("div", { class: "md" }), pictures);
 }

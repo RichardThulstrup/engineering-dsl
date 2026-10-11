@@ -269,10 +269,14 @@ def test_the_library_is_at_hand_by_key_by_search_and_by_name(page_and_folder):
     assert page.evaluate("document.querySelectorAll('.region.has-error').length") == 0
 
 
-def test_text_regions_get_a_table_and_formulas_from_the_panel(page_and_folder):
+def test_text_written_as_markdown_gets_a_table_and_formulas_from_the_panel(page_and_folder):
     page, _ = page_and_folder
     page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
     keys = page.keyboard
+    # Text is written as it looks unless its markdown is asked for (View >
+    # Write text as Markdown): then the panel's tools write markdown.
+    page.click("#view-menu .menu-button")
+    page.click("#view-menu [data-cmd='toggle-markdown']")
 
     def editor():
         """The open editor's text, with what is selected in brackets."""
@@ -623,6 +627,25 @@ PICTURES = """() => [...document.querySelectorAll('.region')].filter((r) => r.qu
             picture: r.classList.contains('picture'), selected: r.classList.contains('selected')};
 })"""
 TOAST = "(document.querySelector('#toast').hidden ? '' : document.querySelector('#toast').textContent)"
+# The text being written as it looks, in short: a formula as its LaTeX
+# between dollars, a picture as [what it is called].
+WRITTEN = """() => {
+    const copy = document.querySelector('.region .ProseMirror').cloneNode(true);
+    copy.querySelectorAll('.ProseMirror-separator, .ProseMirror-trailingBreak').forEach((node) => node.remove());
+    copy.querySelectorAll('.formula').forEach((node) => {
+        const tex = node.querySelector('annotation').textContent;
+        node.replaceWith(node.tagName === 'DIV' ? '$$' + tex + '$$' : '$' + tex + '$');
+    });
+    copy.querySelectorAll('img').forEach((node) => node.replaceWith('[' + node.alt + ']'));
+    return copy.innerHTML;
+}"""
+# What a copy takes along from where the keyboard is — made by hand, no clipboard is touched.
+COPIED = """() => {
+    const data = new DataTransfer();
+    const event = new ClipboardEvent('copy', {clipboardData: data, bubbles: true, cancelable: true});
+    document.activeElement.dispatchEvent(event);
+    return {text: data.getData('text/plain'), html: data.getData('text/html'), types: [...data.types]};
+}"""
 LIMIT = "async ([name, value]) => { (await import('/static/js/pictures.js')).LIMITS[name] = value; }"
 EDITOR = "document.querySelector('.region .ed textarea').value"
 
@@ -641,6 +664,33 @@ def save_as(page, name):
     page.keyboard.press("Control+s")
     page.fill(".dialog input[type=text]", name)
     page.keyboard.press("Enter")
+
+
+def frame(page):
+    """Wait for the next frame.  A browser tells of a caret moved (by an
+    arrow key, a click) with the next frame it draws; only then does the
+    editor of a text know where the caret is."""
+    page.evaluate("() => new Promise((done) => requestAnimationFrame(() => setTimeout(done)))")
+
+
+def kept(page):
+    """Finish the text being written (which leaves its region selected) and give its markdown."""
+    page.keyboard.press("Escape")
+    return page.evaluate(COPIED)["text"]
+
+
+def given_the_keyboard(page):
+    """Let the editor of a text settle after it was opened.  For 20 ms
+    after it has been given the keyboard, ProseMirror puts a caret that
+    the browser moved back where it had it: no one types that fast, but
+    a test does."""
+    page.wait_for_timeout(50)
+
+
+def reopen(page):
+    """Enter opens the region that is selected: a text with the caret at its end."""
+    page.keyboard.press("Enter")
+    given_the_keyboard(page)
 
 
 def test_a_picture_is_pasted_at_the_cursor_resized_and_saved_with_the_sheet(page_and_folder):
@@ -703,8 +753,8 @@ def test_a_picture_is_pasted_at_the_cursor_resized_and_saved_with_the_sheet(page
     assert page.evaluate("document.querySelector('.region.picture img') === window.kept")
     # A double click opens the text that names it — for a caption, say.
     page.locator(".region.picture").dblclick()
-    assert re.fullmatch(r"!\[picture\]\(attachment:[0-9a-f]{12}\.png\)", page.evaluate(EDITOR))
-    keys.press("Escape")
+    assert page.evaluate(WRITTEN) == "<p>[picture]</p>"
+    assert re.fullmatch(r"!\[picture\]\(attachment:[0-9a-f]{12}\.png\)", kept(page))
     assert pictures(page, 1)[0]["shown"] == [120, 60]           # and closed, the text is the picture again
 
     # Saved, it is a text cell with the picture attached, as a notebook keeps one.
@@ -885,34 +935,37 @@ def test_pictures_come_from_files_go_into_text_and_survive_copying_and_undo(page
     # what is pasted.
     page.mouse.click(paper["x"] + 24, paper["y"] + 560)
     keys.type('"')
+    given_the_keyboard(page)
     keys.type("Before  after")
     for _ in range(6):
         keys.press("ArrowLeft")
-    assert page.evaluate(PASTE, [[["image.png", "image/png", BITMAP]], [["text/plain", "words"]]]) is False
+    frame(page)
+    assert page.evaluate(PASTE, [[["image.png", "image/png", BITMAP]], [["text/plain", "words"]]]) is True
+    assert page.evaluate(WRITTEN) == "<p>Before words after</p>"
     assert page.evaluate(PASTE, [[["image.png", "image/png", BITMAP]], []]) is True
-    page.wait_for_function(f"{EDITOR}.includes('attachment:')")
-    assert re.fullmatch(r"Before !\[picture\]\(attachment:[0-9a-f]{12}\.png\) after", page.evaluate(EDITOR))
+    page.wait_for_selector(".region .ProseMirror img[alt=picture]")
+    assert page.evaluate(WRITTEN) == "<p>Before words[picture] after</p>"
     choose("plot [v2].png")
-    page.wait_for_function(f"{EDITOR}.split('attachment:').length === 3")
-    assert re.fullmatch(r"Before !\[picture\]\(attachment:\w+\.png\)!\[plot v2\]\(attachment:\w+\.png\) after", page.evaluate(EDITOR))
-    keys.press("Escape")
+    page.wait_for_selector(".region .ProseMirror img[alt='plot v2']")
+    assert page.evaluate(WRITTEN) == "<p>Before words[picture][plot v2] after</p>"
+    assert re.fullmatch(r"Before words!\[picture\]\(attachment:\w+\.png\)!\[plot v2\]\(attachment:\w+\.png\) after", kept(page))
     within = pictures(page, 6)[4]
     assert (within["picture"], within["shown"]) == (False, [120, 60])          # a text with pictures in it
     # One of them is taken out of the text again (and so, further down, is not saved).
-    page.locator(".region.text:not(.picture)").click(position={"x": 30, "y": 30})
-    page.evaluate("() => { const area = document.querySelector('.region .ed textarea');"
-                  " area.setSelectionRange(area.value.indexOf('![plot v2]'), area.value.indexOf(' after')); }")
+    page.locator(".region.text:not(.picture)").click(position={"x": 30, "y": 8})
+    page.locator(".region .ProseMirror img[alt='plot v2']").click()            # a click on a picture selects it
+    frame(page)
     keys.press("Backspace")
-    keys.press("Escape")
+    assert re.fullmatch(r"Before words!\[picture\]\(attachment:\w+\.png\) after", kept(page))
     assert len(pictures(page, 5)) == 5
 
     # One that arrives when its text has been finished goes below the text.
     page.mouse.click(paper["x"] + 24, paper["y"] + 640)
     keys.type('"')
     keys.type("A caption")
-    page.evaluate("""(paste) => { const area = document.querySelector('.region .ed textarea');
+    page.evaluate("""(paste) => { const text = document.querySelector('.region .ProseMirror');
         eval(paste)([[['image.png', 'image/png', '%s']], []]);
-        area.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); }""" % BITMAP, PASTE)
+        text.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); }""" % BITMAP, PASTE)
     late = pictures(page, 6)[5]
     caption = page.evaluate(BOXES)[5]
     assert late["picture"] and late["left"] == 24 and late["top"] >= caption["top"] + caption["height"]
@@ -1016,3 +1069,957 @@ def test_a_notebook_with_pictures_pasted_in_jupyterlab_shows_them_as_they_are(pa
     page.mouse.up()
     wider = pictures(page, 4)[0]
     assert (wider["width"], wider["shown"]) == (256, [244, 122])
+
+
+# ---- text written as it looks -----------------------------------------------
+
+# What the bar above a text shows as on, and the kind of paragraph it names.
+BAR = """() => {
+    const bar = document.querySelector('.region .formatbar');
+    return [...bar.querySelectorAll('.fmt.on')].map((b) => b.dataset.mark || b.dataset.tool).join(' ') + ' | '
+        + bar.querySelector('select').selectedOptions[0].textContent;
+}"""
+IN_TEXT = "document.activeElement.classList.contains('ProseMirror')"
+# Where the keyboard is, a moment after it went there: a text is finished a
+# tick after the keyboard has left it, unless it went to a field of its own.
+WENT_TO = """() => new Promise((done) => setTimeout(() => done(
+    (document.querySelector('.region.editing') ? 'writing, in ' : 'finished, in ') + (document.activeElement.className || document.activeElement.tagName)), 60))"""
+# A key as another keyboard sends it; answers whether the page took it for itself.
+KEY = """([key, code, keyCode, held]) => {
+    const event = new KeyboardEvent('keydown', {key, code, keyCode, bubbles: true, cancelable: true, ...held});
+    document.activeElement.dispatchEvent(event);
+    return event.defaultPrevented;
+}"""
+
+
+def middle(page, selector):
+    box = page.locator(selector).first.bounding_box()
+    return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+
+def test_text_is_written_as_it_looks_with_keys_and_a_bar_for_its_formatting(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    paper = page.locator("#content").bounding_box()
+    bar = lambda what: page.locator(f".formatbar [data-{what}]")                 # noqa: E731
+
+    def afresh():
+        """Open the region that was just finished, and empty it."""
+        reopen(page)
+        keys.press("Control+a")
+        keys.press("Delete")
+
+    # A text region is written as it looks: what is bold is bold while it is typed.
+    page.mouse.click(paper["x"] + 40, paper["y"] + 40)
+    keys.type('"')
+    assert page.query_selector(".region .ed textarea") is None and page.locator(".region .formatbar").is_visible()
+    keys.type("Plain ")
+    keys.press("Control+b")
+    assert page.evaluate(BAR) == "strong | Text"                # (the bar says so before a letter of it is typed)
+    keys.press("Control+b")
+    for key, word in (("b", "bold"), ("i", "slanted"), ("u", "under")):
+        keys.press(f"Control+{key}")
+        keys.type(word)
+        keys.press(f"Control+{key}")
+        keys.type(" ")
+    keys.type("H")
+    keys.press("Control+,")
+    keys.type("2")
+    keys.press("Control+,")
+    keys.type("O x")
+    keys.press("Control+.")
+    keys.type("2")
+    shown = "<p>Plain <strong>bold</strong> <em>slanted</em> <u>under</u> H<sub>2</sub>O x<sup>2</sup></p>"
+    assert page.evaluate(WRITTEN) == shown
+    assert page.evaluate(BAR) == "sup | Text"                   # the bar shows what the text at the caret is
+    # In the file it is markdown — with HTML's own tags for what markdown has no mark for.
+    assert kept(page) == "Plain **bold** *slanted* <u>under</u> H<sub>2</sub>O x<sup>2</sup>"
+    assert page.evaluate("document.querySelector('.region.text .md').innerHTML") == shown         # and shown as it was written
+
+    # The bar does the same to what is selected, and the keyboard stays in the text.
+    afresh()
+    keys.type("one two three")
+    for _ in range(5):
+        keys.press("Shift+ArrowLeft")
+    frame(page)
+    bar("mark=strong").click()
+    assert page.evaluate(WRITTEN) == "<p>one two <strong>three</strong></p>"
+    assert page.evaluate(BAR) == "strong | Text" and page.evaluate(IN_TEXT)
+    bar("mark=em").click()
+    bar("mark=strong").click()
+    assert page.evaluate(WRITTEN) == "<p>one two <em>three</em></p>"
+    for mark in ("del", "code"):
+        bar(f"mark={mark}").click()
+        assert page.evaluate(WRITTEN) == f"<p>one two <em><{mark}>three</{mark}></em></p>"
+        bar(f"mark={mark}").click()
+    keys.press("Control+Shift+x")
+    assert kept(page) == "one two *~~three~~*"
+    reopen(page)
+    keys.press("Home")                                          # (right after it was opened: the key is the caret's)
+    frame(page)
+    assert page.evaluate(BAR) == " | Text"                      # nothing at the start of the line
+    keys.press("ArrowUp")                                       # (above a paragraph there is nothing to make room for)
+    keys.press("ArrowDown")
+    assert page.evaluate(WRITTEN) == "<p>one two <em><del>three</del></em></p>"
+    keys.press("Home")
+    frame(page)
+
+    # What kind of paragraph it is: chosen in the bar, or by key.
+    page.locator(".formatbar select").focus()                  # (the list has the keyboard while it is open)
+    assert page.evaluate(WENT_TO) == "writing, in SELECT"
+    page.locator(".formatbar select").select_option(label="Heading 2")
+    assert page.evaluate(WRITTEN) == "<h2>one two <em><del>three</del></em></h2>" and page.evaluate(IN_TEXT)
+    assert page.evaluate(BAR) == " | Heading 2"
+    assert kept(page) == "## one two *~~three~~*"
+    reopen(page)
+    keys.press("Control+Shift+0")
+    assert page.evaluate(WRITTEN) == "<p>one two <em><del>three</del></em></p>"
+    keys.press("Control+Shift+3")
+    assert page.evaluate(BAR) == "em del | Heading 3"           # (opened by key, the caret is at the end)
+    keys.press("Home")
+    frame(page)
+    keys.press("Backspace")                                     # at the start of a heading: plain text again
+    assert page.evaluate(WRITTEN) == "<p>one two <em><del>three</del></em></p>"
+
+    # A keyboard may make something else of Shift and a digit — "(" of 8, on
+    # a Danish one — and the key is the text's all the same.  AltGr and a
+    # digit, which a browser tells of as Ctrl+Alt, is a character (@, £, })
+    # and never a key of the text's.
+    held = {"ctrlKey": True, "shiftKey": True}
+    assert page.evaluate(KEY, ["!", "Digit1", 49, held]) is True
+    assert page.evaluate(WRITTEN) == "<h1>one two <em><del>three</del></em></h1>"
+    assert page.evaluate(KEY, ["=", "Digit0", 48, held]) is True
+    assert page.evaluate(KEY, [")", "Digit9", 57, held]) is True
+    assert page.evaluate(WRITTEN) == "<ol><li><p>one two <em><del>three</del></em></p></li></ol>"
+    assert page.evaluate(KEY, ["(", "Digit8", 56, held]) is True
+    assert page.evaluate(WRITTEN) == "<ul><li><p>one two <em><del>three</del></em></p></li></ul>"
+    # Code is Ctrl and <: a key of its own there, Shift and the comma on an American keyboard.
+    assert page.evaluate(KEY, ["<", "IntlBackslash", 226, {"ctrlKey": True}]) is True and page.evaluate(BAR) == "code bullets | Text"
+    assert page.evaluate(KEY, ["<", "Comma", 188, held]) is True and page.evaluate(BAR) == "bullets | Text"
+    for key, code, number in (("@", "Digit2", 50), ("£", "Digit3", 51), ("}", "Digit0", 48)):
+        assert page.evaluate(KEY, [key, code, number, {"ctrlKey": True, "altKey": True}]) is False
+    assert page.evaluate(WRITTEN) == "<ul><li><p>one two <em><del>three</del></em></p></li></ul>"
+    assert page.evaluate("document.querySelector('#paper').style.zoom || '1'") == "1"      # (Ctrl and = were the text's, not the page's)
+
+    # Lists: begun from the bar, gone on with Enter, nested with Tab; an
+    # empty item ends the list.  A quotation likewise.
+    keys.press("Escape")
+    afresh()
+    keys.type("first")
+    bar("tool=bullets").click()
+    keys.press("Enter")
+    keys.type("second")
+    keys.press("Enter")
+    keys.press("Tab")
+    keys.type("inner")
+    keys.press("Enter")
+    keys.press("Shift+Tab")
+    keys.type("third")
+    assert page.evaluate(BAR) == "bullets | Text" and page.evaluate(IN_TEXT)
+    assert kept(page) == "- first\n- second\n  - inner\n- third"
+    keys.press("Enter")
+    bar("tool=numbers").click()
+    assert page.evaluate(BAR) == "numbers | Text"
+    keys.press("Enter")
+    keys.press("Enter")
+    keys.type("after")
+    keys.press("Control+'")
+    assert page.evaluate(BAR) == "quote | Text"
+    assert kept(page) == "1. first\n2. second\n   - inner\n3. third\n\n> after"
+    keys.press("Enter")
+    bar("tool=quote").click()
+    bar("tool=bullets").click()
+    assert page.evaluate(BAR) == "bullets | Text"
+    bar("tool=bullets").click()                                 # once more: out of the list
+    assert page.evaluate(BAR) == " | Text"
+    bar("tool=numbers").click()
+    assert kept(page) == "1. first\n2. second\n   - inner\n3. third\n\n1. after"
+
+    # A link: Ctrl+K asks for the address the selected text is to go to.
+    afresh()
+    keys.type("See the manual")
+    for _ in range(6):
+        keys.press("Shift+ArrowLeft")
+    frame(page)
+    keys.press("Control+k")
+    assert page.evaluate(WENT_TO) == "writing, in link"
+    keys.type("https://example.org/a b(c)")
+    keys.press("Enter")
+    assert page.evaluate(WENT_TO).startswith("writing, in md ProseMirror") and page.evaluate(BAR) == "link | Text"
+    linked = "See the [manual](https://example.org/a%20b(c%29)"        # (as markdown can hold it between its brackets)
+    assert kept(page) == linked
+    assert page.evaluate("document.querySelector('.region.text a').href") == "https://example.org/a%20b(c%29"
+    # With the caret in a link the field shows where it goes; one that could
+    # do harm is not taken, and the field says so; an empty one takes the link off.
+    reopen(page)
+    keys.press("ArrowLeft")
+    frame(page)
+    assert page.evaluate(BAR) == "link | Text"
+    bar("tool=link").click()
+    assert page.evaluate("document.activeElement.value") == "https://example.org/a%20b(c%29"
+    keys.press("Control+a")
+    keys.type("javascript:alert(1)")
+    keys.press("Enter")
+    assert page.evaluate("document.activeElement.className") == "link bad"
+    keys.press("Escape")
+    assert page.evaluate(IN_TEXT) and page.evaluate("document.querySelector('.formatbar .link').hidden")
+    assert kept(page) == linked
+    reopen(page)
+    keys.press("ArrowLeft")
+    frame(page)
+    keys.press("Control+k")
+    keys.press("Control+a")
+    keys.press("Delete")
+    keys.press("Enter")
+    assert kept(page) == "See the manual"
+    # With nothing selected the address itself is put, as a link; one that
+    # begins with www. is on the web.
+    reopen(page)
+    keys.type(" at ")
+    keys.press("Control+k")
+    keys.type("www.example.org/x")
+    keys.press("Enter")
+    assert page.evaluate(WRITTEN) == ('<p>See the manual at <a href="https://www.example.org/x" target="_blank"'
+                                      ' rel="noopener noreferrer">https://www.example.org/x</a></p>')
+    assert kept(page) == "See the manual at https://www.example.org/x"
+
+    # Markdown's own marks work while they are typed: "# " begins a heading,
+    # "- " a list, **…** is bold and $…$ a formula.  In code, Enter is a new line.
+    afresh()
+    keys.type("# Title")
+    keys.press("Enter")
+    keys.type("Some **bold**, *slanted*, ~~struck~~, `code` and $x^2$ here, 2*3*4 not.")
+    keys.press("Enter")
+    keys.type("- item")
+    keys.press("Enter")
+    keys.press("Enter")
+    keys.type("1. numbered")
+    keys.press("Enter")
+    keys.press("Enter")
+    keys.type("> quoted")
+    keys.press("Enter")
+    keys.press("Enter")
+    keys.type("```")
+    keys.type("x = 1")
+    keys.press("Enter")
+    keys.type("y = 2")
+    keys.press("Shift+Enter")                                   # out of the code
+    keys.type("Line")
+    keys.press("Shift+Enter")                                   # a new line in the same paragraph
+    keys.type("break")
+    assert page.evaluate(WRITTEN) == (
+        "<h1>Title</h1><p>Some <strong>bold</strong>, <em>slanted</em>, <del>struck</del>, <code>code</code> and $x^2$ here,"
+        " 2*3*4 not.</p><ul><li><p>item</p></li></ul><ol><li><p>numbered</p></li></ol><blockquote><p>quoted</p></blockquote>"
+        "<pre><code>x = 1\ny = 2</code></pre><p>Line<br>break</p>")
+    typed = ("# Title\n\nSome **bold**, *slanted*, ~~struck~~, `code` and $x^2$ here, 2\\*3\\*4 not.\n\n- item\n\n1. numbered\n\n"
+             "> quoted\n\n```\nx = 1\ny = 2\n```\n\nLine\\\nbreak")
+    assert kept(page) == typed
+    # Backspace takes such a mark back at once: the dollars were dollars.
+    afresh()
+    keys.type("costs $5 or 6$")
+    assert page.evaluate(WRITTEN) == "<p>costs $5 or 6$</p>" and page.locator(".region .formula").count() == 1
+    keys.press("Backspace")
+    assert page.locator(".region .formula").count() == 0
+    assert kept(page) == "costs \\$5 or 6\\$"
+
+    # $$…$$ is a formula on a line of its own: a block of its own where it
+    # is all the paragraph has — and the writing goes on below it.
+    afresh()
+    keys.type("$$E=mc^2$$")
+    keys.type("so")
+    assert page.evaluate(WRITTEN) == "$$E=mc^2$$<p>so</p>"
+    keys.type(" $$a$$ too")
+    assert kept(page) == "$$E=mc^2$$\n\nso $$a$$ too"
+    # A formula whose LaTeX is emptied is gone, wherever it stood.
+    afresh()
+    keys.type("$$x$$")
+    keys.press("ArrowUp")                                       # onto the formula
+    keys.press("Enter")                                         # into its LaTeX
+    assert page.evaluate(WENT_TO) == "writing, in tex-source"
+    keys.press("Control+a")
+    keys.press("Delete")
+    keys.press("Enter")
+    assert page.evaluate(WENT_TO).startswith("writing, in md ProseMirror")
+    keys.type("in its place: $y$")
+    keys.press("ArrowLeft")
+    keys.press("Enter")
+    keys.press("Control+a")
+    keys.press("Delete")
+    keys.press("Enter")
+    assert page.evaluate(WRITTEN) == "<p>in its place: </p><p></p>"
+    assert kept(page) == "in its place:"
+    # Room is made beside a formula, a list and code as beside a table: the
+    # arrow key that would leave the text makes a paragraph there.
+    afresh()
+    keys.type("$$x$$")
+    keys.press("ArrowUp")                                       # onto the formula
+    keys.press("ArrowUp")                                       # and out of the text: room above it
+    keys.type("### Above")
+    assert page.evaluate(WRITTEN) == "<h3>Above</h3>$$x$$<p></p>"
+    keys.press("Control+End")
+    keys.type("- item")
+    keys.press("ArrowDown")
+    keys.type("```")
+    keys.type("code")
+    keys.press("ArrowDown")
+    keys.type("below")
+    assert kept(page) == "### Above\n\n$$x$$\n\n- item\n\n```\ncode\n```\n\nbelow"
+    # A text that ends with a formula is opened, by key, with the caret in
+    # its words: on the formula, what is typed next would take its place.
+    afresh()
+    keys.type("text")
+    keys.press("Enter")
+    keys.type("$$x$$")
+    assert kept(page) == "text\n\n$$x$$"
+    reopen(page)
+    keys.type("!")
+    assert page.evaluate(WRITTEN) == "<p>text!</p>$$x$$"
+    # The keyboard taken elsewhere — not to the bar, not to the symbol
+    # panel — finishes the text.
+    page.evaluate("document.querySelector('#sink').focus()")
+    page.wait_for_function("!document.querySelector('.region.editing')")
+    keys.press("Control+a")
+    assert page.evaluate(COPIED)["text"] == "text!\n\n$$x$$"
+    # The page's own keys work from a formula's LaTeX as well: Ctrl+S saves,
+    # and what is being written into the formula is saved with the rest.
+    keys.press("Enter")
+    keys.press("ArrowDown")                                     # onto the formula
+    keys.press("Enter")                                         # into its LaTeX
+    keys.type("^2")
+    save_as(page, "written")
+    page.wait_for_function("document.title.startsWith('written')", timeout=20_000)
+    assert nbformat.read(str(folder / "written.ipynb"), as_version=4).cells[1].source == "text!\n\n$$x^2$$"
+    # Opened at the very top of the window, a text is brought down far
+    # enough for the bar above it to be in view.
+    page.evaluate("() => { const desk = document.querySelector('#desk');"
+                  " desk.scrollTop += document.querySelector('.region').getBoundingClientRect().top - desk.getBoundingClientRect().top; }")
+    page.locator(".region.text").click(position={"x": 30, "y": 8})
+    assert page.evaluate("document.querySelector('.formatbar').getBoundingClientRect().top"
+                         " >= document.querySelector('#desk').getBoundingClientRect().top")
+    keys.press("Escape")
+
+    # Ctrl+Enter finishes a text as Enter finishes a math region: the cursor goes below it.
+    afresh()
+    keys.type("done")
+    keys.press("Control+Enter")
+    assert page.query_selector(".region.editing") is None and page.evaluate("document.activeElement.id") == "sink"
+    below = page.evaluate("[parseFloat(document.querySelector('#cross').style.top),"
+                          " parseFloat(document.querySelector('.region').style.top) + document.querySelector('.region').offsetHeight]")
+    assert below[0] > below[1] - 1 and page.evaluate("!document.querySelector('#cross').hidden")
+    page.locator(".region.text").click(modifiers=["Shift"])
+
+    # The markdown is one click away: the bar's Markdown goes on with the text as markdown.
+    afresh()
+    keys.type("A **bold** word")
+    bar("tool=markdown").click()
+    assert page.evaluate(EDITOR) == "A **bold** word" and page.evaluate("document.activeElement.tagName") == "TEXTAREA"
+    keys.type(" and ~~more~~")
+    assert kept(page) == "A **bold** word and ~~more~~"
+    keys.press("Enter")
+    assert page.evaluate(WRITTEN) == "<p>A <strong>bold</strong> word and <del>more</del></p>"   # opened again: as it looks
+    keys.press("Escape")
+
+    # View > Write text as Markdown makes that the way text is written — on
+    # this computer, from now on; it is no change to the sheet.
+    keys.press("Control+s")
+    page.wait_for_function("document.querySelector('#doc-dirty').hidden", timeout=20_000)
+    assert nbformat.read(str(folder / "written.ipynb"), as_version=4).cells[1].source == "A **bold** word and ~~more~~"
+    page.click("#view-menu .menu-button")
+    page.click("#view-menu [data-cmd='toggle-markdown']")
+    assert page.evaluate("document.querySelector('#doc-dirty').hidden")
+    page.reload()
+    page.wait_for_selector(".region.text strong")
+    page.wait_for_function("document.querySelector('#view-menu [data-cmd=\"toggle-markdown\"]').getAttribute('aria-checked') === 'true'")
+    page.locator(".region.text").click()
+    assert page.evaluate(EDITOR) == "A **bold** word and ~~more~~" and page.query_selector(".region .formatbar") is None
+    keys.press("Escape")
+    page.click("#view-menu .menu-button")
+    page.click("#view-menu [data-cmd='toggle-markdown']")
+    page.locator(".region.text").click()
+    assert page.evaluate(WRITTEN) == "<p>A <strong>bold</strong> word and <del>more</del></p>"
+
+
+def test_formulas_and_tables_in_a_text_written_as_it_looks(page_and_folder):
+    page, _ = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    keys.press("F2")
+    page.wait_for_function("document.querySelectorAll('.lib-tabs button').length > 10")
+    page.wait_for_timeout(200)
+    paper = page.locator("#content").bounding_box()            # (where the page is with the panel open)
+    field = "document.activeElement.className + ': ' + document.activeElement.value"
+
+    # The formula editor puts a formula into the text being written: it is
+    # drawn there, and the writing goes on after it.
+    page.mouse.click(paper["x"] + 40, paper["y"] + 24)
+    keys.type('"')
+    keys.type("Ohm: ")
+    page.click(".lib-tabs button[data-tab='Formula']")
+    page.wait_for_selector(".tool-pane math-field", timeout=30_000)
+    page.click(".tool-pane math-field")
+    assert page.evaluate(WENT_TO) == "writing, in MATH-FIELD"   # (the panel may have the keyboard: the text stays open)
+    keys.type("U=R*I")
+    keys.press("Enter")
+    keys.type(", so")
+    assert page.evaluate(WRITTEN) == "<p>Ohm: $U=R\\cdot I$, so</p>"
+    # On a line of its own (Shift+Enter): the writing goes on below it.
+    page.click(".tool-pane math-field")
+    keys.type("I=U/R")
+    keys.press("Shift+Enter")
+    page.wait_for_timeout(200)                                  # (MathLive must not take the keyboard back: see above)
+    assert page.evaluate(IN_TEXT)
+    keys.type("below")
+    assert page.evaluate(WRITTEN) == "<p>Ohm: $U=R\\cdot I$, so</p>$$I=\\frac{U}{R}$$<p>below</p>"
+    assert kept(page) == "Ohm: $U=R\\cdot I$, so\n\n$$I=\\frac{U}{R}$$\n\nbelow"
+    assert page.evaluate("document.querySelectorAll('.region.text .katex-error').length") == 0
+
+    # A click on a formula selects it; the formula editor takes it up, and
+    # Enter puts the changed one in its place.
+    page.mouse.click(*middle(page, ".region.text .md > p .katex"))             # opens the text, the formula selected
+    assert page.evaluate("document.querySelector('.region span.formula').classList.contains('ProseMirror-selectednode')")
+    page.click(".tool-pane math-field")
+    page.wait_for_function("document.querySelector('.tool-pane math-field').value === 'U=R\\\\cdot I'")
+    keys.press("End")
+    keys.type("+1")
+    keys.press("Enter")
+    keys.type("!")
+    assert page.evaluate(WRITTEN) == "<p>Ohm: $U=R\\cdot I+1$!, so</p>$$I=\\frac{U}{R}$$<p>below</p>"
+    # A double click opens its LaTeX in the text; a key of the panel goes
+    # into it, dollars typed into it are dropped, and Enter puts it back.
+    page.mouse.dblclick(*middle(page, ".region span.formula"))
+    assert page.evaluate(WENT_TO) == "writing, in tex-source" and page.evaluate(field) == "tex-source: U=R\\cdot I+1"
+    page.click(".lib-tabs button[data-tab='Greek']")
+    page.click(".lib-body button:text-is('α')")
+    keys.type("$")
+    assert page.evaluate(field) == "tex-source: U=R\\cdot I+1α$"
+    keys.press("Enter")
+    assert page.evaluate(IN_TEXT)
+    assert page.evaluate(WRITTEN) == "<p>Ohm: $U=R\\cdot I+1α$!, so</p>$$I=\\frac{U}{R}$$<p>below</p>"
+    # A click elsewhere in the text puts what was written into a formula
+    # back as well; a click elsewhere on the page finishes the text.
+    page.mouse.dblclick(*middle(page, ".region div.formula"))
+    keys.type("^2")
+    page.mouse.click(*middle(page, ".region .ProseMirror > p:last-child"))
+    assert page.evaluate(WRITTEN) == "<p>Ohm: $U=R\\cdot I+1α$!, so</p>$$I=\\frac{U}{R}^2$$<p>below</p>"
+    assert page.query_selector(".region.editing") is not None
+    page.mouse.click(paper["x"] + 300, paper["y"] + 500)
+    assert page.query_selector(".region.editing") is None
+    page.locator(".region.text").click(modifiers=["Shift"])
+    assert page.evaluate(COPIED)["text"] == "Ohm: $U=R\\cdot I+1α$!, so\n\n$$I=\\frac{U}{R}^2$$\n\nbelow"
+    # Opened by key, the caret is at the end of the text; an arrow key goes
+    # onto a formula on its own line, and Enter opens it.
+    reopen(page)
+    keys.press("ArrowUp")
+    frame(page)
+    keys.press("Enter")
+    assert page.evaluate(field) == "tex-source: I=\\frac{U}{R}^2"
+    keys.type("+7")
+    keys.press("Escape")                                        # not this time: it stays as it was
+    assert page.evaluate(IN_TEXT)
+    keys.press("Escape")
+    # Put back as the other kind, a formula on its own line becomes one in a
+    # line — of a paragraph of its own: nothing around it is lost …
+    page.mouse.click(*middle(page, ".region.text .md > .katex-display .katex"))
+    page.click(".lib-tabs button[data-tab='Formula']")
+    page.click(".tool-pane math-field")
+    page.wait_for_function("document.querySelector('.tool-pane math-field').value !== ''")
+    page.click(".tool-pane .btn:text-is('Replace, in the line')")
+    assert page.evaluate(WRITTEN) == "<p>Ohm: $U=R\\cdot I+1α$!, so</p><p>$I=\\frac{U}{R}^2$</p><p>below</p>"
+    # … and one written while another is selected goes beside that one.
+    page.click(".tool-pane math-field")
+    keys.type("x")
+    page.mouse.click(*middle(page, ".region .ProseMirror > p:nth-child(2) span.formula"))
+    page.click(".tool-pane math-field")
+    keys.press("Enter")
+    assert page.evaluate(WRITTEN) == "<p>Ohm: $U=R\\cdot I+1α$!, so</p><p>$I=\\frac{U}{R}^2$$x$</p><p>below</p>"
+    # In a line, put back on a line of its own.
+    page.mouse.click(*middle(page, ".region .ProseMirror > p:nth-child(1) span.formula"))
+    page.click(".tool-pane math-field")
+    page.wait_for_function("document.querySelector('.tool-pane math-field').value !== ''")
+    page.click(".tool-pane .btn:text-is('Replace, on its own line')")
+    # (The formula editor writes a letter it was given as the name it has.)
+    several = "Ohm: !, so\n\n$$U=R\\cdot I+1\\alpha$$\n\n$I=\\frac{U}{R}^2$$x$\n\nbelow"
+    assert kept(page) == several
+    # What cannot be written as markdown the way it is shown — a formula
+    # that ends in a backslash, say — is not saved as something else: the
+    # text goes on as the markdown it would be, and the page says why.
+    reopen(page)
+    page.mouse.dblclick(*middle(page, ".region .ProseMirror > p span.formula"))
+    keys.press("End")
+    keys.type("\\")
+    keys.press("Enter")
+    keys.press("Escape")
+    page.wait_for_function(f"{TOAST}.includes('could not be written as markdown the way it is shown')")
+    assert page.evaluate(EDITOR) == several.replace("^2$$x$", "^2\\$$x$") and page.evaluate("document.activeElement.tagName") == "TEXTAREA"
+    keys.press("Control+a")
+    keys.type("mended")
+    assert kept(page) == "mended"
+
+    # The table builder: a table to write over.  Tab goes from cell to
+    # cell, and after the last one adds a row.
+    page.mouse.click(paper["x"] + 40, paper["y"] + 240)
+    page.click(".lib-tabs button[data-tab='Table']")
+    page.fill(".tool-pane input[aria-label='Columns']", "2")
+    page.fill(".tool-pane input[aria-label='Rows']", "1")
+    page.select_option(".tool-pane select", "right")
+    page.click(".tool-pane .btn.primary")
+    for cell in ("Part", "Value", "R1", "10 k", "C"):
+        keys.type(cell)
+        keys.press("Tab")
+    keys.press("Shift+Tab")                                     # back a cell (what is in it is selected)
+    keys.press("End")
+    frame(page)
+    keys.type("1")
+    keys.press("Tab")
+    keys.type("100 n")
+    # The up and down keys go from row to row, to the end of the cell's text.
+    keys.press("ArrowUp")
+    keys.type("Ω")
+    keys.press("ArrowDown")
+    keys.type("F")
+    assert page.evaluate("[...document.querySelectorAll('.region .ProseMirror tr')].map((r) => [...r.children].map((c) =>"
+                         " [c.tagName, c.className, c.textContent]))") == [
+        [["TH", "al-right", "Part"], ["TH", "al-right", "Value"]], [["TD", "al-right", "R1"], ["TD", "al-right", "10 kΩ"]],
+        [["TD", "al-right", "C1"], ["TD", "al-right", "100 nF"]]]
+    table = "| Part | Value |\n| --: | --: |\n| R1 | 10 kΩ |\n| C1 | 100 nF |"
+    # A text that begins or ends with a table has room made beside it: the
+    # arrow key that would leave the table makes a paragraph there.  Room
+    # that is not written in is not kept.
+    keys.press("ArrowDown")
+    assert page.evaluate(WRITTEN).startswith("<table>") and page.evaluate(WRITTEN).endswith("</table><p></p>")
+    assert kept(page) == table
+    assert page.evaluate("[...document.querySelectorAll('.region.text td')].map(c => [c.textContent, c.className])") \
+        == [["R1", "al-right"], ["10 kΩ", "al-right"], ["C1", "al-right"], ["100 nF", "al-right"]]
+    reopen(page)                                                # opened by key: the caret is in the last cell
+    keys.press("ArrowDown")
+    keys.type("Below")
+    keys.press("Home")                                          # (from a paragraph beside the table the key makes no room:
+    frame(page)                                                 #  it goes into the table)
+    keys.press("ArrowUp")
+    frame(page)
+    assert page.evaluate(WRITTEN).startswith("<table>")
+    keys.press("Control+Home")
+    keys.press("ArrowUp")
+    keys.type("Above")
+    keys.press("ArrowUp")                                       # (a paragraph is there already)
+    # Between paragraphs the keys go into the table, and out of it again
+    # from its first row and its last.
+    cell = ("(() => { const node = getSelection().anchorNode;"
+            " return (node.nodeType === 3 ? node.parentElement : node).closest('th, td')?.textContent ?? null; })()")
+    keys.press("ArrowDown")
+    frame(page)
+    assert page.evaluate(cell) in ("Part", "Value")
+    keys.press("ArrowUp")
+    keys.type("!")
+    keys.press("Control+End")
+    keys.press("ArrowUp")
+    frame(page)
+    assert page.evaluate(cell) in ("C1", "100 nF")
+    keys.press("ArrowDown")
+    keys.type("?")
+    assert kept(page) == "Above!\n\n" + table + "\n\n?Below"
+
+    # A text that grows while it is written pushes what is below it down at once.
+    tops = "[...document.querySelectorAll('.region')].map((r) => parseFloat(r.style.top))"
+    before = page.evaluate(tops)
+    page.locator(".region.text").first.click()
+    for _ in range(12):
+        keys.press("Enter")
+    grown = page.evaluate(tops)
+    assert page.query_selector(".region.editing") is not None and grown[0] == before[0] and grown[1] > before[1] + 100
+    keys.press("Control+z")                                     # (the lines are taken back: they were one step of typing)
+    keys.press("Escape")
+    keys.press("Escape")
+
+    # With no text being written, a formula starts a text region at the cursor.
+    page.mouse.click(paper["x"] + 40, paper["y"] + 520)
+    page.click(".lib-tabs button[data-tab='Formula']")
+    page.click(".tool-pane math-field")
+    keys.type("a+b")
+    keys.press("Enter")
+    page.wait_for_selector(".region .ProseMirror .formula")
+    assert page.evaluate(WRITTEN) == "<p>$a+b$</p>"
+    keys.type(" is new")
+    assert kept(page) == "$a+b$ is new"
+    assert page.evaluate("document.querySelectorAll('.region.has-error').length") == 0
+
+
+WORD = ('<html><body><!--StartFragment--><h2 style="color:red">Results</h2>'
+        '<p class=MsoNormal>Plain <b>bold</b> <i>slanted</i> <span style="font-weight:700">heavy</span> '
+        '<span style="font-style:italic">leaning</span> <u>under</u> <s>struck</s> H<sub>2</sub>O x<sup>2</sup> '
+        '<a href="https://en.wikipedia.org/wiki/Ohm_(unit)">ohm</a> <a href="javascript:alert(1)">bad</a> '
+        '<span style="color:#f00;font-size:30pt">big red</span><script>window.hacked = 1</script>'
+        '<img src="file:///C:/Temp/clip_image001.png" onerror="window.hacked = 2"><img src="data:image/png;base64,%s" alt="pic"></p>'
+        # What other programs write for the same things: a style where a tag
+        # would do, a tag (bold) that its own style takes back.
+        '<p><b style="font-weight:normal">not bold</b> <span style="text-decoration:underline">lined</span> '
+        '<span style="text-decoration: line-through">through</span> <span style="vertical-align:sub">low</span> '
+        '<span style="vertical-align:super">high</span> <a href="https://example.org/"><u>link</u></a> '
+        '<img src="data:image/tiff;base64,AAAA" alt="tiff"><span data-tex="x$^2$">f</span> <span data-tex="  ">gone</span> '
+        '<i style="font-style:normal">upright</i> <strike>old</strike> <ins>new</ins> <code>mono</code> <img src="https://example.org/web (1).png" alt="web"></p>'
+        '<blockquote><p>quoted<br>twice</p></blockquote><hr><pre>a = 1\n  b = 2</pre><h4>Small</h4>'
+        '<ul><li>one</li><li>two<ul><li>inner</li></ul></li></ul><ol><li>counted</li></ol>'
+        '<table><tr><td>a</td><td style="text-align:right">1</td><td align="center">c</td><td class="al-left">d</td></tr>'
+        '<tr><td colspan="2">wide</td></tr></table>'
+        '<iframe src="https://example.org"></iframe><!--EndFragment--></body></html>') % BITMAP
+
+# What a word processor puts on the clipboard, as far as the editor goes by
+# it: every cell of a table a paragraph (or two); a list as paragraphs that
+# begin with their bullet or number, and say in their style that they do.
+LISTED = ('<p class=MsoListParagraph style="text-indent:-18.0pt;mso-list:l%d level%d lfo1"><![if !supportLists]>'
+          '<span style="font-family:Symbol"><span style="mso-list:Ignore">%s<span style="font:7.0pt &quot;Times New Roman&quot;">'
+          '&nbsp;&nbsp;&nbsp; </span></span></span><![endif]>%s<o:p></o:p></p>\n')
+OFFICE = ('<table class=MsoTableGrid>\n <tr>\n  <td><p class=MsoNormal><span>Part</span></p></td>\n  <td><p class=MsoNormal><b>Value</b></p></td>\n </tr>\n'
+          ' <tr>\n  <td>\n   <p class=MsoNormal>R1</p>\n   <p class=MsoNormal>second line</p>\n  </td>\n'
+          '  <td><p class=MsoNormal>10 k<o:p></o:p></p></td>\n </tr>\n</table>\n'
+          + "".join(LISTED % item for item in ((0, 1, "·", "One"), (0, 2, "o", "Within"), (0, 1, "·", "Two")))
+          + '<p class=MsoNormal>Between</p>\n' + "".join(LISTED % item for item in ((1, 1, "1.", "First"), (1, 1, "2.", "Second")))
+          + '<ul><li><p>an item</p><p>in two paragraphs</p></li></ul>')
+
+
+def test_text_copied_and_pasted_keeps_the_formatting_markdown_can_say(page_and_folder):
+    page, _ = page_and_folder
+    page.set_viewport_size({"width": 1280, "height": 1500})    # room for what is pasted, and for more below it
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    paper = page.locator("#content").bounding_box()
+
+    def below():
+        """Put the cursor on empty paper under everything that is on the page."""
+        bottom = page.evaluate("Math.max(...[...document.querySelectorAll('.region')].map((r) => r.getBoundingClientRect().bottom))")
+        page.mouse.click(paper["x"] + 40, bottom + 40)
+
+    # Formatted text from another program — a word processor, a web page —
+    # keeps the formatting markdown can say and loses the rest; a picture
+    # that comes with it as data is attached to the region; nothing of it
+    # is run, and a link that could do harm is no link.
+    # (A picture on the web is not fetched from the web here.)
+    page.route("https://example.org/**", lambda route: route.fulfill(body=png(30, 20), content_type="image/png"))
+    page.mouse.click(paper["x"] + 40, paper["y"] + 24)
+    keys.type('"')
+    assert page.evaluate(PASTE, [[], [["text/html", WORD], ["text/plain", "Results Plain bold"]]]) is True
+    page.wait_for_function("document.querySelector('.region .ProseMirror img[alt=pic]')?.naturalWidth === 120")
+    assert page.evaluate(WRITTEN) == (
+        '<h2>Results</h2><p>Plain <strong>bold</strong> <em>slanted</em> <strong>heavy</strong> <em>leaning</em> <u>under</u>'
+        ' <del>struck</del> H<sub>2</sub>O x<sup>2</sup> <a href="https://en.wikipedia.org/wiki/Ohm_(unit%29" target="_blank"'
+        ' rel="noopener noreferrer">ohm</a> bad big red[pic]</p>'
+        '<p>not bold <u>lined</u> <del>through</del> <sub>low</sub> <sup>high</sup> <a href="https://example.org/" target="_blank"'
+        ' rel="noopener noreferrer">link</a> $x^2$ gone upright <del>old</del> <u>new</u> <code>mono</code> [web]</p>'
+        '<blockquote><p>quoted<br>twice</p></blockquote><hr contenteditable="false"><pre><code>a = 1\n  b = 2</code></pre><h4>Small</h4>'
+        '<ul><li><p>one</p></li><li><p>two</p><ul><li><p>inner</p></li></ul></li></ul><ol><li><p>counted</p></li></ol>'
+        '<table><tbody><tr><th>a</th><th class="al-right">1</th><th class="al-center">c</th><th class="al-left">d</th></tr>'
+        '<tr><td>wide</td><td class="al-right"></td><td class="al-center"></td><td class="al-left"></td></tr></tbody></table>')
+    assert page.evaluate("window.hacked") is None
+    pasted = kept(page)
+    assert re.fullmatch(
+        r"## Results\n\nPlain \*\*bold\*\* \*slanted\* \*\*heavy\*\* \*leaning\* <u>under</u> ~~struck~~ H<sub>2</sub>O x<sup>2</sup> "
+        r"\[ohm\]\(https://en\.wikipedia\.org/wiki/Ohm_\(unit%29\) bad big red!\[pic\]\(attachment:[0-9a-f]{12}\.png\)\n\n"
+        r"not bold <u>lined</u> ~~through~~ <sub>low</sub> <sup>high</sup> \[link\]\(https://example\.org/\) \$x\^2\$ gone "
+        r"upright ~~old~~ <u>new</u> `mono` !\[web\]\(https://example\.org/web%20\(1%29\.png\)\n\n"
+        r"> quoted\\\n> twice\n\n---\n\n```\na = 1\n  b = 2\n```\n\n#### Small\n\n"
+        r"- one\n- two\n  - inner\n\n1\. counted\n\n\| a \| 1 \| c \| d \|\n\| --- \| --: \| :-: \| :-- \|\n\| wide \|  \|  \|  \|", pasted), pasted
+    assert pictures(page, 2)[0]["shown"] == [120, 60]
+
+    # A word processor's table stays a table (a paragraph in a cell is a line
+    # of the cell) and its list is a list.
+    below()
+    keys.type('"')
+    assert page.evaluate(PASTE, [[], [["text/html", OFFICE], ["text/plain", "Part Value"]]]) is True
+    assert kept(page) == ("| Part | **Value** |\n| --- | --- |\n| R1<br>second line | 10 k |\n\n- One\n  - Within\n- Two\n\nBetween\n\n"
+                          "1. First\n2. Second\n\n- an item<br>in two paragraphs")
+    keys.press("Delete")                                        # (the region is selected: it has served)
+
+    # Copied out of a text, it goes as formatted text for programs that take
+    # that (a picture with what it shows), and as its markdown for the others.
+    page.locator(".region.text").first.click(modifiers=["Shift"])
+    reopen(page)
+    keys.press("Control+a")
+    copied = page.evaluate(COPIED)
+    assert copied["text"] == pasted
+    assert "<h2" in copied["html"] and "<strong>bold</strong>" in copied["html"] and "<sub>2</sub>" in copied["html"]
+    assert 'src="data:image/png;base64,' + BITMAP in copied["html"] and "attachment:" not in copied["html"]
+    # A piece from inside a paragraph is that piece and no more.
+    keys.press("Control+Home")
+    keys.press("ArrowDown")
+    for _ in range(10):
+        keys.press("Shift+ArrowRight")
+    frame(page)
+    assert page.evaluate(COPIED)["text"] == "Plain **bold**"
+    keys.press("Escape")
+    # A region copied on the page goes as formatted text as well — the same
+    # text, whichever way it was copied.
+    region = page.evaluate(COPIED)
+    assert region["text"] == pasted and "application/x-edsl-regions" in region["types"]
+    assert region["html"] == copied["html"].replace(' data-pm-slice="0 0 []"', "")
+    assert 'data-tex="x^2">$x^2$</span>' in region["html"] and "katex" not in region["html"]
+
+    # Formatted text pasted into another region arrives formatted — formulas and pictures with it.
+    below()
+    keys.type('"')
+    keys.type("From $E=mc^2$ on:")
+    keys.press("Enter")
+    keys.type("$$a^2$$")
+    keys.press("Control+a")
+    formula = page.evaluate(COPIED)
+    assert formula["text"] == "From $E=mc^2$ on:\n\n$$a^2$$"
+    assert ">$E=mc^2$</span>" in formula["html"] and ">$$a^2$$</div>" in formula["html"]      # (what another program shows of them)
+    keys.press("Control+End")
+    assert page.evaluate(PASTE, [[], [["text/html", formula["html"]], ["text/plain", "not this"]]]) is True
+    assert page.locator(".region .ProseMirror .formula").count() == 4
+    assert kept(page) == "From $E=mc^2$ on:\n\n$$a^2$$\n\nFrom $E=mc^2$ on:\n\n$$a^2$$"
+    keys.press("Enter")
+
+    # So a region copied on the page can be pasted into a text being written.
+    keys.press("Control+a")
+    keys.press("Delete")
+    assert page.evaluate(PASTE, [[], [["text/html", region["html"]], ["text/plain", region["text"]], ["application/x-edsl-regions", "[]"]]]) is True
+    page.wait_for_function("document.querySelector('.region.editing img[alt=pic]')?.naturalWidth === 120")
+    assert page.locator(".region.editing .formula").count() == 1 and page.locator(".region.editing table").count() == 1
+    assert kept(page).startswith("## Results\n\nPlain **bold**")
+    keys.press("Enter")
+
+    # Plain text is read as the markdown it may be, each of its lines a
+    # line; pasted with Shift held as well, it is put in just as it is.
+    keys.press("Control+a")
+    keys.press("Delete")
+    plain = "first line\nsecond *line*\n\n- an item\n- $x^2$ and <u>tags</u>, a_b_c and $5"
+    assert page.evaluate(PASTE, [[], [["text/plain", plain]]]) is True
+    assert page.evaluate(WRITTEN) == ("<p>first line<br>second <em>line</em></p><ul><li><p>an item</p></li>"
+                                      "<li><p>$x^2$ and <u>tags</u>, a_b_c and $5</p></li></ul>")
+    assert kept(page) == "first line\\\nsecond *line*\n\n- an item\n- $x^2$ and <u>tags</u>, a_b_c and $5"
+    keys.press("Enter")
+    keys.press("Control+a")
+    keys.press("Delete")
+    keys.down("Shift")
+    assert page.evaluate(PASTE, [[], [["text/plain", "as *it* is: $5$\nline two"], ["text/html", "<b>not this</b>"]]]) is True
+    keys.up("Shift")
+    assert page.evaluate(WRITTEN) == "<p>as *it* is: $5$</p><p>line two</p>"
+    assert kept(page) == "as \\*it\\* is: \\$5\\$\n\nline two"
+    # A picture alone is the sheet's to place: into the text, at the caret
+    # (and the keyboard never leaves the text for it).
+    keys.press("Enter")
+    assert page.evaluate("([paste, file]) => [eval(paste)([[file], []]), %s]" % IN_TEXT,
+                         [PASTE, ["image.png", "image/png", BITMAP]]) == [True, True]
+    page.wait_for_selector(".region .ProseMirror img[alt=picture]")
+    assert page.evaluate(WRITTEN) == "<p>as *it* is: $5$</p><p>line two[picture]</p>"
+    # So is a picture file let go of over the text, whatever comes with it
+    # (a web page sends the picture's address along): the text is finished,
+    # and the picture lands on the page — once.
+    assert page.evaluate("""([file, make]) => {
+        const data = new DataTransfer();
+        data.items.add(eval(make)(file));
+        data.setData('text/html', '<img src="https://example.org/remote.png" alt="remote">');
+        const text = document.querySelector('.region .ProseMirror'), box = text.getBoundingClientRect();
+        return ['dragover', 'drop'].map((kind) => {
+            const event = new DragEvent(kind, {bubbles: true, cancelable: true, clientX: box.left + 20, clientY: box.top + 10, dataTransfer: data});
+            text.dispatchEvent(event);
+            return event.defaultPrevented;
+        });
+    }""", [["dropped.png", "image/png", BITMAP], FILE]) == [True, True]
+    dropped = pictures(page, 4)
+    assert [p["picture"] for p in dropped] == [False, False, True] and page.query_selector(".region.editing") is None
+    keys.press("Control+a")
+    assert "remote" not in page.evaluate(COPIED)["text"]
+
+    # A math region goes to other programs as its text.
+    below()
+    keys.type("k := 1")
+    keys.press("Enter")
+    settled(page)
+    keys.press("Control+a")
+    assert "<pre>k := 1</pre>" in page.evaluate(COPIED)["html"]
+    assert page.evaluate("document.querySelectorAll('.region.has-error').length") == 0
+
+
+ODD = ("Setext heading?\n===\n\n__bold__ and _slanted_ text,   with   blanks\nand a second line\n\n"
+       "* star item\n* another\n\n+ plus item\n\n| a | b |\n|:-|-:|\n| 1 | 2 |\n\nLast paragraph.")
+BEGINS = "\n\n  Begins after empty lines."
+# The middle of a letter of the text shown: the `into`-th of the first place `word` stands.
+LETTER = """([word, into]) => {
+    const walker = document.createTreeWalker(document.querySelector('#content'), NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const at = node.data.indexOf(word);
+        if (at < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, at + into);
+        range.setEnd(node, at + into + 1);
+        const box = range.getBoundingClientRect();
+        return [box.left + 1, box.top + box.height / 2];
+    }
+}"""
+
+
+def test_a_text_someone_else_wrote_stays_as_it_was_written_where_it_is_not_changed(page_and_folder):
+    # A notebook's text may be spelled in ways this editor would not spell
+    # it.  What is not changed is written back as it stood, letter for letter.
+    page, folder = page_and_folder
+    nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_markdown_cell(ODD), nbformat.v4.new_markdown_cell(BEGINS)]),
+                   str(folder / "odd.ipynb"))
+    page.goto(page.url.split("?")[0] + "?open=odd.ipynb")
+    page.wait_for_selector(".region.text table")
+    keys = page.keyboard
+    click = lambda word, into=2: page.mouse.click(*page.evaluate(LETTER, [word, into]))        # noqa: E731
+
+    # Opened and closed, nothing has changed — not the empty lines a text
+    # begins with, either.
+    click("Last")
+    assert page.query_selector(".region .formatbar") is not None
+    assert kept(page) == ODD
+    click("Begins")
+    assert kept(page) == BEGINS and page.evaluate("document.querySelector('#doc-dirty').hidden")
+    # The caret goes where the text was clicked; only that paragraph is written anew.
+    click("Last", 2)
+    keys.type("#")
+    keys.press("End")
+    keys.type(" More.")
+    changed = ODD.replace("Last paragraph.", "La#st paragraph. More.")
+    assert kept(page) == changed and page.evaluate("!document.querySelector('#doc-dirty').hidden")
+    # Undo on the sheet takes the edit back in one step; redo brings it again.
+    keys.press("Control+z")
+    keys.press("Control+a")
+    assert page.evaluate(COPIED)["text"] == ODD + "\n\n" + BEGINS
+    keys.press("Control+y")
+    keys.press("Control+a")
+    assert page.evaluate(COPIED)["text"] == changed + "\n\n" + BEGINS
+    keys.press("Escape")
+    # While a text is written Ctrl+Z is the text's own; what is changed and
+    # changed back is as it stood.
+    click("star", 4)
+    keys.type("XY")
+    keys.press("Control+z")
+    assert kept(page) == changed
+    click("Begins")
+    keys.press("End")
+    keys.type("!")
+    keys.press("Control+z")
+    keys.press("Control+y")                                     # and Ctrl+Y brings back what Ctrl+Z took
+    assert kept(page) == "Begins after empty lines.!"
+    # Touched, a block is spelled this editor's way — that block alone.
+    click("star", 4)
+    keys.type("s")
+    changed = changed.replace("* star item\n* another", "- stars item\n- another")
+    assert kept(page) == changed
+    click("slanted", 3)
+    keys.type("#")
+    changed = changed.replace("__bold__ and _slanted_ text,   with   blanks\nand a second line",
+                              "**bold** and *sla#nted* text,   with   blanks and a second line")
+    assert kept(page) == changed
+    # Zoomed, the caret still goes where the text was clicked.
+    keys.press("Escape")
+    for _ in range(3):
+        keys.press("Control+=")
+    assert page.evaluate("document.querySelector('#paper').style.zoom") == "1.3"
+    click("another", 3)
+    keys.type("#")
+    assert kept(page) == changed.replace("- another", "- ano#ther")
+    # The bar of a text that stands far to the right stays on the paper
+    # (it reaches to the left of the text instead), enlarged as it is here.
+    keys.press("Escape")
+    box = page.locator("#content").bounding_box()
+    bottom = page.evaluate("Math.max(...[...document.querySelectorAll('.region')].map((r) => r.getBoundingClientRect().bottom))")
+    page.mouse.click(box["x"] + 0.85 * box["width"], bottom + 60)
+    keys.type('"')
+    assert page.evaluate("""() => {
+        const bar = document.querySelector('.formatbar').getBoundingClientRect();
+        const paper = document.querySelector('#paper').getBoundingClientRect(), desk = document.querySelector('#desk');
+        return [bar.width > 300, bar.left >= paper.left, bar.right <= paper.right, desk.scrollWidth <= desk.clientWidth];
+    }""") == [True, True, True, True]
+    keys.press("Escape")
+    assert page.evaluate("document.querySelectorAll('.region.has-error').length") == 0
+
+
+# What Word puts on the clipboard for prose — the shape of a real one (Word
+# 15, read off a clipboard with every letter replaced): a whole document, its
+# head full of styles and of settings in a comment; one paragraph; and the
+# paragraph that was not selected to its end as bare spans, a bullet made
+# by hand before it.
+PROSE = ('<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word">\n\n<head>\n'
+         '<meta http-equiv=Content-Type content="text/html; charset=utf-8">\n<meta name=Generator content="Microsoft Word 15">\n'
+         '<!--[if gte mso 9]><xml>\n <w:WordDocument>\n  <w:View>Normal</w:View>\n  <w:Zoom>0</w:Zoom>\n </w:WordDocument>\n</xml><![endif]-->\n'
+         '<style>\n<!--\n p.MsoNormal {margin:0cm; font-size:11.0pt; font-family:"Calibri",sans-serif;}\n-->\n</style>\n</head>\n\n'
+         "<body lang=EN-GB style='tab-interval:36.0pt;word-wrap:break-word'>\n<!--StartFragment-->\n\n"
+         "<p class=MsoNormal style='margin-top:0cm;margin-left:48.0pt;text-indent:-24.0pt;line-height:normal'><span style='font-size:16.0pt;\n"
+         "font-family:\"Helvetica\",sans-serif;color:black;mso-font-kerning:0pt'>The gain is set by two resistors.\n"
+         "It (really) is \u2018that\u2019 simple, if x = 5 and the load is light. <o:p></o:p></span></p>\n\n"
+         "<span style='font-size:16.0pt;line-height:107%;font-family:\"Helvetica\",sans-serif;color:black'>-</span><span style='font-size:9.0pt;line-height:\n"
+         "107%;font-family:\"TimesNewRomanPSMT\",serif;color:black'>&nbsp;&nbsp;&nbsp;\n</span><span style='font-size:16.0pt;line-height:107%;"
+         "font-family:\"Helvetica\",sans-serif;color:black'>Each stage\nadds noise </span><!--EndFragment-->\n</body>\n\n</html>\n")
+PROSE_KEPT = ("The gain is set by two resistors. It (really) is \u2018that\u2019 simple, if x = 5 and the load is light.\n\n"
+              "\\-\xa0\xa0\xa0 Each stage adds noise")
+# A web page's, with the styles a browser writes into what it copies; and code, as editors of programs write it.
+WEB = ('<meta charset="utf-8"><b style="font-weight:normal;" id="docs-internal-guid-1"><p dir="ltr" style="line-height:1.38;"><span style="font-size:11pt;'
+       'font-family:Arial,sans-serif;font-weight:700;white-space:pre-wrap;">Bold</span><span style="font-size:11pt;white-space:pre-wrap;"> words </span>'
+       '<img src="data:image/png;base64,%s" alt="pic"></p></b>') % BITMAP
+CODE = ('<meta charset=\'utf-8\'><div style="color: #cccccc;background-color: #1f1f1f;font-family: Consolas, \'Courier New\', monospace;'
+        'font-size: 14px;line-height: 19px;white-space: pre;"><div><span style="color: #9cdcfe;">x</span><span style="color: #cccccc;"> := </span>'
+        '<span style="color: #b5cea8;">2</span><span style="color: #cccccc;"> V</span></div></div>')
+
+
+def test_formatted_text_pasted_on_the_page_is_a_text_region_and_code_is_taken_as_typed(page_and_folder):
+    page, _ = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    paper = page.locator("#content").bounding_box()
+    kinds = "[...document.querySelectorAll('.region')].map((r) => r.className.replace('region ', ''))"
+    pasted = lambda html, words: page.evaluate(PASTE, [[], [["text/html", html], ["text/plain", words]]])        # noqa: E731
+
+    # Prose from a word processor, pasted with the cursor on the page, is
+    # text — a text region of its own — whatever its words would be as a
+    # calculation.  It is left selected, and the cursor waits below it.
+    page.mouse.click(paper["x"] + 40, paper["y"] + 40)
+    assert pasted(PROSE, "The gain is set by two resistors. It (really) is 'that' simple, if x = 5 and the load is light.\r\n- Each stage adds noise") is True
+    assert page.evaluate(kinds) == ["text selected"] and page.evaluate("document.activeElement.id") == "sink"
+    assert page.evaluate(COPIED)["text"] == PROSE_KEPT
+    assert page.evaluate("[...document.querySelectorAll('.region.text .md > *')].map((block) => [block.tagName, block.textContent])") == [
+        ["P", "The gain is set by two resistors. It (really) is \u2018that\u2019 simple, if x = 5 and the load is light."],
+        ["P", "-\xa0\xa0\xa0 Each stage adds noise"]]
+    box = page.evaluate(BOXES)[0]
+    assert (box["left"], box["top"], round(box["width"])) == (40, 32, 640)
+    cross = page.evaluate("[parseFloat(document.querySelector('#cross').style.left), parseFloat(document.querySelector('#cross').style.top)]")
+    assert cross[0] == 40 and cross[1] >= box["top"] + box["height"] and page.evaluate("!document.querySelector('#doc-dirty').hidden")
+    keys.press("Control+z")                                     # one step to take back, and to redo
+    assert page.evaluate(kinds) == []
+    keys.press("Control+y")
+    assert page.evaluate(kinds) == ["text"]
+
+    # So with what a web page gives — a picture that comes with it as data is attached to the region.
+    page.mouse.click(paper["x"] + 40, paper["y"] + 300)
+    assert pasted(WEB, "Bold words") is True
+    assert pictures(page, 1)[0]["shown"] == [120, 60]
+    assert re.fullmatch(r"\*\*Bold\*\* words !\[pic\]\(attachment:[0-9a-f]{12}\.png\)", page.evaluate(COPIED)["text"])
+    assert page.evaluate(kinds) == ["text", "text selected"]
+    # A word processor's table and its list come out as they do in a text that is being written.
+    assert pasted(OFFICE, "Part Value") is True
+    assert page.evaluate(COPIED)["text"] == ("| Part | **Value** |\n| --- | --- |\n| R1<br>second line | 10 k |\n\n- One\n  - Within\n- Two\n\n"
+                                             "Between\n\n1. First\n2. Second\n\n- an item<br>in two paragraphs")
+    keys.press("Delete")
+    assert page.evaluate(kinds) == ["text", "text"]
+
+    # Code is formatted, too, where it was copied in an editor of programs
+    # — in a <pre>, or with its line ends kept by its style: it is taken
+    # as it is typed, like plain text (which a browser hands to the sheet
+    # by itself: the page does not take the paste).
+    page.mouse.click(paper["x"] + 40, paper["y"] + 520)
+    for html in (CODE, "<pre>x := 2 V\ny := 3 V</pre>", "<p><code>x := 2 V</code></p>", '<span style="white-space:pre;">x := 2 V</span>',
+                 "<p> </p>", ""):
+        assert pasted(html, "x := 2 V") is False
+    assert pasted("<p>The words <code>x := 2 V</code> in a sentence.</p>", "The words x := 2 V in a sentence.") is True
+    assert page.evaluate(COPIED)["text"] == "The words `x := 2 V` in a sentence."
+    keys.press("Delete")
+    # Pasted with Shift held as well, everything is taken as it is typed.
+    page.evaluate(KEY, ["V", "KeyV", 86, {"ctrlKey": True, "shiftKey": True}])
+    assert pasted(PROSE, "The gain") is False
+    assert pasted(PROSE, "The gain") is True                    # (the next one — from the browser's menu, no key at all — is not held to that)
+    keys.press("Delete")
+    page.evaluate(KEY, ["v", "KeyV", 86, {"ctrlKey": True}])
+    assert pasted(PROSE, "The gain") is True
+    keys.press("Delete")
+    # What is pasted while a math region is being written is that region's.
+    keys.type("k := 1 + ")
+    assert pasted(PROSE, "2") is False and page.evaluate(kinds) == ["text", "text", "math editing"]
+    keys.type("2")
+    keys.press("Enter")
+    settled(page)
+    assert page.evaluate(kinds) == ["text", "text", "math"] and "3" in shown(page)[2]
+    assert page.evaluate("document.querySelectorAll('.region.has-error').length") == 0

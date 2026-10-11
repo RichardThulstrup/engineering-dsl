@@ -81,9 +81,10 @@ packages = ["utils", "utils.worksheet"]
 
 [tool.setuptools.package-data]
 utils = ["templates/edsl-print/*"]
-# The worksheet's front end, including the vendored KaTeX and MathLive
-# (both MIT; their licences travel with them in static/vendor/).
+# The worksheet's front end, including the vendored KaTeX, MathLive and
+# ProseMirror (all MIT; their licences travel with them in static/vendor/).
 "utils.worksheet" = [
     "static/*", "static/css/*", "static/js/*", "static/data/*",
     "static/vendor/katex/*", "static/vendor/katex/fonts/*", "static/vendor/mathlive/*",
+    "static/vendor/prosemirror/*",
 ]

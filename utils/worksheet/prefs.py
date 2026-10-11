@@ -1,7 +1,8 @@
 """How someone likes the page set up: kept on this computer, for every sheet.
 
-Whether the grid is shown and the symbol panel open is a matter of how a
-person works, not part of a worksheet, so it is not stored in notebooks.
+Whether the grid is shown, the symbol panel open and text written as its
+markdown is a matter of how a person works, not part of a worksheet, so
+it is not stored in notebooks.
 The browser cannot keep it either: its storage goes by port, and the
 server takes the next free port when its usual one is busy.  It lives in
 a small file in Jupyter's data folder, beside Jupyter's record of which
@@ -15,7 +16,7 @@ from pathlib import Path
 
 __all__ = ["DEFAULTS", "load", "save"]
 
-DEFAULTS = {"grid": False, "symbols": False}
+DEFAULTS = {"grid": False, "symbols": False, "markdown": False}
 
 
 def _file() -> Path:

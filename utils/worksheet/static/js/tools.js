@@ -7,7 +7,7 @@
 // with the KaTeX fonts the sheet already has.
 
 import { el } from "./util.js";
-import { formulaAt, tableMarkdown } from "./textaids.js";
+import { tableMarkdown } from "./textaids.js";
 
 export const TOOLS = ["Formula", "Table"];
 
@@ -27,8 +27,8 @@ function loadMathlive() {
 /**
  * @param {object} hooks
  * @param {(text: string, options?: object) => void} hooks.insertMarkdown   into the text region (or a new one)
- * @param {() => ({value: string, caret: number}|null)} hooks.textCaret     the text being written, if any
- * @param {(start: number, end: number, text: string) => void} hooks.replaceText
+ * @param {() => ({start, end, latex, display}|null)} hooks.formula          the formula the caret is in (or that is selected)
+ * @param {(latex, display, found, replace) => void} hooks.putFormula       in its place, beside it, or at the caret
  * @param {() => void} hooks.refocus                                        the keyboard, back to the sheet
  */
 function formulaTool(hooks) {
@@ -61,7 +61,7 @@ function formulaTool(hooks) {
     inline.classList.toggle("primary", !apart);
     display.classList.toggle("primary", apart);
     note.textContent = editing
-      ? "This is the formula the caret is in. Change it here and put it back."
+      ? "This is the formula the caret is in, or that is selected in the text. Change it here and put it back."
       : "Write the formula as you would say it: a/b is a fraction, ^ a power, _ an index, and \\ begins a name " +
         "(\\alpha, \\sqrt, \\int). Enter puts it into the text you are writing — or starts a text region.";
   }
@@ -71,8 +71,7 @@ function formulaTool(hooks) {
   /** With the caret inside a formula of the text, take that formula up for changing. */
   function adopt() {
     if (!field) return;
-    const text = hooks.textCaret();
-    const found = text ? formulaAt(text.value, text.caret) : null;
+    const found = hooks.formula();
     if (!found) editing = null;                          // the caret is elsewhere: what is here is new
     else if (!same(found, editing) && (editing || !value())) {
       editing = found;                                   // (a formula begun here is not thrown away for it)
@@ -84,13 +83,9 @@ function formulaTool(hooks) {
   function put(asDisplay) {
     const now = value();
     if (!now) return;
-    const text = hooks.textCaret();
-    const around = text ? formulaAt(text.value, text.caret) : null;
-    const formula = asDisplay ? `$$${now}$$` : `$${now}$`;
+    const around = hooks.formula();
     handedBack = performance.now();
-    if (same(around, editing)) hooks.replaceText(around.start, around.end, formula);
-    else if (around) hooks.replaceText(around.end, around.end, " " + formula);      // beside it, never inside
-    else hooks.insertMarkdown(formula, { block: asDisplay });
+    hooks.putFormula(now, asDisplay, around, same(around, editing));
     editing = null;
     field.value = "";
     refresh();

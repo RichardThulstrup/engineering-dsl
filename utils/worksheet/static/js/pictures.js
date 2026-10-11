@@ -64,6 +64,15 @@ export function named(source, attachments) {
   return kept;
 }
 
+/**
+ * A picture that came as a data address (in text pasted from another
+ * program): {name, bundle} to attach it by — null if it is none this page shows.
+ */
+export function attachment(address) {
+  const m = /^data:(image\/[\w.+-]+);base64,([A-Za-z0-9+/]+={0,2})$/.exec(address);
+  return m && ENDING[m[1]] ? { name: `${uid()}.${ENDING[m[1]]}`, bundle: { [m[1]]: m[2] } } : null;
+}
+
 /** How a picture is written into a text. */
 export function reference(picture) {
   return `![${picture.alt}](attachment:${picture.name})`;

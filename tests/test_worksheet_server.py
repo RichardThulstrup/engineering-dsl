@@ -499,17 +499,19 @@ def test_what_was_chosen_for_the_page_is_kept_for_the_next_server(server):
     assert fetch(server, "/api/prefs", cookie=False)[0] == 403
     assert fetch(server, "/api/prefs", cookie=False, method="PUT", body={"grid": True})[0] == 403
     status, _, text = fetch(server, "/api/prefs")
-    assert status == 200 and json.loads(text) == {"grid": False, "symbols": False}        # no grid until asked for
+    # No grid until asked for; text is written as it looks, not as its markdown.
+    assert status == 200 and json.loads(text) == {"grid": False, "symbols": False, "markdown": False}
     # A choice is taken over; what is not a preference, or not of its kind, is not.
     status, _, text = fetch(server, "/api/prefs", method="PUT", body={"grid": True, "theme": "dark", "symbols": "yes"})
-    assert status == 200 and json.loads(text) == {"grid": True, "symbols": False}
+    assert status == 200 and json.loads(text) == {"grid": True, "symbols": False, "markdown": False}
+    assert json.loads(fetch(server, "/api/prefs", method="PUT", body={"markdown": True})[2])["markdown"] is True
     assert fetch(server, "/api/prefs", method="PUT", body=["grid"])[0] == 400
     try:
         # Another server on the same computer -- on another port, as a second
         # window of the app is -- finds it.
         with launch(server.folder) as other:
             assert other.port != server.port
-            assert json.loads(fetch(other, "/api/prefs")[2]) == {"grid": True, "symbols": False}
+            assert json.loads(fetch(other, "/api/prefs")[2]) == {"grid": True, "symbols": False, "markdown": True}
     finally:
-        fetch(server, "/api/prefs", method="PUT", body={"grid": False})
+        fetch(server, "/api/prefs", method="PUT", body={"grid": False, "markdown": False})
     assert json.loads(fetch(server, "/api/prefs")[2])["grid"] is False
