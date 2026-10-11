@@ -501,6 +501,45 @@ def test_every_page_of_a_long_sheet_is_printed_where_the_screen_has_it(page_and_
     assert places["https://example.org/end/1"][1] - places["https://example.org/top/1"][1] == 1009 - 48 - 16
 
 
+def test_what_is_changed_while_a_sheet_is_being_saved_is_still_to_be_saved(page_and_folder):
+    # Saving takes a moment — a long one for a sheet full of pictures on a
+    # slow disk.  What is typed in that moment is not in the file; the sheet
+    # said it was saved all the same, and would have closed without a word.
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    sources = lambda: [cell.source for cell in nbformat.read(str(folder / "slow.ipynb"), as_version=4).cells[1:]]      # noqa: E731
+    keys.type("first := 5")
+    keys.press("Enter")
+    settled(page)
+    save_as(page, "slow.ipynb")
+    page.wait_for_function("document.querySelector('#doc-dirty').hidden")
+    keys.type("second := 6")
+    keys.press("Enter")
+    settled(page)
+    # The save is held up on its way to the server.
+    held = []
+    page.route("**/api/doc?*", lambda route: held.append(route) if route.request.method == "PUT" else route.continue_())
+    page.evaluate("document.querySelector('#toast').hidden = true")
+    keys.press("Control+s")
+    for _ in range(100):
+        if held:
+            break
+        page.wait_for_timeout(50)
+    keys.type("third := 7")
+    keys.press("Enter")
+    page.wait_for_function("document.querySelectorAll('.region').length === 3")
+    held[0].continue_()
+    page.wait_for_function(f"{TOAST} === 'Saved'")
+    page.unroute("**/api/doc?*")
+    assert sources() == ["first := 5", "second := 6"]
+    assert page.evaluate("!document.querySelector('#doc-dirty').hidden") and page.title().startswith("\u2022 ")
+    # Saved again, with nothing changed meanwhile, it is all in the file, and the sheet says so.
+    save(page)
+    assert sources() == ["first := 5", "second := 6", "third := 7"]
+    assert page.evaluate("document.querySelector('#doc-dirty').hidden") and page.title() == "slow \u2014 Worksheet"
+
+
 BOXES = """() => [...document.querySelectorAll('.region')].map((r) => {
     const box = r.getBoundingClientRect();
     return {left: parseFloat(r.style.left), top: parseFloat(r.style.top), width: box.width, height: box.height};
@@ -728,6 +767,14 @@ def save_as(page, name):
     page.keyboard.press("Control+s")
     page.fill(".dialog input[type=text]", name)
     page.keyboard.press("Enter")
+
+
+def save(page):
+    """Ctrl+S on a sheet that has a file, and the server's answer taken in."""
+    page.evaluate("document.querySelector('#toast').hidden = true")
+    with page.expect_response(lambda response: "/api/doc" in response.url and response.request.method == "PUT"):
+        page.keyboard.press("Control+s")
+    page.wait_for_function(f"{TOAST} === 'Saved'")
 
 
 def frame(page):

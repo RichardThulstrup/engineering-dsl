@@ -24,6 +24,7 @@ const state = {
   // not in the sheet (and not in the browser, whose storage goes by port).
   prefs: { grid: false, symbols: false, markdown: false },
   dirty: false,
+  changes: 0,               // counts them: has anything changed since a save set out?
   kernel: "none",
   online: false,
   vocab: null,
@@ -77,16 +78,22 @@ const conn = new Conn({
 // status, title, banner
 // ---------------------------------------------------------------------------
 
+/** The sheet has been changed (true), or is as its file has it (false). */
 function setDirty(dirty) {
   state.dirty = dirty;
-  $("#doc-dirty").hidden = !dirty;
-  document.title = `${dirty ? "• " : ""}${state.name} — Worksheet`;
+  if (dirty) state.changes += 1;
+  showDirty();
+}
+
+function showDirty() {
+  $("#doc-dirty").hidden = !state.dirty;
+  document.title = `${state.dirty ? "• " : ""}${state.name} — Worksheet`;
 }
 
 function setTitle() {
   $("#doc-name").textContent = state.name;
   $("#doc-title").title = state.path || "not saved yet";
-  setDirty(state.dirty);
+  showDirty();
 }
 
 const STATUS_TEXT = {
@@ -413,6 +420,7 @@ async function save(as = false) {
     create = path !== state.path;
   }
   sheet.settle();
+  const changes = state.changes;            // (what is changed from here on is not in what is saved)
   const doc = { settings: state.settings, trusted: state.trusted && sheet.calculated,
                 preamble: state.preamble, regions: sheet.serialize(state.settings.showResults) };
   if (weight(doc.regions) > LIMITS.sheet) {
@@ -429,7 +437,8 @@ async function save(as = false) {
       state.name = data.name;
       state.mtime = data.mtime;
       setTitle();
-      setDirty(false);
+      // Saved — but for what was changed while the server was writing.
+      if (state.changes === changes) setDirty(false);
       const url = new URL(location.href);
       url.searchParams.set("open", state.path);
       history.replaceState(null, "", url);
