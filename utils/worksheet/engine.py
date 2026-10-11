@@ -977,7 +977,7 @@ class Engine:
     def user_names(self):
         """Names the sheet has defined, for completion in the editor."""
         return sorted(name for name, value in self.ns.items()
-                      if not name.startswith("_")
+                      if isinstance(name, str) and not name.startswith("_")       # (``globals()[5] = 3`` names nothing)
                       and self.baseline.get(name, MISSING) is not value)
 
     def op_hello(self, request):

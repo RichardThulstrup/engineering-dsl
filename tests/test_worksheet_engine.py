@@ -93,6 +93,14 @@ def test_a_deleted_definition_is_gone(kernel):
     assert kernel.calc(["y := x + 1"]).error(0) == "NameError"
 
 
+def test_what_a_sheet_keeps_under_a_key_that_is_no_name_is_none_of_its_names(kernel):
+    # globals() is the sheet's namespace, and takes any key.  The engine's
+    # list of the sheet's names once tripped over one that is no text —
+    # and with it every calculation of the sheet.
+    p = kernel.calc(["globals()[5] = 3\nx := 2", "x + 1"])
+    assert p.value(1) == "3" and p.done["names"] == ["x"]
+
+
 def test_stopping_a_calculation(kernel):
     timer = threading.Timer(1.5, kernel.manager.interrupt_kernel)
     timer.start()
