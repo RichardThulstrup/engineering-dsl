@@ -46,6 +46,9 @@ import urllib.parse
 
 __all__ = ["print_view", "hardcopy"]
 
+# nbconvert's words when Playwright cannot start its browser.
+_NO_BROWSER = "No suitable chromium executable found"
+
 
 def _session_path():
     """The notebook's path from ``JPY_SESSION_NAME``, or None.
@@ -302,6 +305,21 @@ def hardcopy(notebook=None, to=None, timeout=600, execute=False):
 
         proc = subprocess.run(
             [*entry, "--to", to, *extra_args, str(export_src)], **run_kwargs)
+        if (proc.returncode != 0 and to in ("webpdf", "edsl_pdf")
+                and _NO_BROWSER in (proc.stderr or "")):
+            # Playwright is installed but its browser is not: never
+            # fetched, or Playwright has been upgraded since — every
+            # version of it wants a browser build of its own.
+            print(
+                "PDF output needs Playwright's browser, which is not there (it is\n"
+                "fetched once, and again whenever Playwright has been upgraded):\n"
+                "    python -m playwright install chromium\n"
+                "Falling back to HTML for now (math needs internet to display)."
+            )
+            to = "html"
+            proc = subprocess.run(
+                [sys.executable, "-m", "nbconvert", "--to", to, *extra_args,
+                 str(export_src)], **run_kwargs)
         if proc.returncode != 0:
             tail = "\n".join((proc.stderr or "").splitlines()[-12:])
             raise RuntimeError(f"nbconvert failed:\n{tail}")

@@ -318,7 +318,8 @@ ships two replacements that work out of the box:
   next to it (`hardcopy('DSL_Manual.ipynb')` to pick another). It warns
   when the saved file has no outputs; `hardcopy(execute=True)` runs the
   notebook fresh during export instead of relying on what was saved.
-  PDF output needs a browser to print with, fetched once:
+  PDF output needs a browser to print with, fetched once and again
+  whenever Playwright has been upgraded:
 
   ```bash
   python -m playwright install chromium
@@ -327,7 +328,7 @@ ships two replacements that work out of the box:
   (Playwright itself came with step 3 of [Install](#install); where
   the toolkit was installed without the `all` extra, first run
   `python -m pip install "nbconvert[webpdf]"`.) Without it, `hardcopy()`
-  falls back to a standalone `.html`.
+  falls back to a standalone `.html` and repeats the command.
 
 For batch exports of all the manuals (HTML + GitHub-renderable Markdown
 + PDF in one go, executed once per notebook), use
