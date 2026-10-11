@@ -15,6 +15,13 @@
 // nothing else (see pictures.js): it fills its region, so the region's
 // width is the picture's, and a click selects it instead of opening its
 // text.
+//
+// The sheet is one strip, from its top down, and a page takes PAGE_H of
+// it.  With a header and a footer (pageframe.js) a page takes less: they
+// stand between the pages' parts of the strip, on screen as on paper.
+// Positions of regions and of the cursor are places on the strip; only
+// where something is drawn, or the pointer read, is a place on the strip
+// turned into one on the paper (`this.geo`) and back.
 
 import { $, clamp, el, snap, toast, uid } from "./util.js";
 import { aligned, distributed, NEEDED } from "./arrange.js";
@@ -23,6 +30,7 @@ import { formatted, pastedText, RichEditor } from "./richtext.js";
 import { renderMarkdown } from "./markdown.js";
 import { notebookOutputs, outputsNode, renderItems, renderSource } from "./mathview.js";
 import { bringsFiles, carried, collect, KINDS_SAID, lonePicture, named, reference } from "./pictures.js";
+import { paged } from "./pageframe.js";
 
 // Page geometry — mirrored in css/worksheet.css.
 export const CONTENT_W = 680;          // A4 less 15 mm margins, at 96 dpi
@@ -65,6 +73,7 @@ export class Sheet {
    *   highlight                (text, caret) => html
    *   settings()               {showResults}
    *   prefs()                  {markdown}: text is written as its markdown, not as it looks
+   *   frame()                  the header or the footer of a page was double-clicked
    */
   constructor(hooks) {
     this.hooks = hooks;
@@ -90,7 +99,24 @@ export class Sheet {
     this.rankCounter = 0;
     this.press = null;
     this.breaks = [];
+    this.frame = null;                  // the pages' header and footer: {head, foot, band(), stamp}
+    this.geo = paged(0, 0, PAGE_H);     // where things are on paper
+    this.bands = [];                    // per page shown: what is drawn of the frame
     this.bind();
+  }
+
+  /**
+   * Give the pages a header and a footer — or none (null).  `frame` is
+   * {head, foot} — how high they are, in px — with band(which, page,
+   * pages), which draws the "header" or the "footer" of a page (or
+   * returns null), and a `stamp` that is another one whenever they are
+   * to be drawn anew.
+   */
+  setFrame(frame) {
+    this.frame = frame;
+    this.geo = paged(frame ? frame.head : 0, frame ? frame.foot : 0, PAGE_H);
+    this.layout();
+    this.drawCross();
   }
 
   // ====================================================================
@@ -134,6 +160,11 @@ export class Sheet {
 
   bottom() {
     return this.regions.reduce((max, r) => Math.max(max, r.dy + r.h), 0);
+  }
+
+  /** How many pages have something on them: the pages a printer is given.  (Of an empty sheet, one.) */
+  printedPages() {
+    return Math.max(1, Math.ceil(this.bottom() / this.geo.body));
   }
 
   /** The document as it will be saved. */
@@ -297,9 +328,10 @@ export class Sheet {
   }
 
   /** Keep a region whole on one printed page where it fits on one. */
-  static offBreak(y, h) {
-    const page = Math.floor(y / PAGE_H);
-    return h <= PAGE_H && y + h > (page + 1) * PAGE_H ? (page + 1) * PAGE_H : y;
+  offBreak(y, h) {
+    const high = this.geo.body;
+    const page = Math.floor(y / high);
+    return h <= high && y + h > (page + 1) * high ? (page + 1) * high : y;
   }
 
   layout() {
@@ -325,7 +357,7 @@ export class Sheet {
       let y = 0;
       for (const region of this.regions) {
         region.dx = 0;
-        region.dy = Sheet.offBreak(y, region.h);
+        region.dy = this.offBreak(y, region.h);
         y = snap(region.dy + region.h + GAP + GRID / 2, GRID);
       }
     } else {
@@ -341,7 +373,7 @@ export class Sheet {
               moved = true;
             }
           }
-          const clear = Sheet.offBreak(y, region.h);
+          const clear = this.offBreak(y, region.h);
           if (clear !== y) { y = clear; moved = true; }
         }
         region.dx = region.x;
@@ -352,7 +384,7 @@ export class Sheet {
     for (const region of this.regions) {
       if (this.press && this.press.dragging && this.selected.has(region)) continue;
       region.el.style.left = `${region.dx}px`;
-      region.el.style.top = `${region.dy}px`;
+      region.el.style.top = `${this.geo.toPaper(region.dy)}px`;
     }
     const anchor = this.crossBelow;
     if (anchor && this.regions.includes(anchor) && !this.editing) {
@@ -363,12 +395,19 @@ export class Sheet {
   }
 
   drawBreaks() {
-    const pages = Math.max(1, Math.ceil((Math.max(this.bottom(), this.cross.y) + 200) / PAGE_H));
+    const { body, head, foot, framed, toPaper } = this.geo;
+    const bottom = this.bottom();
+    const pages = Math.max(1, Math.ceil((Math.max(bottom, this.cross.y) + 200) / body));
     this.content.style.minHeight = `${pages * PAGE_H}px`;
     // On paper the sheet ends with its last region (see the print rules
     // in worksheet.css): the room kept here for the cursor, and for
-    // going on, would come out of the printer as an empty page.
-    this.content.style.setProperty("--printed", `${this.bottom()}px`);
+    // going on, would come out of the printer as an empty page.  With a
+    // footer it ends with the page that region is on, and never before
+    // the header of that page.
+    const printed = this.printedPages();
+    const lowest = this.regions.reduce((low, r) => Math.max(low, toPaper(r.dy) + r.h), 0);
+    const ends = !framed ? bottom : foot ? printed * PAGE_H : Math.max(lowest, (printed - 1) * PAGE_H + head);
+    this.content.style.setProperty("--printed", `${ends}px`);
     while (this.breaks.length > pages - 1) this.breaks.pop().remove();
     while (this.breaks.length < pages - 1) {
       const n = this.breaks.length + 1;
@@ -376,6 +415,36 @@ export class Sheet {
       line.style.top = `${n * PAGE_H}px`;
       this.content.prepend(line);
       this.breaks.push(line);
+    }
+    this.drawFrame(pages, printed);
+  }
+
+  /**
+   * The header and the footer of every page shown.  Of these, `printed`
+   * are pages with something on them, and count; a page after them is
+   * there for going on, and its frame says what it will say then.
+   */
+  drawFrame(pages, printed) {
+    const frame = this.frame;
+    const shown = frame ? pages : 0;
+    for (const gone of this.bands.splice(shown)) gone.nodes.forEach((node) => node.remove());
+    for (let page = 0; page < shown; page += 1) {
+      const ahead = page >= printed;
+      const count = ahead ? page + 1 : printed;
+      const drawn = this.bands[page] || (this.bands[page] = { key: "", nodes: [] });
+      const key = `${frame.stamp} ${count} ${ahead}`;
+      if (drawn.key === key) continue;
+      drawn.key = key;
+      drawn.nodes.forEach((node) => node.remove());
+      drawn.nodes = [];
+      for (const which of ["header", "footer"]) {
+        const node = frame.band(which, page + 1, count);
+        if (!node) continue;
+        if (ahead) node.classList.add("ahead");
+        node.style.top = `${which === "header" ? page * PAGE_H : (page + 1) * PAGE_H - frame.foot}px`;
+        this.content.prepend(node);
+        drawn.nodes.push(node);
+      }
     }
   }
 
@@ -427,9 +496,10 @@ export class Sheet {
   // ====================================================================
   // cursor and selection
   // ====================================================================
+  /** Where on the sheet the pointer is.  (Over a header or a footer: at the nearest place of that page.) */
   point(event) {
     const rect = this.content.getBoundingClientRect();
-    return { x: (event.clientX - rect.left) / this.zoom, y: (event.clientY - rect.top) / this.zoom };
+    return { x: (event.clientX - rect.left) / this.zoom, y: this.geo.toSheet((event.clientY - rect.top) / this.zoom) };
   }
 
   /**
@@ -449,10 +519,11 @@ export class Sheet {
   }
 
   drawCross() {
+    const top = this.geo.toPaper(this.cross.y);
     this.crossEl.style.left = `${this.cross.x}px`;
-    this.crossEl.style.top = `${this.cross.y}px`;
+    this.crossEl.style.top = `${top}px`;
     this.sink.style.left = `${this.cross.x}px`;
-    this.sink.style.top = `${this.cross.y}px`;
+    this.sink.style.top = `${top}px`;
   }
 
   static under(region) {
@@ -1002,6 +1073,9 @@ export class Sheet {
   // ====================================================================
   bind() {
     this.paper.addEventListener("pointerdown", (event) => this.pointerDown(event));
+    this.paper.addEventListener("dblclick", (event) => {
+      if (event.target.closest(".pageframe")) this.hooks.frame?.();
+    });
     window.addEventListener("pointermove", (event) => this.pointerMove(event));
     window.addEventListener("pointerup", (event) => this.pointerUp(event));
     this.desk.addEventListener("pointerdown", (event) => {
@@ -1144,8 +1218,10 @@ export class Sheet {
     press.moved = true;
     if (press.kind === "band") {
       const x = Math.min(point.x, press.start.x), y = Math.min(point.y, press.start.y);
-      Object.assign(this.band.style, { left: `${x}px`, top: `${y}px`,
-                                       width: `${Math.abs(dx)}px`, height: `${Math.abs(dy)}px` });
+      // (Drawn on the paper, where it reaches over the frames between the pages it spans.)
+      const top = this.geo.toPaper(y), low = this.geo.toPaper(y + Math.abs(dy));
+      Object.assign(this.band.style, { left: `${x}px`, top: `${top}px`,
+                                       width: `${Math.abs(dx)}px`, height: `${low - top}px` });
       this.band.hidden = false;
       const hit = this.regions.filter((r) => r.dx < x + Math.abs(dx) && x < r.dx + r.wpx
         && r.dy < y + Math.abs(dy) && y < r.dy + r.h);
@@ -1163,7 +1239,7 @@ export class Sheet {
       }
       for (const region of this.selected) {
         region.el.style.left = `${region.dx + dx}px`;
-        region.el.style.top = `${region.dy + dy}px`;
+        region.el.style.top = `${this.geo.toPaper(region.dy + dy)}px`;
       }
     }
   }
@@ -1177,7 +1253,10 @@ export class Sheet {
       this.band.hidden = true;
       if (!press.moved) {
         this.select([]);
-        this.placeCross(point.x, point.y - 8);
+        // (The cursor stays on the page that was clicked: it is not put
+        // above the first grid line of it, beyond a header and a footer.)
+        const top = Math.floor(point.y / this.geo.body) * this.geo.body;
+        this.placeCross(point.x, Math.max(Math.ceil(top / GRID) * GRID, point.y - 8));
       } else {
         this.focus();
       }

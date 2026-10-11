@@ -516,6 +516,100 @@ for (const formula of FORMULAS) {
 assert.ok(drawings >= 30, `only ${drawings} long drawings were checked`);
 assert.equal(shortenStroke("M95,702c-2.7,0,-7.17,-2.7,-13.5,-8H400000v40H845z", 400000), "M95,702c-2.7,0,-7.17,-2.7,-13.5,-8H400000v40H845z");
 
+// ---- the frame of a page: header and footer ---------------------------------
+{
+  const frames = await import(js("pageframe.js"));
+  assert.deepEqual(frames.BUILT_IN.map((template) => template.name), ["Page numbers", "File and date", "Title block"]);
+  const BLOCK = frames.BUILT_IN[2].frame;
+  // A frame is made of whatever a file holds — and of nothing but what a frame is.
+  for (const none of [null, undefined, "x", 7, [], {}, { header: ["", " \n ", ""], footer: [] }, { header: "{file}" },
+                      { logo: { data: { "image/png": BITMAP } } }]) {
+    assert.equal(frames.normal(none), null, JSON.stringify(none));
+  }
+  const odd = frames.normal({ header: ["a\r\nb\rc\nd\ne", 5, "x".repeat(400), "a fourth"], footer: null, rule: { header: 1, footer: true },
+                              dates: "tomorrow", template: 9, more: "of it" });
+  assert.deepEqual(odd, { header: ["a\nb\nc\nd", "", "x".repeat(300)], footer: ["", "", ""],
+                          rule: { header: false, footer: true }, dates: "iso", logo: null });
+  assert.deepEqual(frames.normal(BLOCK), BLOCK);                                  // (made again, it is what it was)
+  const logoOf = (logo) => frames.normal({ header: ["{logo}", "", ""], logo }).logo;
+  assert.deepEqual(logoOf({ data: { "image/png": BITMAP }, name: "acme.png" }), { data: { "image/png": BITMAP }, name: "acme.png", height: 10 });
+  assert.deepEqual(logoOf({ data: { "image/png": BITMAP, "image/svg+xml": DRAWING }, height: 15 }).data, { "image/svg+xml": DRAWING });
+  assert.deepEqual([1, 4, 12.5, 40, 99, "x"].map((height) => logoOf({ data: { "image/png": BITMAP }, height }).height), [4, 4, 12.5, 40, 40, 10]);
+  for (const data of [{ "text/html": BITMAP }, { "image/png": "<svg onload=alert(1)>" }, { "image/png": 5 }, "image/png", null,
+                      { "image/png": "A".repeat(2.8e6 + 4) }]) {
+    assert.equal(logoOf({ data }), null, JSON.stringify(data).slice(0, 60));
+  }
+
+  // How high they are is worked out, not measured: a step of the grid for
+  // every line, the logo's height in whole steps, and one step for the rule.
+  const high = (header, footer = ["", "", ""], logo = null) => frames.heights(frames.normal({ header, footer, logo }));
+  assert.deepEqual(frames.heights(null), { head: 0, foot: 0 });
+  assert.deepEqual(high(["{file}", "", ""]), { head: 32, foot: 0 });
+  assert.deepEqual(high(["", "", ""], ["", "{page}", ""]), { head: 0, foot: 32 });
+  assert.deepEqual(high(["one", "one\ntwo\nthree", "one\ntwo"], ["a\nb", "", ""]), { head: 64, foot: 48 });
+  assert.deepEqual(frames.heights(BLOCK), { head: 48, foot: 32 });               // (a place for a logo, and none yet: a line)
+  const PICTURE = { data: { "image/png": BITMAP }, height: 10 };                 // 10 mm are 37.8 px: three steps
+  assert.deepEqual(high(["{logo}", "**{title}**\n{file}", ""], ["", "", ""], PICTURE), { head: 64, foot: 0 });
+  assert.deepEqual(high(["{logo}\nACME", "", ""], ["", "", ""], PICTURE), { head: 80, foot: 0 });
+  assert.deepEqual(high(["no logo here", "", ""], ["", "", ""], { ...PICTURE, height: 40 }), { head: 32, foot: 0 });
+  assert.deepEqual(high(["{logo}", "", ""], ["", "", "{logo}"], { ...PICTURE, height: 40 }), { head: 176, foot: 176 });
+
+  // The fields say what is known of the sheet and the page.  What they say
+  // is text: it is not read again, as markdown or as anything else.
+  const ABOUT = { file: "Torque_v2_.ipynb", name: "Torque_v2_", folder: "C:\\work", title: "**Torque** <img src=x onerror=alert(1)>",
+                  author: "R. T.", revision: 7, saved: new Date(2026, 9, 11, 9, 5), now: new Date(2026, 11, 24, 18, 30), page: 2, pages: 5 };
+  const drawn = (header, more = {}, about = ABOUT) => frames.band(frames.normal({ header, ...more }), "header", about);
+  const texts = (node) => node.find("div").filter((div) => div.className === "words").map((line) => line.textContent);
+  assert.deepEqual(texts(drawn(["{file} ({name}) in {folder}", "{title}", "Rev. {revision} by {author}\n{page} / {pages}"])),
+                   ["Torque_v2_.ipynb (Torque_v2_) in C:\\work", "**Torque** <img src=x onerror=alert(1)>", "Rev. 7 by R. T.", "2 / 5"]);
+  assert.deepEqual(drawn(["", "{title}", ""]).find("img"), []);
+  assert.ok(drawn(["", "{title}", ""]).html.includes("**Torque** &lt;img src=x onerror=alert(1)&gt;"));
+  assert.deepEqual(texts(drawn(["{saved} {saved-time}", "{date} {time}", "{nothing} {Page} { page } {pages"])),
+                   ["2026-10-11 09:05", "2026-12-24 18:30", "{nothing} {Page} { page } {pages"]);
+  assert.deepEqual(Object.keys(frames.DATES).map((dates) => texts(drawn(["{saved}", "", ""], { dates }))[0]),
+                   ["2026-10-11", "11-10-2026", "11.10.2026", "11/10/2026", "10/11/2026", "11 October 2026"]);
+  assert.equal(texts(drawn(["{saved}|{saved-time}|{revision}|{author}", "", ""], {}, { ...ABOUT, saved: null, revision: 0, author: undefined }))[0],
+               "||0|");
+  assert.equal(texts(drawn(["{saved}|{saved-time}|{date}", "", ""], {}, { ...ABOUT, saved: new Date("no date") }))[0], "||2026-12-24");
+  // The text around them is read as a line of a text region is.
+  const formatted = drawn(["**{name}** and *more*", "$x^2$ `{file}`", "one\ntwo"]);
+  assert.equal(formatted.find("strong")[0].textContent, "Torque_v2_");
+  assert.equal(formatted.find("em")[0].textContent, "more");
+  assert.equal(formatted.find("code")[0].textContent, "{file}");                 // (code is as it is typed)
+  assert.ok(formatted.html.includes("[math:x^2]"));
+  assert.deepEqual(formatted.find("div").filter((div) => div.className.startsWith("cell ")).map((cell) => [cell.className, cell.childNodes.length]),
+                   [["cell left", 1], ["cell centre", 1], ["cell right", 2]]);
+  // The logo is a picture where it is named, at the height it is given; without one, its place is empty.
+  const withLogo = drawn(["{logo} ACME", "", ""], { logo: { data: { "image/svg+xml": DRAWING }, height: 12 } });
+  assert.deepEqual(withLogo.find("img").map((img) => [img.attributes.src, img.attributes.alt]), [[`data:image/svg+xml;base64,${DRAWING}`, "logo"]]);
+  assert.equal(withLogo.attributes.style, "height: 64px; --logo: 45.35px;");
+  assert.equal(texts(withLogo)[0], " ACME");
+  assert.deepEqual([drawn(["{logo} ACME", "", ""]).find("img").length, texts(drawn(["{logo} ACME", "", ""]))[0]], [0, " ACME"]);
+  assert.equal(texts(drawn(["{logo} ACME", "", ""], {}, { ...ABOUT, noLogo: "[logo]" }))[0], "[logo] ACME");
+  // Header: its cells, then the rule; footer: the rule first.  A part that is empty is not there at all.
+  const both = frames.normal({ header: ["h", "", ""], footer: ["", "f", ""], rule: { header: true, footer: false } });
+  assert.deepEqual(frames.band(both, "header", ABOUT).childNodes.map((node) => node.className), ["cells", "rule drawn"]);
+  assert.deepEqual(frames.band(both, "footer", ABOUT).childNodes.map((node) => node.className), ["rule", "cells"]);
+  assert.deepEqual([frames.band(both, "header", ABOUT).className, frames.band(both, "footer", ABOUT).attributes.style], ["pageframe header", "height: 32px;"]);
+  assert.equal(frames.band(frames.normal({ header: ["h", "", ""] }), "footer", ABOUT), null);
+  assert.ok(frames.sameFrame({ ...BLOCK, template: "another name" }, BLOCK) && !frames.sameFrame({ ...BLOCK, dates: "dmy" }, BLOCK));
+  assert.ok(frames.FIELDS.every(([name]) => texts(drawn([`{${name}}`, "", ""]))[0] !== `{${name}}`));     // every field offered says something
+
+  // Header and footer take their room from the page.  Regions keep their
+  // places on the sheet — one strip, top to bottom — and a page takes less
+  // of it; on paper the frames stand between the pages' parts of the strip.
+  const plain = frames.paged(0, 0, 1009);
+  assert.deepEqual([plain.framed, plain.body, plain.toPaper(1234.5), plain.toSheet(1234.5), plain.toSheet(-20)], [false, 1009, 1234.5, 1234.5, -20]);
+  const framed = frames.paged(48, 32, 1009);
+  assert.deepEqual([framed.framed, framed.body], [true, 929]);
+  assert.deepEqual([0, 100, 928, 929, 930, 1858, 2000].map(framed.toPaper), [48, 148, 976, 1057, 1058, 2066, 2208]);
+  assert.deepEqual([48, 148, 976, 1057, 1058, 2066, 2208].map(framed.toSheet), [0, 100, 928, 929, 930, 1858, 2000]);
+  // A place in a header or a footer is the nearest place of its page.
+  assert.deepEqual([-30, 0, 47, 977, 1000, 1008, 1009, 1056].map(framed.toSheet), [0, 0, 0, 928, 928, 928, 929, 929]);
+  assert.equal(framed.toPaper(-10), 38);                                         // (a region dragged above the sheet's top is above the first page's)
+  for (let y = 0; y < 5000; y += 37) assert.equal(framed.toSheet(framed.toPaper(y)), y);
+}
+
 // ---- a text as the formatted editor holds it --------------------------------
 // The editor's document (richdoc.js) is made from a region's markdown and
 // written back as markdown.  It asks for ProseMirror by name, as the page

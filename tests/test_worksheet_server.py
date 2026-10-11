@@ -499,19 +499,90 @@ def test_what_was_chosen_for_the_page_is_kept_for_the_next_server(server):
     assert fetch(server, "/api/prefs", cookie=False)[0] == 403
     assert fetch(server, "/api/prefs", cookie=False, method="PUT", body={"grid": True})[0] == 403
     status, _, text = fetch(server, "/api/prefs")
-    # No grid until asked for; text is written as it looks, not as its markdown.
-    assert status == 200 and json.loads(text) == {"grid": False, "symbols": False, "markdown": False}
+    # No grid until asked for; text is written as it looks, not as its markdown;
+    # a new sheet has no header or footer.
+    assert status == 200 and json.loads(text) == {"grid": False, "symbols": False, "markdown": False, "template": ""}
     # A choice is taken over; what is not a preference, or not of its kind, is not.
-    status, _, text = fetch(server, "/api/prefs", method="PUT", body={"grid": True, "theme": "dark", "symbols": "yes"})
-    assert status == 200 and json.loads(text) == {"grid": True, "symbols": False, "markdown": False}
+    status, _, text = fetch(server, "/api/prefs", method="PUT",
+                            body={"grid": True, "theme": "dark", "symbols": "yes", "template": 3})
+    assert status == 200 and json.loads(text) == {"grid": True, "symbols": False, "markdown": False, "template": ""}
     assert json.loads(fetch(server, "/api/prefs", method="PUT", body={"markdown": True})[2])["markdown"] is True
+    assert json.loads(fetch(server, "/api/prefs", method="PUT", body={"template": "Title block"})[2])["template"] == "Title block"
     assert fetch(server, "/api/prefs", method="PUT", body=["grid"])[0] == 400
     try:
         # Another server on the same computer -- on another port, as a second
         # window of the app is -- finds it.
         with launch(server.folder) as other:
             assert other.port != server.port
-            assert json.loads(fetch(other, "/api/prefs")[2]) == {"grid": True, "symbols": False, "markdown": True}
+            assert json.loads(fetch(other, "/api/prefs")[2]) == {"grid": True, "symbols": False, "markdown": True,
+                                                                 "template": "Title block"}
     finally:
-        fetch(server, "/api/prefs", method="PUT", body={"grid": False, "markdown": False})
+        fetch(server, "/api/prefs", method="PUT", body={"grid": False, "markdown": False, "template": ""})
     assert json.loads(fetch(server, "/api/prefs")[2])["grid"] is False
+
+
+def test_headers_and_footers_of_the_users_own_are_kept_by_name(server):
+    # A template is the header and footer of a page as a sheet holds them.
+    # What one may hold is the page's to say: the server keeps what it is
+    # given, as long as that is a JSON object under a name that is one.
+    frame = {"header": ["{logo}", "**{title}**", "{saved}"], "footer": ["", "{page} / {pages}", ""],
+             "rule": {"header": True, "footer": False}, "logo": {"data": {"image/png": "iVBORw0KGgo="}, "height": 12}}
+    listed = lambda reply: [entry["name"] for entry in json.loads(reply[2])["templates"]]                # noqa: E731
+    put = lambda body: fetch(server, "/api/templates", method="PUT", body=body)                         # noqa: E731
+    assert fetch(server, "/api/templates", cookie=False)[0] == 403
+    assert fetch(server, "/api/templates", cookie=False, method="PUT", body={"name": "x", "frame": frame})[0] == 403
+    assert fetch(server, "/api/templates?name=x", cookie=False, method="DELETE")[0] == 403
+    assert json.loads(fetch(server, "/api/templates")[2]) == {"templates": []}
+    try:
+        status, _, text = put({"name": "  Calculations  ", "frame": frame})
+        assert status == 200 and json.loads(text) == {"templates": [{"name": "Calculations", "frame": frame}]}
+        assert listed(put({"name": "acme", "frame": {"header": ["ACME", "", ""]}})) == ["acme", "Calculations"]
+        assert listed(put({"name": "Æble ½", "frame": frame})) == ["acme", "Calculations", "Æble ½"]    # (by name, whatever the letters)
+        # Another of the same name takes its place.
+        status, _, text = put({"name": "acme", "frame": {"footer": ["", "", "{page}"]}})
+        assert json.loads(text)["templates"][0] == {"name": "acme", "frame": {"footer": ["", "", "{page}"]}}
+        assert listed((status, _, text)) == ["acme", "Calculations", "Æble ½"]
+        # What is no template is turned down, and says why; the others are as they were.
+        for body in ({"name": "", "frame": frame}, {"name": "   ", "frame": frame}, {"name": "x" * 61, "frame": frame},
+                     {"name": "two\nlines", "frame": frame}, {"name": 7, "frame": frame}, {"frame": frame},
+                     {"name": "no frame"}, {"name": "a list", "frame": [frame]}, {"name": "text", "frame": "{}"},
+                     ["acme", frame], "acme",
+                     {"name": "too large", "frame": {"logo": {"data": {"image/png": "A" * 4_000_000}}}}):
+            status, _, text = put(body)
+            assert status == 400 and json.loads(text)["error"], body if len(str(body)) < 200 else "the large one"
+        assert "2 MB" in json.loads(put({"name": "too large", "frame": {"logo": {"data": {"image/png": "A" * 4_000_000}}}})[2])["error"]
+        assert listed(fetch(server, "/api/templates")) == ["acme", "Calculations", "Æble ½"]
+        # Another server on the same computer finds them: they are in a file beside the preferences.
+        with launch(server.folder) as other:
+            assert listed(fetch(other, "/api/templates")) == ["acme", "Calculations", "Æble ½"]
+        stored = json.loads((server.folder / ".jupyter-data" / "edsl_worksheet_templates.json").read_text(encoding="utf-8"))
+        assert [entry["name"] for entry in stored["templates"]] == ["acme", "Calculations", "Æble ½"]
+        # One is let go of by its name; a name that is not there changes nothing.
+        assert listed(fetch(server, "/api/templates?name=Calculations", method="DELETE")) == ["acme", "Æble ½"]
+        assert listed(fetch(server, "/api/templates?name=Calculations", method="DELETE")) == ["acme", "Æble ½"]
+        assert listed(fetch(server, "/api/templates", method="DELETE")) == ["acme", "Æble ½"]
+        # A file that someone wrote by hand, and badly, costs no more than what is wrong in it.
+        file = server.folder / ".jupyter-data" / "edsl_worksheet_templates.json"
+        file.write_text(json.dumps({"templates": [{"name": "good", "frame": frame}, {"name": "", "frame": frame}, "x",
+                                                  {"name": "no frame"}, {"name": "list", "frame": []}, None]}), encoding="utf-8")
+        assert listed(fetch(server, "/api/templates")) == ["good"]
+        for broken in ("{", "[]", '{"templates": 5}', ""):
+            file.write_text(broken, encoding="utf-8")
+            assert json.loads(fetch(server, "/api/templates")[2]) == {"templates": []}, broken
+    finally:
+        (server.folder / ".jupyter-data" / "edsl_worksheet_templates.json").unlink(missing_ok=True)
+
+
+def test_no_more_templates_are_kept_than_there_is_use_for(tmp_path, monkeypatch):
+    from utils.worksheet import templates
+
+    monkeypatch.setattr(templates, "_file", lambda: tmp_path / "kept" / "templates.json")
+    monkeypatch.setattr(templates, "MOST", 3)
+    for name in "abc":
+        templates.save(name, {"header": [name, "", ""]})
+    with pytest.raises(ValueError, match="delete one first"):
+        templates.save("d", {})
+    assert [entry["name"] for entry in templates.save("b", {"again": True})] == ["a", "b", "c"]         # (one of them, again, is none more)
+    assert templates.load()[1]["frame"] == {"again": True}
+    assert [entry["name"] for entry in templates.delete("a")] == ["b", "c"]
+    assert [entry["name"] for entry in templates.save("d", {})] == ["b", "c", "d"]

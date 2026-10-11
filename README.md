@@ -161,6 +161,9 @@ type, and the line becomes a typeset formula with its value beside it.
 - **Pictures** — Ctrl+V puts a screenshot or a copied picture at the
   cursor; picture files can be chosen or dropped on the page. SVG
   drawings stay drawings. They are stored in the sheet's file.
+- **Header and footer** — on every page, with a logo and with fields
+  for the file's name, the date and revision, and the page numbers.
+  Templates are ready-made, or your own.
 - **Still a notebook** — a worksheet is saved as `.ipynb` (positions in
   cell metadata), so JupyterLab, VS Code, `hardcopy()` and GitHub all
   read it, and every existing notebook opens as a worksheet.

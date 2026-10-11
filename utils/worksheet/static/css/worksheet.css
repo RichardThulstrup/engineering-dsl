@@ -151,6 +151,29 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .pagebreak span {
   position: absolute; right: 6px; top: -15px; font-size: 10px; color: #9aa0a6; background: #fff; padding: 0 3px;
 }
+/* The header and the footer of a page (js/pageframe.js): as high as that
+   says, whatever is in them — a line is a step of the grid. */
+.pageframe {
+  position: absolute; left: 0; width: 100%; overflow: hidden; display: flex; flex-direction: column;
+  background: #fff; font: 12px/16px var(--text); color: #30343a; cursor: default; user-select: none;
+}
+.pageframe .cells { display: grid; grid-template-columns: 1fr auto 1fr; column-gap: 16px; flex: 1; min-height: 0; }
+.pageframe.header .cells { align-items: end; }
+.pageframe.footer .cells { align-items: start; }
+.pageframe .cell { white-space: nowrap; }
+.pageframe .cell.centre { text-align: center; }
+.pageframe .cell.right { text-align: right; }
+.pageframe .words { min-height: 16px; }
+.pageframe .rule { flex: none; height: 16px; }
+/* (A border: a printer is not given backgrounds.) */
+.pageframe .rule.drawn::after { content: ""; display: block; border-top: 1px solid #30343a; margin-top: 4px; }
+.pageframe.footer .rule.drawn::after { margin-top: 11px; }
+.pageframe img { height: var(--logo, 16px); width: auto; max-width: none; vertical-align: bottom; -webkit-user-drag: none; }
+.pageframe code { font: 11px var(--mono); }
+/* (A link is one on paper, in a PDF; on screen a click is the page's: the cursor, or the dialog.) */
+.pageframe a { color: inherit; text-decoration: none; pointer-events: none; }
+.pageframe.ahead { opacity: .4; }                       /* of a page with nothing on it yet */
+#content > .pageframe:hover { box-shadow: 0 0 0 1px var(--accent-soft); }
 #cross { position: absolute; width: 0; height: 0; pointer-events: none; z-index: 5; }
 #cross::before, #cross::after { content: ""; position: absolute; background: #d0342c; }
 #cross::before { left: -6px; top: 8px; width: 13px; height: 1px; }
@@ -488,6 +511,37 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dialog input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31, 95, 191, .15); }
 .dialog p { margin: 4px 0 8px; line-height: 1.5; }
 .dialog.wide { width: 720px; }
+/* The dialog for header and footer (js/framedialog.js): wide enough to
+   show both as wide as they are on the page. */
+.dialog.frame { width: 760px; max-height: 86vh; }
+.dialog.frame .row { display: flex; align-items: center; gap: 8px; margin: 7px 0; }
+.dialog.frame .label { flex: none; width: 76px; color: var(--muted); }
+.dialog.frame .label.short { width: auto; margin-left: 6px; }
+.dialog.frame .three { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.dialog.frame textarea {
+  width: 100%; resize: none; padding: 4px 7px; border: 1px solid #c3c8ce; border-radius: 5px; outline: none;
+  font: 12px/16px var(--text); white-space: pre; overflow: hidden;
+}
+.dialog.frame select, .dialog.frame input[type="number"] {
+  height: 30px; padding: 0 6px; border: 1px solid #c3c8ce; border-radius: 5px; outline: none; background: #fff;
+}
+.dialog.frame input[type="number"] { width: 60px; }
+.dialog.frame input[type="text"] { flex: 1; min-width: 0; width: auto; margin-top: 0; }
+.dialog.frame textarea:focus, .dialog.frame select:focus, .dialog.frame input[type="number"]:focus {
+  border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31, 95, 191, .15);
+}
+.dialog.frame .check { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.dialog.frame .three + .check { flex: none; width: 104px; }        /* (so that the cells of header and footer stand in line) */
+.dialog.frame .btn:disabled { opacity: .5; cursor: default; }
+.dialog.frame .note { color: var(--muted); font-size: 12px; }
+.dialog.frame p.note { margin: 0 0 4px 84px; }
+.dialog.frame h4 { margin: 14px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.dialog.frame .fields { display: flex; flex-wrap: wrap; gap: 4px; }
+.dialog.frame .field { padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px; background: #fff; font: 12px var(--mono); cursor: pointer; }
+.dialog.frame .field:hover { background: var(--accent-soft); border-color: var(--accent-soft); }
+.framepreview { width: 682px; margin: 8px auto; border: 1px solid var(--line); background: #fff; }
+.framepreview .pageframe { position: relative; }        /* (on a page it has its place; here it stands in line) */
+.framepreview .nothing { height: 24px; font: italic 12px/24px var(--ui); text-align: center; color: #a3a8ae; }
 .help h4 { margin: 12px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .help h4:first-child { margin-top: 0; }
 .help table { border-collapse: collapse; width: 100%; }
@@ -512,12 +566,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
   html, body { height: auto; overflow: visible; background: #fff; }
   body { display: block; }
   #bar, #banner, #palette, #overlay, #toast, #cross, #band, #sink, .pagebreak, .grip, .sizer, .preview, .popup,
-  .errpop, .flag { display: none !important; }
+  .errpop, .flag, .pageframe.ahead { display: none !important; }
   #work, #desk { display: block; overflow: visible; padding: 0; }
   #paper { width: 680px; margin: 0; padding: 0; box-shadow: none; zoom: 1 !important; }
   /* As long as what is on it, and no longer (sheet.js: drawBreaks). */
   #content { min-height: var(--printed, 0) !important; }
   #paper.grid #content { background-image: none; }
-  .region { border-color: transparent !important; background: none !important; box-shadow: none !important; }
+  .region, .pageframe { border-color: transparent !important; background: none !important; box-shadow: none !important; }
   .region.stale .res, .region.stale .eq, .region.stale .outs { opacity: 1; }
 }

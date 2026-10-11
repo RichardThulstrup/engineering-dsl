@@ -378,6 +378,9 @@ A worksheet is saved as `.ipynb`:
 - a picture is a text cell with the picture attached to it; pictures
   that a notebook brings along (pasted in JupyterLab, say) are shown,
   and one that no text names any more is not saved again;
+- the sheet's header and footer, with their logo, and its title, author
+  and revision are in the notebook's own metadata (`edsl_worksheet`),
+  beside its settings;
 - tags, attachments and other metadata of existing cells are preserved.
 
 If the file was changed by another program while open, saving asks
@@ -414,6 +417,52 @@ KaTeX draws them 400em long and hides the rest, which a screen and a
 PDF do faithfully; on paper such a bar has been seen running to the
 left of its root sign.
 
+### Header and footer
+
+*File → Header and footer…* gives every page a header, a footer, or
+both; a double click on one that is there opens the dialog again. Each
+has three cells — left, centre, right. A cell is written as text is
+(`**bold**`, `*italic*`, `$x^2$`), each of its lines is a line, and it
+may hold fields, which say something about the sheet or the page:
+
+| Field | says |
+|---|---|
+| `{file}`, `{name}`, `{folder}` | the sheet's file name — `Torque.ipynb` — the same without its ending, and the folder the file is in |
+| `{title}`, `{author}` | what you give the sheet for them, in the same dialog. The title is the file's name until you do |
+| `{revision}` | how many times the sheet has been saved with something changed. Type a number there to count on from — or anything else, `B` or `1.2`, which then stays as it is typed |
+| `{saved}`, `{saved-time}` | the day, and the time of day, of the last such save |
+| `{date}`, `{time}` | the day, and the time of day, of printing |
+| `{page}`, `{pages}` | the number of the page, and how many pages there are |
+| `{logo}` | the logo: a picture you choose in the dialog (PNG, JPEG, GIF, WebP, BMP or an SVG drawing, up to 2 MB), shown 4 to 40 mm high |
+
+The dialog draws header and footer as they will be while you set them:
+with a line under the one and over the other if you want it, and with
+dates written the way you choose.
+
+Header and footer are on the page — on screen as on paper — and take
+their room from it: a line of text takes 4.2 mm, a logo its height.
+Regions keep their places on the sheet, and a page holds a little less
+of it; a region that the new end of a page would cut moves to the next
+page, as it does when a region above it grows. A click on a header or
+a footer puts the cursor at the nearest place of that page. The page
+that the screen shows for going on, with nothing on it yet, has its
+header and footer faded: it is not paper. (A browser has a header and
+footer of its own for what it prints — the date, the page's address.
+Where it adds them, untick *Headers and footers* under *More settings*
+in its print dialog.)
+
+**Templates.** A template is a header and footer under a name. Three
+are ready-made — *Page numbers*, *File and date*, and *Title block*
+with a place for a logo — and *Save as template…* keeps what you have
+set, logo and all, as one of your own: on this computer, for every
+sheet. *New sheets*, in the same dialog, chooses the template that a
+new sheet starts with. A sheet holds a copy of what it was given, so
+it looks the same on another computer, and changing a template later
+changes no sheet.
+
+Only a sheet with a header or a footer counts its saves and notes when
+it was saved; a sheet without them is saved as it always was.
+
 ## Security
 
 The server executes code, so it is closed to everything but its own
@@ -442,6 +491,11 @@ the folder the server was started in.
 - One sheet per browser tab; each has its own kernel. A second tab on
   the same address opens another sheet.
 - The page is A4 portrait.
+- Header and footer are the worksheet's: JupyterLab and `hardcopy()`,
+  which show a sheet as a notebook, do not show them. They are the
+  same on every page, the first included. A region that is higher
+  than a page runs across the footer and header of the pages it
+  crosses.
 
 ## For developers
 
@@ -453,7 +507,8 @@ the folder the server was started in.
 | `utils/worksheet/fingerprint.py` | "same value as last time?" for the reuse rules |
 | `utils/worksheet/mathrender.py` | transformed-Python AST → LaTeX |
 | `utils/worksheet/document.py` | `.ipynb` ⇄ worksheet document, trust |
-| `utils/worksheet/prefs.py` | what the user chose for the page (grid, symbol panel, text as markdown): a file in Jupyter's data folder, because a browser keeps its own storage per port |
+| `utils/worksheet/prefs.py` | what the user chose for the page (grid, symbol panel, text as markdown, the template of a new sheet): a file in Jupyter's data folder, because a browser keeps its own storage per port |
+| `utils/worksheet/templates.py` | the headers and footers a user keeps by name: another file there |
 | `utils/worksheet/static/` | the front end: plain ES modules, no build step |
 | `utils/worksheet/make_library.py` | writes `static/data/library.json` — the symbol panel's library — from the Windows palette's list |
 | `utils/worksheet/make_icon.py` | writes `static/icon.ico` from the drawings `static/icon.svg` and `static/icon-small.svg` (needs Playwright and a Chromium) |
@@ -499,6 +554,16 @@ document only what the tree can say), and `richtext.js` is the editor.
 What was edited is written back from the tree — plainly where nobody
 would misread it, with backslashes or tags where it must — and every
 block written is read once more to see that it says what was shown.
+
+The header and footer of a page are `static/js/pageframe.js`: what one
+may hold, how it is drawn, and how high it is — worked out from its
+lines and its logo, never measured, so that a sheet has the same pages
+on every computer. Regions are placed on the sheet as on one strip;
+`sheet.js` turns a place on the strip into a place on the paper, past
+the headers and footers, only where it draws something or reads the
+pointer. The page is printed with a top and bottom margin of 57 px,
+not of 15 mm: a browser gives a printed page a whole number of px, and
+only so is that the 1009 a page of the sheet has.
 
 ```bash
 python -m pytest tests/test_worksheet_render.py tests/test_worksheet_engine.py \

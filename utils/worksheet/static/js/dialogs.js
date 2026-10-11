@@ -1,8 +1,10 @@
 // Modal dialogs: confirm, open, save as.  Each returns a promise.
+// (The one for a sheet's header and footer is in framedialog.js.)
 
 import { $, api, el } from "./util.js";
 
-function show(dialog, onCancel) {
+/** Put `dialog` up, the keyboard its own; returns what closes it.  Esc, or a click beside it, closes it and calls `onCancel`. */
+export function show(dialog, onCancel) {
   const overlay = $("#overlay");
   const close = () => {
     overlay.hidden = true;
@@ -16,7 +18,8 @@ function show(dialog, onCancel) {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); onCancel(); }
     else if (event.key === "Tab") {
       // Tab stays in the dialog: behind it lies the sheet, where typing writes.
-      const stops = [...dialog.querySelectorAll("button, input")].filter((node) => !node.disabled);
+      const stops = [...dialog.querySelectorAll("button, input, select, textarea")]
+        .filter((node) => !node.disabled && node.getClientRects().length);
       const at = stops.indexOf(document.activeElement);
       const next = event.shiftKey ? (at <= 0 ? stops.length - 1 : at - 1) : (at + 1) % (stops.length || 1);
       event.preventDefault();

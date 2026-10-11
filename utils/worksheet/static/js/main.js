@@ -10,6 +10,8 @@ import { ask, browse, info } from "./dialogs.js";
 import { fitStrokes, restoreStrokes } from "./strokes.js";
 import { NEEDED } from "./arrange.js";
 import { LIMITS, megabytes, weight } from "./pictures.js";
+import { band, BUILT_IN, heights, normal } from "./pageframe.js";
+import { frameDialog } from "./framedialog.js";
 
 const DEFAULTS = { showResults: "auto" };          // of a sheet: saved with it
 
@@ -17,12 +19,14 @@ const state = {
   path: null,               // relative to the server's folder; null = never saved
   name: "Untitled",
   mtime: null,
+  root: "",                 // the server's folder, as the computer names it
   trusted: true,            // false: a sheet not calculated on this machine yet
   preamble: null,
   settings: { ...DEFAULTS },
   // How the user likes the page: kept by the server for this computer,
   // not in the sheet (and not in the browser, whose storage goes by port).
-  prefs: { grid: false, symbols: false, markdown: false },
+  prefs: { grid: false, symbols: false, markdown: false, template: "" },
+  templates: [],            // header and footer, by name: the user's own (kept by the server, too)
   dirty: false,
   changes: 0,               // counts them: has anything changed since a save set out?
   kernel: "none",
@@ -54,6 +58,7 @@ const sheet = new Sheet({
     }
   },
   preview: (region, source) => requestPreview(region, source),
+  frame: () => run("page-frame"),
 });
 
 const session = sessionStorage.getItem("edsl-session") || uid();
@@ -172,6 +177,123 @@ function trust() {
   if (state.path && !state.dirty) {
     api("POST", `/api/trust?path=${encodeURIComponent(state.path)}`, { mtime: state.mtime });
   }
+}
+
+// ---------------------------------------------------------------------------
+// header and footer
+// ---------------------------------------------------------------------------
+
+/**
+ * What a sheet says of itself, as far as a file's word for it is of the
+ * kind it should be: {title, author, revision, saved}.
+ */
+function aboutOf(given) {
+  const about = {};
+  if (!given || typeof given !== "object") return about;
+  for (const name of ["title", "author", "saved"]) {
+    if (typeof given[name] === "string" && given[name]) about[name] = given[name].slice(0, 200);
+  }
+  if (typeof given.revision === "string" && given.revision) about.revision = given.revision.slice(0, 20);
+  else if (Number.isSafeInteger(given.revision) && given.revision >= 0) about.revision = given.revision;
+  return about;
+}
+
+/** What the fields of a header or footer say about this sheet (pageframe.js). */
+function aboutSheet() {
+  const own = state.settings.about || {};
+  // When it was saved: as the sheet says itself — or, of one that does not (or says no date), as its file does.
+  let saved = new Date(own.saved || NaN);
+  try {
+    if (Number.isNaN(saved.getTime())) saved = state.mtime ? new Date(Number(BigInt(state.mtime) / 1000000n)) : null;
+  } catch (error) {
+    saved = null;                           // a time that is none
+  }
+  const inside = folder(state.path);
+  return {
+    file: `${state.name}.ipynb`, name: state.name,
+    folder: state.path === null ? "" : [state.root, ...(inside ? inside.split("/") : [])].join(state.root.includes("\\") ? "\\" : "/"),
+    title: own.title || state.name, author: own.author || "", revision: own.revision ?? 0, saved, now: new Date(),
+  };
+}
+
+let frameStamp = 0;
+
+/** Draw the pages with the header and the footer the sheet has, saying what is so now. */
+function showFrame() {
+  const frame = normal(state.settings.frame);
+  const about = aboutSheet();
+  sheet.setFrame(frame && { ...heights(frame), stamp: ++frameStamp,
+                            band: (which, page, pages) => band(frame, which, { ...about, page, pages }) });
+}
+
+/** The user's own templates as the server gave them: each a frame this page understands, under a name. */
+function templatesOf(data) {
+  return (Array.isArray(data.templates) ? data.templates : [])
+    .map((template) => ({ name: String(template?.name ?? "").trim(), frame: normal(template?.frame) }))
+    .filter((template) => template.name && template.frame && !BUILT_IN.some((ready) => ready.name === template.name));
+}
+
+/** Have the server keep (PUT) or let go of (DELETE) a template of the user's own; resolves to them all — or to null. */
+async function ownTemplates(method, url, body) {
+  const { ok, status, data } = await api(method, url, body);
+  if (!ok) {
+    toast(status === 404
+      ? "Templates of your own are kept by the worksheet server, and the one running here was started before it could: " +
+        "close the worksheet and start it again."
+      : data.error || "That did not work: the template is as it was.", "error");
+    return null;
+  }
+  state.templates = templatesOf(data);
+  return state.templates;
+}
+
+/** The header and footer a new sheet starts with: the template chosen for that on this computer. */
+function usualFrame() {
+  const found = [...BUILT_IN, ...state.templates].find((template) => template.name === state.prefs.template);
+  return found ? { frame: found.frame } : {};
+}
+
+/** File ▸ Header and footer…: ask, and give the sheet what was chosen. */
+async function editFrame() {
+  sheet.commitEdit();
+  const frame = normal(state.settings.frame);
+  const had = state.settings.about || {};
+  const made = await frameDialog({
+    frame, about: had, sample: { ...aboutSheet(), pages: sheet.printedPages() },
+    templates: state.templates, usual: state.prefs.template,
+    keep: (name, kept) => ownTemplates("PUT", "/api/templates", { name, frame: kept }),
+    drop: (name) => ownTemplates("DELETE", `/api/templates?name=${encodeURIComponent(name)}`),
+  });
+  if (!made) return;
+  if (made.usual !== state.prefs.template) setPref("template", made.usual);
+  // What the sheet says of itself: what was typed, and — untouched here — when it was saved.
+  const about = { ...had, ...made.about };
+  for (const name of Object.keys(about)) {
+    if (about[name] === undefined || about[name] === "") delete about[name];
+  }
+  if (JSON.stringify([made.frame, about]) === JSON.stringify([frame, had])) return;         // nothing of the sheet's was changed
+  const settings = { ...state.settings };
+  delete settings.frame;
+  delete settings.about;
+  if (made.frame) settings.frame = made.frame;
+  if (Object.keys(about).length) settings.about = about;
+  state.settings = settings;
+  setDirty(true);
+  showFrame();
+}
+
+/**
+ * What a sheet says of itself once it is saved now — or null, where a
+ * save leaves that as it is.  A sheet that has a header or a footer says
+ * when it was last saved with something `changed`, and counts those
+ * saves: its revision — unless that was typed as text, which stays as it
+ * was typed.
+ */
+function stamp(settings, changed) {
+  if (!changed || !normal(settings.frame)) return null;
+  const about = { ...(settings.about || {}), saved: new Date().toISOString() };
+  if (typeof (about.revision ?? 0) === "number") about.revision = (about.revision ?? 0) + 1;
+  return about;
 }
 
 // ---------------------------------------------------------------------------
@@ -368,9 +490,13 @@ function adopt(doc) {
   state.preamble = doc.preamble || null;
   state.settings = { ...DEFAULTS, ...(doc.settings || {}) };
   delete state.settings.grid;           // sheets saved before the grid became a preference carry it
+  // What it says of itself: as far as that is of the kind it should be.
+  state.settings.about = aboutOf(state.settings.about);
+  if (!Object.keys(state.settings.about).length) delete state.settings.about;
   state.calc = null;
   state.renders.clear();
   sheet.calculated = state.trusted;
+  showFrame();
   sheet.load(doc);
   applySettings();
   setTitle();
@@ -399,7 +525,7 @@ function folder(path) {
 
 async function newSheet() {
   if (!(await discardOk())) return;
-  adopt({ regions: [], name: "Untitled", trusted: true });
+  adopt({ regions: [], name: "Untitled", trusted: true, settings: usualFrame() });
   if (conn.online) scheduleCalc({ now: true });
 }
 
@@ -421,7 +547,8 @@ async function save(as = false) {
   }
   sheet.settle();
   const changes = state.changes;            // (what is changed from here on is not in what is saved)
-  const doc = { settings: state.settings, trusted: state.trusted && sheet.calculated,
+  const about = stamp(state.settings, state.dirty);
+  const doc = { settings: about ? { ...state.settings, about } : state.settings, trusted: state.trusted && sheet.calculated,
                 preamble: state.preamble, regions: sheet.serialize(state.settings.showResults) };
   if (weight(doc.regions) > LIMITS.sheet) {
     toast(`The pictures on this sheet take ${megabytes(weight(doc.regions))} MB: more than the ` +
@@ -436,9 +563,11 @@ async function save(as = false) {
       state.path = data.path;
       state.name = data.name;
       state.mtime = data.mtime;
+      if (about) state.settings = { ...state.settings, about };
       setTitle();
       // Saved — but for what was changed while the server was writing.
       if (state.changes === changes) setDirty(false);
+      showFrame();                          // (its name, its revision, when it was saved)
       const url = new URL(location.href);
       url.searchParams.set("open", state.path);
       history.replaceState(null, "", url);
@@ -520,6 +649,7 @@ const COMMANDS = {
   open: openDialog,
   save: () => save(false),
   "save-as": () => save(true),
+  "page-frame": editFrame,
   print: () => { sheet.commitEdit(); sheet.select([]); sheet.settle(); window.print(); },
   undo: () => sheet.undo(),
   redo: () => sheet.redo(),
@@ -571,6 +701,11 @@ const HELP = [
     ["Arrange menu", "line the selection up by its edges or middles, or space it out evenly"],
     ["Ctrl+Enter / Ctrl+Backspace", "open / close a line of space at the cursor"],
     ["Tab / Shift+Tab", "edit the next / previous region"],
+  ]],
+  ["Pages", [
+    ["File ▸ Header and footer…", "a header and a footer on every page: text, a logo, and fields such as {file}, {saved} and {page}"],
+    ["double-click a header or a footer", "change it"],
+    ["Ctrl+P", "print the sheet, or save it as a PDF, on the pages it fills"],
   ]],
   ["Pictures", [
     ["Ctrl+V", "the picture on the clipboard — a screenshot, a copied drawing, a copied picture file — at the cursor"],
@@ -718,7 +853,12 @@ function bindChrome() {
   window.addEventListener("beforeunload", (event) => {
     if (state.dirty) { event.preventDefault(); event.returnValue = ""; }
   });
-  window.addEventListener("beforeprint", () => { sheet.commitEdit(); sheet.select([]); fitStrokes(); });
+  window.addEventListener("beforeprint", () => {
+    sheet.commitEdit();
+    sheet.select([]);
+    showFrame();                            // (the day and the time of printing are now)
+    fitStrokes();
+  });
   window.addEventListener("afterprint", restoreStrokes);
   document.fonts?.ready.then(() => sheet.layout());
 }
@@ -746,12 +886,18 @@ async function start() {
   }
   conn.connect();
   sheet.focus();
-  const chosen = await api("GET", "/api/prefs");
+  const [chosen, own, where] = await Promise.all([api("GET", "/api/prefs"), api("GET", "/api/templates"),
+                                                  api("GET", "/api/info")]);
   if (chosen.ok) {
     Object.assign(state.prefs, chosen.data);
     applySettings();
     if (state.prefs.symbols && $("#palette").hidden) togglePalette({ remember: false });
   }
+  if (own.ok) state.templates = templatesOf(own.data);
+  if (where.ok) state.root = String(where.data.root || "");
+  // A sheet that is new starts with the template chosen for new sheets.
+  if (state.path === null && !state.settings.frame) Object.assign(state.settings, usualFrame());
+  showFrame();
 }
 
 start();

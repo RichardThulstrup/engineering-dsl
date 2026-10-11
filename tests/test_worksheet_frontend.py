@@ -2134,3 +2134,588 @@ def test_formatted_text_pasted_on_the_page_is_a_text_region_and_code_is_taken_as
     settled(page)
     assert page.evaluate(kinds) == ["text", "text", "math"] and "3" in shown(page)[2]
     assert page.evaluate("document.querySelectorAll('.region.has-error').length") == 0
+
+
+# ---- header and footer -------------------------------------------------------
+
+# The headers and footers on the sheet, from its top down: which, where, how
+# high, and what the lines of their three cells say (a logo as "[logo]").
+FRAMES = """() => [...document.querySelectorAll('#content > .pageframe')].map((band) => ({
+    part: band.className.replace('pageframe ', ''), top: parseFloat(band.style.top), height: band.getBoundingClientRect().height,
+    says: [...band.querySelectorAll('.cell')].map((cell) => [...cell.querySelectorAll('.words')].map((line) =>
+        line.textContent + (line.querySelector('img') ? '[logo]' : '')).join(' / ')),
+})).sort((a, b) => a.top - b.top)"""
+TOPS = "[...document.querySelectorAll('.region')].map((r) => parseFloat(r.style.top))"
+CROSS = "parseFloat(document.querySelector('#cross').style.top)"
+DIRTY = "!document.querySelector('#doc-dirty').hidden"
+LOGO = ('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40" viewBox="0 0 120 40">'
+        '<rect width="120" height="40" rx="6" fill="#1f5fbf"/></svg>')
+
+
+def frame_dialog(page):
+    """File > Header and footer…"""
+    page.click("#file-menu .menu-button")
+    page.click("#file-menu [data-cmd='page-frame']")
+    page.wait_for_selector(".dialog.frame")
+
+
+def frame_ok(page):
+    page.click(".dialog.frame .foot .btn.primary")
+    page.wait_for_selector(".dialog.frame", state="detached")
+
+
+def cells(page):
+    """What the six cells of the dialog hold, and the template it names."""
+    return page.evaluate("[document.querySelector('.dialog.frame select').value,"
+                         " ...[...document.querySelectorAll('.dialog.frame textarea')].map((area) => area.value)]")
+
+
+def saved_settings(folder, name):
+    return json.loads((folder / name).read_text(encoding="utf-8"))["metadata"]["edsl_worksheet"]["settings"]
+
+
+def test_a_header_and_a_footer_on_every_page_take_their_room_from_the_page(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    paper = page.locator("#content").bounding_box()
+
+    def click(y, x=40, **how):
+        """Click the paper at height y of the sheet's page (of what is in view)."""
+        page.evaluate("(y) => { document.querySelector('#desk').scrollTop = Math.max(0, y - 400); }", y)
+        box = page.locator("#content").bounding_box()
+        page.mouse.click(box["x"] + x, box["y"] + y, **how)
+
+    # Four regions: one at the top, three near the end of the first page.
+    for y, source in ((8, "aa := 1"), (888, "bb := 2"), (928, "cc := 3"), (968, "dd := 4")):
+        click(y)
+        keys.type(source)
+        keys.press("Enter")
+    settled(page)
+    assert page.evaluate(TOPS) == [0, 880, 920, 960] and page.evaluate(FRAMES) == []
+    assert page.evaluate("document.querySelectorAll('.pagebreak').length") == 1
+    click(408, x=300)
+    assert page.evaluate(CROSS) == 400
+
+    # A template gives every page a header and a footer.  A line of text is
+    # a step of the grid (16 px), and a step more is for the rule.
+    frame_dialog(page)
+    assert cells(page) == ["", "", "", "", "", "", ""]
+    page.select_option(".dialog.frame select[aria-label='Template']", "File and date")
+    assert cells(page) == ["File and date", "{file}", "", "{saved}", "", "Page {page} of {pages}", ""]
+    frame_ok(page)
+    assert page.evaluate(DIRTY) and page.evaluate("document.activeElement.id") == "sink"
+    assert page.evaluate(CROSS) == 432                          # (the cursor is where it was on the sheet)
+    # They take their room from the page: 945 px of the sheet are a page's
+    # now.  A region stays where it is on the sheet; one that the page's
+    # new end would cut goes to the next page, and what it meets there
+    # makes room.  On the page, the frames stand between the pages' parts.
+    assert page.evaluate(FRAMES) == [
+        {"part": "header", "top": 0, "height": 32, "says": ["Untitled.ipynb", "", ""]},
+        {"part": "footer", "top": 977, "height": 32, "says": ["", "Page 1 of 2", ""]},
+        {"part": "header", "top": 1009, "height": 32, "says": ["Untitled.ipynb", "", ""]},
+        {"part": "footer", "top": 1986, "height": 32, "says": ["", "Page 2 of 2", ""]}]
+    # The left cell begins at the left edge, the right one ends at the right, the centre is the page's; a line is 16 px.
+    words = """(part) => [...document.querySelector('#content > .pageframe.' + part).querySelectorAll('.words')].map((line) => {
+        const range = document.createRange();
+        range.selectNodeContents(line);
+        const edge = document.querySelector('#content').getBoundingClientRect().left, box = range.getBoundingClientRect();
+        return [Math.round(box.left - edge), Math.round(box.right - edge), line.getBoundingClientRect().height]; })"""
+    left, centre, right = page.evaluate(words, "header"), page.evaluate(words, "footer")[1], None
+    assert left[0][0] == 0 and left[0][2] == 16 and abs((centre[0] + centre[1]) / 2 - 340) <= 1 and centre[2] == 16
+    onto_paper = lambda y: y + (y // 945) * 64 + 32                                                    # noqa: E731
+    assert page.evaluate(TOPS) == [onto_paper(y) for y in (0, 880, 945, 984)] == [32, 912, 1041, 1080]
+    assert page.evaluate("[...document.querySelectorAll('.region')].map((r) => r.innerText.replace(/\\s+/g, ''))") == [
+        "aa:=1", "bb:=2", "cc:=3", "dd:=4"]
+
+    # A click on a header or a footer puts the cursor at the nearest place
+    # of that page; the arrows take it from page to page past them.
+    click(1020)                                                 # the header of the second page
+    assert page.evaluate(CROSS) == onto_paper(952) == 1048      # (the first line of the grid on that page)
+    click(990)                                                  # the footer of the first
+    assert page.evaluate(CROSS) == onto_paper(936) == 968
+    keys.press("ArrowDown")
+    assert page.evaluate(CROSS) == onto_paper(960) == 1056
+    keys.press("ArrowUp")
+    assert page.evaluate(CROSS) == 968
+    # A page with nothing on it yet is shown for going on: its frame says what it will say.
+    click(1900)
+    ahead = page.evaluate(FRAMES)[4:]
+    assert [(band["part"], band["top"], band["says"][1] or band["says"][0]) for band in ahead] == [
+        ("header ahead", 2018, "Untitled.ipynb"), ("footer ahead", 2995, "Page 3 of 3")]
+    assert page.evaluate(FRAMES)[1]["says"][1] == "Page 1 of 2"
+    assert page.evaluate("getComputedStyle(document.querySelector('.pageframe.ahead')).opacity") == "0.4"
+    click(40, x=300)
+    assert len(page.evaluate(FRAMES)) == 4
+    # A region on a third page: every footer counts three now — and two again when it is gone.
+    click(1900)                                                 # (far down: a third page is shown)
+    click(2100)
+    keys.type("ee := 5")
+    keys.press("Enter")
+    settled(page)
+    assert [band["says"][1] for band in page.evaluate(FRAMES) if band["part"] == "footer"] == ["Page 1 of 3", "Page 2 of 3", "Page 3 of 3"]
+    keys.press("Control+z")
+    settled(page)
+    click(40, x=300)
+    assert [band["says"][1] for band in page.evaluate(FRAMES) if band["part"] == "footer"] == ["Page 1 of 2", "Page 2 of 2"]
+    # (A double click on the paper itself opens nothing.)
+    box = page.locator("#content").bounding_box()
+    page.mouse.dblclick(box["x"] + 300, box["y"] + 200)
+    page.wait_for_timeout(200)
+    assert page.evaluate("document.querySelector('#overlay').hidden")
+    # Shown larger, the paper is read as it is shown.
+    keys.press("Control+=")
+    keys.press("Control+=")
+    assert page.evaluate("document.querySelector('#paper').style.zoom") == "1.2"
+    page.evaluate("document.querySelector('#desk').scrollTop = 900")
+    box = page.locator("#content").bounding_box()
+    page.mouse.click(box["x"] + 48, box["y"] + 1020 * 1.2)      # the header of the second page again
+    assert page.evaluate(CROSS) == 1048
+    keys.press("Control+0")
+
+    # A region is dragged from one page to the next: across the frames, it
+    # goes on with the pointer.  A rubber band reaches over them, too.
+    box = page.locator("#content").bounding_box()
+    page.evaluate("document.querySelector('#desk').scrollTop = 600")
+    box = page.locator("#content").bounding_box()
+    page.mouse.move(box["x"] + 50, box["y"] + 922)              # on bb, 10 px below its top
+    page.mouse.down()
+    page.mouse.move(box["x"] + 50, box["y"] + 1000, steps=3)
+    page.mouse.move(box["x"] + 50, box["y"] + 1138, steps=4)
+    assert page.evaluate("parseFloat(document.querySelector('.region.dragging').style.top)") == 1128
+    page.mouse.up()
+    settled(page)
+    assert page.evaluate(TOPS) == [32, 1128, 1041, 1080]        # (bb is on the second page now, below dd)
+    page.mouse.move(box["x"] + 300, box["y"] + 900)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 200, box["y"] + 1000, steps=3)
+    page.mouse.move(box["x"] + 20, box["y"] + 1100, steps=3)
+    band = page.evaluate("(() => { const b = document.querySelector('#band'); return [parseFloat(b.style.top), parseFloat(b.style.height), b.hidden]; })()")
+    assert band == [900, 200, False]
+    page.mouse.up()
+    assert page.evaluate("[...document.querySelectorAll('.region.selected')].map((r) => r.innerText.replace(/\\s+/g, ''))") == ["cc:=3", "dd:=4"]
+    keys.press("Escape")
+
+    # A double click on a header or a footer opens the dialog; Esc leaves all as it is.
+    page.evaluate("document.querySelector('#desk').scrollTop = 0")
+    page.locator("#content > .pageframe.header").first.dblclick()
+    page.wait_for_selector(".dialog.frame")
+    assert cells(page)[0] == "File and date"
+    assert page.evaluate("[...document.querySelectorAll('.framepreview .cell.centre')].map((cell) => cell.textContent)") == ["", "Page 1 of 2"]
+    page.fill(".dialog.frame textarea[aria-label='Header, centre']", "not wanted")
+    keys.press("Escape")
+    page.wait_for_selector(".dialog.frame", state="detached")
+    assert page.evaluate(FRAMES)[0]["says"] == ["Untitled.ipynb", "", ""]
+
+    # Saved, the sheet says of itself when, and counts the saves that changed it.
+    save_as(page, "framed.ipynb")
+    page.wait_for_function("!document.querySelector('#doc-name').textContent.includes('Untitled')")
+    today = time.strftime("%Y-%m-%d")
+    assert page.evaluate(FRAMES)[0]["says"] == ["framed.ipynb", "", today]
+    assert page.evaluate(words, "header")[2][1] == 680         # (the date ends at the right edge)
+    kept = saved_settings(folder, "framed.ipynb")
+    assert kept["frame"] == {"header": ["{file}", "", "{saved}"], "footer": ["", "Page {page} of {pages}", ""],
+                             "rule": {"header": True, "footer": True}, "dates": "iso", "logo": None}
+    assert kept["about"]["revision"] == 1 and kept["about"]["saved"].startswith(time.strftime("%Y-%m-%dT", time.gmtime()))
+    # Places are kept as places on the sheet — not on the paper, where the frames stand between them.
+    cells_kept = nbformat.read(str(folder / "framed.ipynb"), as_version=4).cells
+    assert [cell.metadata["edsl"]["y"] for cell in cells_kept if "edsl" in cell.metadata] == [0, 945, 984, 1032]
+
+    # Without the frame a page is 1009 px of the sheet again, and its end
+    # is elsewhere: dd, which it would cut, begins the second page, and bb
+    # makes room for it.
+    frame_dialog(page)
+    page.select_option(".dialog.frame select[aria-label='Template']", "")
+    assert cells(page) == ["", "", "", "", "", "", ""]
+    frame_ok(page)
+    assert page.evaluate(FRAMES) == [] and page.evaluate(TOPS) == [0, 1048, 945, 1009] and page.evaluate(DIRTY)
+    save(page)
+    assert "frame" not in saved_settings(folder, "framed.ipynb")
+    assert saved_settings(folder, "framed.ipynb")["about"]["revision"] == 1                           # (without one, a save is not counted)
+
+
+def test_what_a_header_says_is_set_in_a_dialog_and_tried_out_there(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    keys.type("x := 5")
+    keys.press("Enter")
+    settled(page)
+    (folder / "logo.svg").write_text(LOGO, encoding="utf-8")
+    (folder / "logo.png").write_bytes(png(60, 30))
+    (folder / "notes.txt").write_text("no picture", encoding="utf-8")
+    shown_now = """() => [...document.querySelectorAll('.framepreview')].map((box) => box.querySelector('.pageframe')
+        ? [...box.querySelectorAll('.cell')].map((cell) => [...cell.querySelectorAll('.words')].map((line) =>
+            line.textContent + (line.querySelector('img') ? '[logo]' : '')).join(' / '))
+        : box.textContent)"""
+    area = lambda which: f".dialog.frame textarea[aria-label='{which}']"                                # noqa: E731
+
+    frame_dialog(page)
+    assert page.evaluate(shown_now) == ["no header", "no footer"]
+    assert page.evaluate("document.activeElement.getAttribute('aria-label')") == "Template"
+    # Tab goes round in the dialog, past what is not to be used now: from its last button to its first field.
+    keys.press("Shift+Tab")
+    assert page.evaluate("document.activeElement.textContent") == "OK"
+    keys.press("Tab")
+    assert page.evaluate("document.activeElement.getAttribute('aria-label')") == "Template"
+    keys.press("Tab")
+    assert page.evaluate("document.activeElement.getAttribute('aria-label')") == "Header, left"       # (nothing to keep or delete yet)
+    keys.press("Escape")
+    frame_dialog(page)
+    assert page.evaluate("[...document.querySelectorAll('.dialog.frame .field')].map((b) => b.textContent)") == [
+        "{file}", "{name}", "{folder}", "{title}", "{author}", "{revision}", "{saved}", "{saved-time}", "{date}", "{time}",
+        "{page}", "{pages}", "{logo}"]
+    # What is typed into a cell is shown at once, its fields saying what
+    # they say of this sheet.  A field's button writes it at the caret —
+    # in the header's middle, until a cell has had the keyboard.
+    page.locator(".dialog.frame .field", has_text="{pages}").click()
+    assert cells(page) == ["*", "", "{pages}", "", "", "", ""]
+    page.fill(area("Header, centre"), "")
+    assert cells(page)[0] == ""
+    page.fill(area("Header, left"), "**ACME** Engineering\n")
+    page.locator(".dialog.frame .field", has_text="{name}").click()
+    keys.type(" by ")
+    page.locator(".dialog.frame .field", has_text="{author}").click()
+    assert page.input_value(area("Header, left")) == "**ACME** Engineering\n{name} by {author}"
+    for _ in range(len("{author}")):                            # (in the middle of what is there: at the caret, not at the end)
+        keys.press("ArrowLeft")
+    page.locator(".dialog.frame .field", has_text="{page}").click()
+    keys.type("!")
+    assert page.input_value(area("Header, left")) == "**ACME** Engineering\n{name} by {page}!{author}"
+    page.fill(area("Header, left"), "**ACME** Engineering\n{name} by {author}")
+    assert page.evaluate(shown_now) == [["ACME Engineering / Untitled by ", "", ""], "no footer"]
+    assert page.evaluate("document.querySelector('.framepreview strong').textContent") == "ACME"
+    assert cells(page)[0] == "*"                                 # no template: as set below
+    page.fill(area("Footer, right"), "{page}/{pages}")
+    page.fill(".dialog.frame input[aria-label='Title']", "  A <b>title</b> ")
+    page.fill(".dialog.frame input[aria-label='Author']", "R. T.")
+    page.fill(area("Header, centre"), "{title}")
+    assert page.evaluate(shown_now) == [["ACME Engineering / Untitled by R. T.", "A <b>title</b>", ""], ["", "", "1/1"]]
+    assert page.evaluate("document.querySelectorAll('.framepreview b').length") == 0
+    heights = "[...document.querySelectorAll('.framepreview')].map((box) => box.getBoundingClientRect().height)"
+    assert page.evaluate(heights) == [48 + 2, 32 + 2]           # (two lines and the rule; a line and the rule: in a frame of 1 px)
+    page.fill(area("Header, right"), "a line that is longer than its third of the page, and longer, and longer, and longer still " * 2)
+    assert page.evaluate(heights) == [48 + 2, 32 + 2]
+    assert page.evaluate("[...document.querySelectorAll('.framepreview .words')].every((line) => line.getBoundingClientRect().height === 16)")
+    page.fill(area("Header, right"), "")
+    # The centre is the page's middle whatever stands at the sides, and each of its lines is set in the middle.
+    middles = """() => { const box = document.querySelector('.framepreview').getBoundingClientRect();
+        return [...document.querySelector('.framepreview').querySelectorAll('.cell.centre .words')].map((line) => {
+            const range = document.createRange();
+            range.selectNodeContents(line);
+            const words = range.getBoundingClientRect();
+            return Math.round((words.left + words.right) / 2 - (box.left + box.right) / 2); }); }"""
+    page.fill(area("Header, centre"), "{title}\nx")
+    assert page.evaluate(middles) == [0, 0]
+    page.fill(area("Header, centre"), "{title}")
+    # The rule under the header and over the footer; how dates are written.
+    rules = "[...document.querySelectorAll('.framepreview .rule')].map((rule) => rule.classList.contains('drawn'))"
+    assert page.evaluate(rules) == [True, True]
+    page.uncheck(".dialog.frame label.check:has-text('a line over it') input")
+    assert page.evaluate(rules) == [True, False]
+    page.fill(area("Footer, left"), "{date}")
+    assert page.evaluate(shown_now)[1][0] == time.strftime("%Y-%m-%d")
+    page.select_option(".dialog.frame select[aria-label='How dates are written']", "dots")
+    assert page.evaluate(shown_now)[1][0] == time.strftime("%d.%m.%Y")
+
+    # A logo is a picture, shown where {logo} stands — where no cell names
+    # it yet, the header's left one does — at the height it is given.
+    assert page.evaluate("[...document.querySelectorAll('.dialog.frame .row')].find((row) => row.textContent.startsWith('Logo')).querySelector('.note').textContent").startswith("none")
+    page.set_input_files(".dialog.frame input[type=file]", str(folder / "notes.txt"))
+    page.wait_for_function(f"{TOAST}.includes('not a picture')")
+    page.evaluate(LIMIT.replace("pictures.js", "pageframe.js").replace("LIMITS", "LOGO"), ["bytes", 50])
+    page.set_input_files(".dialog.frame input[type=file]", str(folder / "logo.png"))
+    page.wait_for_function(f"{TOAST}.includes('too large for a logo')")
+    page.evaluate(LIMIT.replace("pictures.js", "pageframe.js").replace("LIMITS", "LOGO"), ["bytes", 2e6])
+    assert page.evaluate("document.querySelectorAll('.framepreview img').length") == 0
+    page.set_input_files(".dialog.frame input[type=file]", str(folder / "logo.svg"))
+    page.wait_for_selector(".framepreview img")
+    assert page.input_value(area("Header, left")) == "{logo} **ACME** Engineering\n{name} by {author}"
+    logo = "(() => { const img = document.querySelector('.framepreview img').getBoundingClientRect(); return [Math.round(img.width), Math.round(img.height)]; })()"
+    assert page.evaluate(logo) == [113, 38]                      # 10 mm high, and as wide as its shape makes it
+    assert page.evaluate("document.querySelector('.framepreview .pageframe').getBoundingClientRect().height") == 80
+    assert page.input_value(".dialog.frame input[aria-label='Height of the logo in mm']") == "10"
+    page.fill(".dialog.frame input[aria-label='Height of the logo in mm']", "5")
+    assert page.evaluate(logo) == [57, 19]
+    assert page.evaluate("document.querySelector('.framepreview .pageframe').getBoundingClientRect().height") == 64
+    for beyond in ("99", "3", ""):                              # (4 to 40 mm it can be)
+        page.fill(".dialog.frame input[aria-label='Height of the logo in mm']", beyond)
+        assert page.evaluate(logo) == [57, 19]
+    page.set_input_files(".dialog.frame input[type=file]", str(folder / "logo.png"))                   # another picture, as high
+    page.wait_for_function("document.querySelector('.framepreview img').src.startsWith('data:image/png')")
+    assert page.evaluate(logo) == [38, 19]
+    page.fill(area("Header, left"), "{logo}")
+    page.fill(area("Header, right"), "{logo}")                   # (it may stand in more than one place)
+    assert page.evaluate(shown_now)[0] == ["[logo]", "A <b>title</b>", "[logo]"]
+    page.click(".dialog.frame button:has-text('Remove')")
+    assert page.evaluate(shown_now)[0] == ["[logo]", "A <b>title</b>", "[logo]"] and page.evaluate("document.querySelectorAll('.framepreview img').length") == 0
+    page.set_input_files(".dialog.frame input[type=file]", str(folder / "logo.png"))
+    page.wait_for_selector(".framepreview img")
+    page.fill(area("Header, right"), "")
+    frame_ok(page)
+    bands = page.evaluate(FRAMES)
+    assert [(band["part"], band["top"], band["height"], band["says"]) for band in bands] == [
+        ("header", 0, 64, ["[logo]", "A <b>title</b>", ""]), ("footer", 977, 32, [time.strftime("%d.%m.%Y"), "", "1/1"])]
+    assert page.evaluate("document.querySelector('#content > .pageframe img').src").startswith("data:image/png;base64,iVBOR")
+    assert page.evaluate("['header', 'footer'].map((part) => getComputedStyle("
+                         "document.querySelector(`#content > .pageframe.${part} .rule`), '::after').borderTopWidth)") == ["1px", "0px"]
+    assert page.evaluate(TOPS) == [64]
+
+    # The day and the hour of printing are those of the printing, not of when the sheet was last drawn.
+    page.evaluate("""() => { const Real = Date;
+        window.Date = class extends Real { constructor(...given) { super(...(given.length ? given : [Real.now() + 49 * 3600e3])); } }; }""")
+    assert page.evaluate(FRAMES)[1]["says"][0] == time.strftime("%d.%m.%Y")
+    page.evaluate("window.dispatchEvent(new Event('beforeprint'))")
+    assert page.evaluate(FRAMES)[1]["says"][0] == time.strftime("%d.%m.%Y", time.localtime(time.time() + 49 * 3600))
+    page.evaluate("window.dispatchEvent(new Event('afterprint'))")
+
+    # The revision: a number is counted on from with every save that changed
+    # the sheet; anything else stays as it was typed.
+    frame_dialog(page)
+    page.fill(area("Footer, left"), "{folder}")
+    page.fill(area("Header, right"), "Rev. {revision}")
+    assert page.evaluate(shown_now)[0][2] == "Rev. 0"           # (no revision yet: none counted)
+    page.fill(".dialog.frame input[aria-label='Revision']", "41")
+    assert page.evaluate(shown_now)[0][2] == "Rev. 41"
+    frame_ok(page)
+    assert page.evaluate(FRAMES)[0]["says"][2] == "Rev. 41" and page.evaluate(FRAMES)[1]["says"][0] == ""
+    save_as(page, "set.ipynb")
+    page.wait_for_function("document.querySelector('#doc-dirty').hidden")
+    assert page.evaluate(FRAMES)[0]["says"][2] == "Rev. 42" and page.evaluate(FRAMES)[1]["says"][0] == str(folder)
+    save(page)                                                  # nothing changed: the same revision
+    assert saved_settings(folder, "set.ipynb")["about"]["revision"] == 42
+    keys.type("y := 2")
+    keys.press("Enter")
+    settled(page)
+    save(page)
+    kept = saved_settings(folder, "set.ipynb")
+    assert kept["about"] == {"title": "A <b>title</b>", "author": "R. T.", "revision": 43, "saved": kept["about"]["saved"]}
+    assert kept["frame"]["logo"]["data"] == {"image/png": base64.b64encode(png(60, 30)).decode()} and kept["frame"]["logo"]["name"] == "logo.png"
+    assert kept["frame"]["dates"] == "dots" and kept["frame"]["rule"] == {"header": True, "footer": False}
+    frame_dialog(page)
+    assert page.input_value(".dialog.frame input[aria-label='Revision']") == "43"
+    page.fill(".dialog.frame input[aria-label='Revision']", " B ")
+    frame_ok(page)
+    assert page.evaluate(FRAMES)[0]["says"][2] == "Rev. B" and page.evaluate(DIRTY)
+    save(page)
+    assert saved_settings(folder, "set.ipynb")["about"]["revision"] == "B" and page.evaluate(FRAMES)[0]["says"][2] == "Rev. B"
+    # What is emptied is the sheet's no more: no author; a revision that begins again.
+    frame_dialog(page)
+    page.fill(".dialog.frame input[aria-label='Revision']", "")
+    page.fill(".dialog.frame input[aria-label='Author']", "")
+    frame_ok(page)
+    assert page.evaluate(FRAMES)[0]["says"][2] == "Rev. 0"
+    save(page)
+    kept = saved_settings(folder, "set.ipynb")
+    assert sorted(kept["about"]) == ["revision", "saved", "title"] and kept["about"]["revision"] == 1
+    frame_dialog(page)                                          # (and "B" again, for what follows)
+    page.fill(".dialog.frame input[aria-label='Revision']", "B")
+    frame_ok(page)
+    save(page)
+    # OK with nothing changed changes nothing: the sheet has nothing new to save.
+    frame_dialog(page)
+    frame_ok(page)
+    assert not page.evaluate(DIRTY)
+    # Opened again, the sheet is as it was saved.
+    page.reload()
+    page.wait_for_selector("#content > .pageframe img")
+    bands = page.evaluate(FRAMES)
+    assert [(band["part"], band["height"], band["says"]) for band in bands] == [
+        ("header", 64, ["[logo]", "A <b>title</b>", "Rev. B"]), ("footer", 32, [str(folder), "", "1/1"])]
+
+
+def test_a_template_of_ones_own_is_kept_for_every_sheet_and_new_sheets_start_with_one(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    (folder / "logo.svg").write_text(LOGO, encoding="utf-8")
+    names = "[...document.querySelectorAll(\".dialog.frame select[aria-label='Template'] option\")].filter((o) => !o.hidden).map((o) => o.textContent)"
+    area = lambda which: f".dialog.frame textarea[aria-label='{which}']"                                # noqa: E731
+
+    # What the server has kept is read again before it is offered: a
+    # template is a header or a footer, under a name that no ready-made one has.
+    kept_file = folder / ".jupyter-data" / "edsl_worksheet_templates.json"
+    kept_file.parent.mkdir(exist_ok=True)
+    kept_file.write_text(json.dumps({"templates": [
+        {"name": "Good", "frame": {"header": ["good", "", ""], "more": "than a frame has"}},
+        {"name": "Title block", "frame": {"header": ["not the ready-made one", "", ""]}},
+        {"name": "Nothing in it", "frame": {"header": ["", " ", ""], "footer": []}}]}), encoding="utf-8")
+    nbformat.write(nbformat.v4.new_notebook(cells=[nbformat.v4.new_markdown_cell("a sheet that has no header")]), str(folder / "plain.ipynb"))
+    page.reload()
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    frame_dialog(page)
+    assert page.evaluate(names) == ["None", "Page numbers", "File and date", "Title block", "Good"]
+    page.select_option(".dialog.frame select[aria-label='Template']", "Title block")
+    assert cells(page)[1] == "{logo}"
+    page.select_option(".dialog.frame select[aria-label='Template']", "Good")
+    assert cells(page) == ["Good", "good", "", "", "", "", ""]
+    page.click(".dialog.frame button:has-text('Delete')")
+    page.wait_for_function(f"!{names}.includes('Good')")
+    page.select_option(".dialog.frame select[aria-label='Template']", "")
+    assert page.evaluate(names) == ["None", "Page numbers", "File and date", "Title block"]
+    assert page.is_disabled(".dialog.frame button:has-text('Save as template')") and page.is_disabled(".dialog.frame button:has-text('Delete')")
+    page.select_option(".dialog.frame select[aria-label='Template']", "Title block")
+    assert cells(page) == ["Title block", "{logo}", "**{title}**\n{file}", "Rev. {revision}\n{saved}", "{author}", "", "Page {page} of {pages}"]
+    page.set_input_files(".dialog.frame input[type=file]", str(folder / "logo.svg"))
+    page.wait_for_selector(".framepreview img")
+    assert cells(page)[0] == "*" and page.evaluate(names)[-1] == "(as set below)"
+    # Kept under a name — not that of a ready-made one — it is one of the templates.
+    page.click(".dialog.frame button:has-text('Save as template')")
+    assert page.evaluate("document.activeElement.getAttribute('aria-label')") == "Name of the template"
+    for taken in ("Title block", "None"):
+        page.evaluate("document.querySelector('#toast').hidden = true")
+        page.fill(".dialog.frame input[aria-label='Name of the template']", taken)
+        keys.press("Enter")
+        page.wait_for_function(f"{TOAST}.includes('ready-made template')")
+    # (A server that was started before templates could be kept does not know the address: that is said.)
+    page.route("**/api/templates*", lambda route: route.fulfill(status=404, body="<html>404: Not Found</html>"))
+    page.fill(".dialog.frame input[aria-label='Name of the template']", "ACME")
+    keys.press("Enter")
+    page.wait_for_function(f"{TOAST}.includes('start it again')")
+    assert page.evaluate(names) == ["None", "Page numbers", "File and date", "Title block", "(as set below)"]
+    page.unroute("**/api/templates*")
+    # (And what a server will not keep, it says why.)
+    page.route("**/api/templates*", lambda route: route.fulfill(status=400, content_type="application/json", body='{"error": "not this one"}'))
+    keys.press("Enter")
+    page.wait_for_function(f"{TOAST} === 'not this one'")
+    page.unroute("**/api/templates*")
+    page.fill(".dialog.frame input[aria-label='Name of the template']", "  ACME ")
+    keys.press("Enter")
+    page.wait_for_function(f"{names}.includes('ACME')")
+    assert page.evaluate(names) == ["None", "Page numbers", "File and date", "Title block", "ACME"] and cells(page)[0] == "ACME"
+    assert not page.is_visible(".dialog.frame input[aria-label='Name of the template']")
+    assert not page.is_disabled(".dialog.frame button:has-text('Delete')")
+    # A template that has no logo leaves the sheet the logo it has.
+    page.select_option(".dialog.frame select[aria-label='Template']", "Page numbers")
+    assert page.evaluate("document.querySelectorAll('.framepreview img').length") == 0
+    page.select_option(".dialog.frame select[aria-label='Template']", "Title block")
+    assert page.evaluate("document.querySelectorAll('.framepreview img').length") == 1 and cells(page)[0] == "ACME"
+    # New sheets on this computer start with the template chosen for them.
+    page.select_option(".dialog.frame select[aria-label='Template of a new sheet']", "ACME")
+    page.fill(area("Footer, centre"), "only this sheet's")
+    frame_ok(page)
+    assert page.evaluate(FRAMES)[0]["says"] == ["[logo]", "Untitled / Untitled.ipynb", "Rev. 0 / "]
+    assert page.evaluate(FRAMES)[1]["says"] == ["", "only this sheet's", "Page 1 of 1"]
+    stored = {entry["name"]: entry["frame"] for entry in json.loads(kept_file.read_text(encoding="utf-8"))["templates"]}
+    assert sorted(stored) == ["ACME", "Nothing in it", "Title block"]       # (what the page did not take is not its to throw away)
+    assert stored["ACME"]["footer"] == ["{author}", "", "Page {page} of {pages}"]
+    assert stored["ACME"]["logo"]["name"] == "logo.svg" and list(stored["ACME"]["logo"]["data"]) == ["image/svg+xml"]
+    assert json.loads((folder / ".jupyter-data" / "edsl_worksheet.json").read_text(encoding="utf-8"))["template"] == "ACME"
+    keys.press("Alt+n")
+    page.click(".dialog .btn:has-text('Discard')")
+    page.wait_for_function("document.querySelectorAll('#content > .pageframe').length === 2 && document.querySelector('#doc-dirty').hidden")
+    assert [band["says"] for band in page.evaluate(FRAMES)] == [["[logo]", "Untitled / Untitled.ipynb", "Rev. 0 / "], ["", "", "Page 1 of 1"]]
+    assert not page.evaluate(DIRTY)                             # (a new sheet: there is nothing to save yet)
+    # A sheet that is there already is as it is: without a header, if it has none.
+    page.goto(page.url.split("?")[0] + f"?token={TOKEN}&open=plain.ipynb")
+    page.wait_for_selector(".region.text")
+    page.wait_for_timeout(500)
+    assert page.evaluate(FRAMES) == []
+    page.goto(page.url.split("?")[0])
+    # So does the sheet a new window begins with.
+    page.reload()
+    page.wait_for_selector("#content > .pageframe img")
+    assert [band["says"] for band in page.evaluate(FRAMES)] == [["[logo]", "Untitled / Untitled.ipynb", "Rev. 0 / "], ["", "", "Page 1 of 1"]]
+    assert not page.evaluate(DIRTY)
+    frame_dialog(page)
+    assert cells(page)[0] == "ACME" and page.input_value(".dialog.frame select[aria-label='Template of a new sheet']") == "ACME"
+    # A template is changed by keeping another under its name, and let go of with Delete.
+    page.fill(area("Footer, left"), "ACME Ltd.")
+    assert cells(page)[0] == "*"
+    page.click(".dialog.frame button:has-text('Save as template')")
+    page.fill(".dialog.frame input[aria-label='Name of the template']", "ACME")
+    page.click(".dialog.frame .row:has(input[aria-label='Name of the template']) button:has-text('Save')")
+    page.wait_for_function("document.querySelector('.dialog.frame select').value === 'ACME'")
+    page.select_option(".dialog.frame select[aria-label='Template']", "Page numbers")
+    page.select_option(".dialog.frame select[aria-label='Template']", "ACME")
+    assert cells(page)[4] == "ACME Ltd."
+    page.click(".dialog.frame button:has-text('Delete')")
+    page.wait_for_function(f"!{names}.includes('ACME')")
+    assert cells(page)[0] == "*" and cells(page)[4] == "ACME Ltd."                                      # (what the sheet has stays)
+    assert page.evaluate("[...document.querySelector(\".dialog.frame select[aria-label='Template of a new sheet']\").selectedOptions]"
+                         ".map((option) => option.textContent)") == ["None"]
+    frame_ok(page)
+    assert sorted(entry["name"] for entry in json.loads(kept_file.read_text(encoding="utf-8"))["templates"]) == ["Nothing in it", "Title block"]
+    assert json.loads((folder / ".jupyter-data" / "edsl_worksheet.json").read_text(encoding="utf-8"))["template"] == ""
+    keys.press("Alt+n")
+    page.click(".dialog .btn:has-text('Discard')")
+    page.wait_for_function("document.querySelectorAll('#content > .pageframe').length === 0")
+    # On paper a sheet with a header alone ends with its last region — and an empty one not before its header.
+    printed = "parseFloat(document.querySelector('#content').style.getPropertyValue('--printed'))"
+    frame_dialog(page)
+    page.fill(area("Header, left"), "only a header")
+    frame_ok(page)
+    assert [band["part"] for band in page.evaluate(FRAMES)] == ["header"] and page.evaluate(printed) == 32
+    keys.type("x := 5")
+    keys.press("Enter")
+    settled(page)
+    region = page.evaluate("(() => { const r = document.querySelector('.region'); return parseFloat(r.style.top) + r.getBoundingClientRect().height; })()")
+    assert 32 + 20 < region == page.evaluate(printed) < 32 + 40
+
+
+def test_a_sheet_from_elsewhere_gets_no_more_of_a_frame_than_a_frame_is_and_prints_it_on_every_page(page_and_folder):
+    page, folder = page_and_folder
+    cells_ = [nbformat.v4.new_code_cell("from utils.Engineer import *")]
+    for k in range(3):
+        cell = nbformat.v4.new_markdown_cell(f"[body {k + 1}](https://example.org/body/{k + 1})")
+        cell.metadata["edsl"] = {"x": 40, "y": k * 929 + 16, "w": 200}
+        cells_.append(cell)
+    nb = nbformat.v4.new_notebook(cells=cells_)
+    nb.metadata["edsl_worksheet"] = {"version": 1, "settings": {
+        "frame": {"header": ["<img src=x onerror=\"window.hacked = 1\"> [head](https://example.org/head)", "{title}\n{author}{logo}", 7, "more"],
+                  "footer": ["[foot](https://example.org/foot) [bad](javascript:window.hacked=2)", "{page} of {pages} in {folder}", "{revision} {saved}"],
+                  "rule": {"header": "yes", "footer": True}, "dates": "never",
+                  "logo": {"data": {"text/html": "PHNjcmlwdD53aW5kb3cuaGFja2VkID0gMzwvc2NyaXB0Pg==", "image/png": "<svg onload=window.hacked=4>"}, "height": 500}},
+        "about": {"title": "<script>window.hacked = 5</script>", "author": ["not", "a", "name"], "revision": {"a": 1}, "saved": "yesterday"}}}
+    (folder / "from" / "them").mkdir(parents=True)
+    nbformat.write(nb, str(folder / "from" / "them" / "theirs.ipynb"))
+    page.goto(page.url.split("?")[0] + f"?token={TOKEN}&open=from/them/theirs.ipynb")
+    page.wait_for_function("document.querySelectorAll('#content > .pageframe').length === 6")
+    page.wait_for_function("document.querySelector('#content > .pageframe.footer').textContent.includes('them')")      # (where the folder is has been asked)
+    bands = page.evaluate(FRAMES)
+    # Markup is text; a link that would run something is none; what is no
+    # picture is no logo; a date that is none says nothing.
+    assert bands[0] == {"part": "header", "top": 0, "height": 48, "says": [
+        '<img src=x onerror="window.hacked = 1"> head', "<script>window.hacked = 5</script> / ", ""]}
+    assert bands[1] == {"part": "footer", "top": 977, "height": 32, "says": [
+        "foot [bad](javascript:window.hacked=2)", f"1 of 3 in {folder / 'from' / 'them'}", "0 " + time.strftime("%Y-%m-%d")]}   # (as old as its file)
+    assert page.evaluate("[document.querySelectorAll('.pageframe img, .pageframe script').length, window.hacked]") == [0, None]
+    assert page.evaluate("[...document.querySelectorAll('#content > .pageframe.header a')].map((a) => a.getAttribute('href'))") == ["https://example.org/head"] * 3
+    assert page.evaluate("['header', 'footer'].map((part) => document.querySelector(`#content > .pageframe.${part} .rule`).classList.contains('drawn'))") == [False, True]
+    assert [band["part"] for band in bands] == ["header", "footer"] * 3
+    # A click on a link there is a click on the header: the cursor's, and no page is opened.
+    link = page.locator("#content > .pageframe.header[style*='top: 0px'] a").bounding_box()            # (the first page's)
+    page.mouse.click(link["x"] + 5, link["y"] + 5)
+    page.wait_for_timeout(300)
+    assert len(page.context.pages) == 1 and page.evaluate(CROSS) == 48 and page.url.endswith("theirs.ipynb")
+    # With the cursor far down, the screen shows a page more, for going on.
+    page.evaluate("document.querySelector('#desk').scrollTop = 2600")
+    box = page.locator("#content").bounding_box()
+    page.mouse.click(box["x"] + 300, box["y"] + 2990)
+    assert [band["part"] for band in page.evaluate(FRAMES)] == ["header", "footer"] * 3 + ["header ahead", "footer ahead"]
+    # On paper: the three pages with something on them, each with its
+    # header and its footer where the screen has them; the page that is
+    # shown for going on is not paper.
+    assert page.evaluate(TOPS) == [48 + 16, 1009 + 48 + 16, 2 * 1009 + 48 + 16]
+    places, pages = linked(page.pdf(prefer_css_page_size=True))
+    assert pages == 3
+    for name, down in (("head", 57 + 16), ("foot", 57 + 1009 - 16)):                             # (a line down in its part)
+        found = sorted((number, at) for address, number, at in places if address == f"https://example.org/{name}")
+        assert [number for number, at in found] == [1, 2, 3] and len({at for number, at in found}) == 1, (name, found)
+        assert down <= found[0][1] < down + 6, (name, found)
+    assert sorted((address, number) for address, number, at in places if "/body/" in address) == [
+        (f"https://example.org/body/{k}", k) for k in (1, 2, 3)]
+    page.emulate_media(media="print")
+    assert page.evaluate("[...document.querySelectorAll('#content > .pageframe')].map((band) => "
+                         "[band.classList.contains('ahead'), getComputedStyle(band).display === 'none'])") == [[False, False]] * 6 + [[True, True]] * 2 \
+        or page.evaluate("[...document.querySelectorAll('#content > .pageframe')].every((band) => "
+                         "band.classList.contains('ahead') === (getComputedStyle(band).display === 'none'))")
+    assert page.evaluate("document.querySelector('#content').getBoundingClientRect().height") == 3 * 1009
+    page.emulate_media(media="screen")
+    # A sheet that says when it was saved is of that day, and of that hour, however new its file is.
+    nb.metadata["edsl_worksheet"]["settings"] = {"frame": {"header": ["{saved} {saved-time}", "", ""]},
+                                                 "about": {"saved": "2021-03-04T10:05:00", "revision": 12}}
+    nbformat.write(nb, str(folder / "dated.ipynb"))
+    page.goto(page.url.split("?")[0] + f"?token={TOKEN}&open=dated.ipynb")
+    page.wait_for_selector("#content > .pageframe")
+    assert page.evaluate(FRAMES)[0]["says"] == ["2021-03-04 10:05", "", ""]

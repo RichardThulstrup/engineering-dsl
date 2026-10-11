@@ -30,7 +30,7 @@ import tornado.httpserver
 import tornado.web
 import tornado.websocket
 
-from . import document, prefs
+from . import document, prefs, templates
 from .session import KernelSession
 
 __all__ = ["main", "make_app", "Config"]
@@ -200,6 +200,31 @@ class _Prefs(_Base):
         if not isinstance(changes, dict):
             raise tornado.web.HTTPError(400, "a JSON object of preferences is expected")
         self.json(prefs.save(changes))
+
+
+class _Templates(_Base):
+    """Headers and footers the user keeps by name on this computer (see ``templates``)."""
+
+    def get(self):
+        self.require_auth()
+        self.json({"templates": templates.load()})
+
+    def put(self):
+        self.require_auth()
+        try:
+            body = json.loads(self.request.body.decode("utf-8"))
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            raise tornado.web.HTTPError(400, "a template, as a JSON object with its name and its frame, is expected")
+        try:
+            self.json({"templates": templates.save(body.get("name"), body.get("frame"))})
+        except ValueError as exc:
+            raise tornado.web.HTTPError(400, str(exc))
+
+    def delete(self):
+        self.require_auth()
+        self.json({"templates": templates.delete(self.get_argument("name", ""))})
 
 
 class _List(_Base):
@@ -397,6 +422,7 @@ def make_app(config: Config) -> tornado.web.Application:
         (r"/", _Index),
         (r"/api/info", _Info),
         (r"/api/prefs", _Prefs),
+        (r"/api/templates", _Templates),
         (r"/api/list", _List),
         (r"/api/doc", _Doc),
         (r"/api/trust", _Trust),

@@ -89,6 +89,11 @@ function blocks(tree, root, pictures) {
   return root;
 }
 
+/** Draw the nodes of one line of text, as mdtree reads a line, into `parent` (for a page's header and footer). */
+export function renderInline(nodes, parent, pictures = null) {
+  return inline(nodes, parent, pictures);
+}
+
 /**
  * Render markdown `source` into a new <div class="md">.  `pictures` are
  * the region's attachments, {name: {type: base64}}, for the pictures its
