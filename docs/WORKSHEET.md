@@ -663,6 +663,7 @@ only so is that the 1009 a page of the sheet has.
 
 ```bash
 python -m pytest tests/test_worksheet_render.py tests/test_worksheet_engine.py \
+                 tests/test_worksheet_values.py \
                  tests/test_worksheet_document.py tests/test_worksheet_server.py \
                  tests/test_worksheet_library.py tests/test_worksheet_frontend.py
 ```
