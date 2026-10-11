@@ -9,6 +9,7 @@ import { buildPanel } from "./panel.js";
 import { ask, browse, info } from "./dialogs.js";
 import { fitStrokes, restoreStrokes } from "./strokes.js";
 import { NEEDED } from "./arrange.js";
+import { LIMITS, megabytes, weight } from "./pictures.js";
 
 const DEFAULTS = { showResults: "auto" };          // of a sheet: saved with it
 
@@ -413,6 +414,11 @@ async function save(as = false) {
   sheet.settle();
   const doc = { settings: state.settings, trusted: state.trusted && sheet.calculated,
                 preamble: state.preamble, regions: sheet.serialize(state.settings.showResults) };
+  if (weight(doc.regions) > LIMITS.sheet) {
+    toast(`The pictures on this sheet take ${megabytes(weight(doc.regions))} MB: more than the ` +
+          `${megabytes(LIMITS.sheet)} MB a sheet is saved with.`, "error");
+    return false;
+  }
   let body = { doc, create, mtime: create ? null : state.mtime };
   for (;;) {
     const { ok, status, data } = await api("PUT", `/api/doc?path=${encodeURIComponent(path)}`, body);
@@ -426,8 +432,19 @@ async function save(as = false) {
       const url = new URL(location.href);
       url.searchParams.set("open", state.path);
       history.replaceState(null, "", url);
-      toast("Saved");
       if (moved) restartKernel();           // the kernel works in the sheet's own folder
+      // The server says how many pictures it stored.  One that turned
+      // some down — or was started before pictures could be kept, and
+      // knows nothing of them — must not lose them without a word.
+      const sent = doc.regions.reduce((count, r) => count + Object.keys(r.attachments || {}).length, 0);
+      const stored = data.pictures ?? 0;
+      if (stored !== sent) {
+        setDirty(true);
+        toast(`Not all of it is saved: the worksheet server stored ${stored} of the ${sent} pictures. ` +
+              "They are still on this page — copy them into a sheet of a freshly started worksheet.", "error");
+        return false;
+      }
+      toast("Saved");
       return true;
     }
     if (status === 409) {
@@ -509,6 +526,7 @@ const COMMANDS = {
   "stop-menu": () => conn.send({ op: "interrupt" }),
   "insert-math": () => sheet.create("math"),
   "insert-text": () => sheet.create("text"),
+  "insert-picture": () => $("#picture-file").click(),
   "toggle-palette": () => togglePalette(),
   "search-symbols": searchSymbols,
   "toggle-grid": () => setPref("grid", !state.prefs.grid),
@@ -541,6 +559,12 @@ const HELP = [
     ["Arrange menu", "line the selection up by its edges or middles, or space it out evenly"],
     ["Ctrl+Enter / Ctrl+Backspace", "open / close a line of space at the cursor"],
     ["Tab / Shift+Tab", "edit the next / previous region"],
+  ]],
+  ["Pictures", [
+    ["Ctrl+V", "the picture on the clipboard — a screenshot, a copied drawing, a copied picture file — at the cursor"],
+    ["Picture (in the bar), or a file dropped on the page", "a picture from a file: PNG, JPEG, GIF, WebP, BMP, or an SVG drawing"],
+    ["click a picture", "select it: drag it to move it, its right edge to resize it, Del deletes it"],
+    ["Ctrl+V while writing text", "the picture goes into the text, at the caret"],
   ]],
   ["Calculating", [
     ["top to bottom, left to right", "a name must be defined above (or to the left of) its use"],
@@ -617,6 +641,13 @@ function bindChrome() {
   $("#status").addEventListener("click", () => {
     const failed = $(".region.has-error");          // the first one in the sheet
     if (failed) failed.scrollIntoView({ block: "center", behavior: "smooth" });
+  });
+  $("#picture-file").addEventListener("change", (event) => {
+    const files = [...event.target.files];
+    event.target.value = "";                         // the same file may be chosen again
+    // Into the text being written, if one is; otherwise onto the page.
+    const writing = sheet.editing && sheet.editing.region.kind === "text" ? sheet.editing.region : null;
+    if (files.length) sheet.takePictures({ files }, writing);
   });
 
   palette = buildPanel($("#palette"), {

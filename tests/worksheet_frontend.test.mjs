@@ -113,6 +113,79 @@ const started = Date.now();
 for (const source of sources) renderMarkdown(source);
 assert.ok(Date.now() - started < 5000, "markdown rendering is too slow");
 
+// ---- pictures ---------------------------------------------------------------
+// A text shows the pictures attached to its region — a drawing before the
+// bitmap copy kept beside it for JupyterLab — whatever their names look like.
+const { carried, lonePicture, looksLikeSvg, named, pictureUrl, reference } = await import(js("pictures.js"));
+const BITMAP = "iVBORw0KGgo=", DRAWING = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=";
+const attached = { "a.png": { "image/png": BITMAP }, "b.svg": { "image/png": BITMAP, "image/svg+xml": DRAWING },
+                   "my c.jpg": { "image/jpeg": BITMAP } };
+const pictured = renderMarkdown("See ![a](attachment:a.png), **![b](attachment:b.svg)**\n\n- ![c](attachment:my%20c.jpg)", attached);
+assert.deepEqual(pictured.find("img").map((img) => [img.attributes.alt, img.attributes.src]), [
+  ["a", `data:image/png;base64,${BITMAP}`], ["b", `data:image/svg+xml;base64,${DRAWING}`],
+  ["c", `data:image/jpeg;base64,${BITMAP}`]]);
+assert.ok(pictured.find("img").every((img) => img.attributes.draggable === "false"));   // the sheet does the dragging
+// … wherever in a text they are named: a heading, emphasis of every kind,
+// a list (its wrapped lines and lists within it), a table, a quotation.
+const everywhere = renderMarkdown([
+  "# ![a](attachment:a.png)", "", "*![a](attachment:a.png)* ~~![a](attachment:a.png)~~ __![a](attachment:a.png)__", "",
+  "- ![a](attachment:a.png)\n  ![a](attachment:a.png)\n  - ![a](attachment:a.png)", "",
+  "| ![a](attachment:a.png) |\n|---|\n| ![a](attachment:a.png) |", "", "> ![a](attachment:a.png)"].join("\n"), attached);
+assert.deepEqual(["h1", "em", "del", "strong", "li", "th", "td", "blockquote"].map((tag) => everywhere.find(tag)
+  .filter((node) => node.find("img").length).length), [1, 1, 1, 1, 2, 1, 1, 1]);
+assert.equal(everywhere.find("img").length, 10);
+
+// What is no picture is not shown as one: a name with nothing attached, an
+// attachment of another kind, data that is not base64, a name every object has.
+const unpictured = renderMarkdown(
+  "![a](attachment:gone.png) ![b](attachment:page.html) ![c](attachment:bad.png) ![d](attachment:constructor)",
+  { "page.html": { "text/html": BITMAP }, "bad.png": { "image/png": '"><script>alert(1)</script>' } });
+assert.equal(unpictured.find("img").length, 0);
+assert.ok(unpictured.textContent.includes("![a](attachment:gone.png)"));       // left as it was written
+assert.equal(renderMarkdown("![a](attachment:a.png)").find("img").length, 0);  // a text without attachments
+assert.equal(pictureUrl({ "image/gif": BITMAP, "text/html": "x" }), `data:image/gif;base64,${BITMAP}`);
+assert.equal(pictureUrl({ "image/svg+xml": "<svg/>" }), null);                 // a drawing, too, is kept as base64
+assert.equal(pictureUrl(null), null);
+
+// A region is a picture when its text is one attached picture and nothing else.
+assert.equal(lonePicture("![plot](attachment:1a2b3c.png)"), "1a2b3c.png");
+assert.equal(lonePicture("  ![](attachment:1a2b3c.svg)\n"), "1a2b3c.svg");
+assert.equal(lonePicture("![plot](attachment:1a2b3c.png) and a caption"), null);
+assert.equal(lonePicture("![plot](https://example.com/plot.png)"), null);
+assert.equal(lonePicture("![a](attachment:a.png)![b](attachment:b.png)"), null);
+assert.equal(reference({ alt: "plot", name: "1a2b3c.png" }), "![plot](attachment:1a2b3c.png)");
+
+// A sheet is saved with the pictures its texts still name.
+assert.deepEqual(Object.keys(named("![a](attachment:a.png) <img src=\"attachment:my%20c.jpg\">", attached)), ["a.png", "my c.jpg"]);
+assert.deepEqual(named("no picture here", attached), {});
+assert.deepEqual(named("![a](attachment:a.png)", undefined), {});
+
+// Text that is an SVG drawing — the whole of it — is pasted as a picture.
+assert.ok(looksLikeSvg('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect/></svg>'));
+assert.ok(looksLikeSvg('\n<?xml version="1.0" encoding="UTF-8"?>\n<!-- drawn by hand -->\n<svg viewBox="0 0 1 1">\n</svg>\n'));
+assert.ok(looksLikeSvg('<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "svg11.dtd"><svg></svg>'));
+assert.ok(!looksLikeSvg("An <svg> element draws: <svg></svg>"));
+assert.ok(!looksLikeSvg("<svg> is how a drawing starts"));
+assert.ok(!looksLikeSvg("<p>about</p><svg></svg>"));
+assert.ok(!looksLikeSvg("<!-- no drawing --><p></p></svg>"));
+assert.ok(!looksLikeSvg("x := 5 V"));
+
+// What a clipboard carries: picture files, a drawing as text — and a
+// drawing the browser names in a paste but hands over only when asked.
+const clipboard = (strings, files = []) => ({
+  types: [...Object.keys(strings), ...(files.length ? ["Files"] : [])], files,
+  getData: (type) => strings[type] || "" });
+const file = (name, type) => ({ name, type, size: 10 });
+assert.equal(carried(clipboard({ "text/plain": "x := 5 V" })), null);
+assert.equal(carried(clipboard({}, [file("notes.txt", "text/plain"), file("report.pdf", "application/pdf")])), null);
+assert.deepEqual(carried(clipboard({ "text/plain": "words" }, [file("image.png", "image/png"), file("notes.txt", "text/plain")])),
+                 { files: [file("image.png", "image/png")], svg: null, ask: false });
+assert.deepEqual(carried(clipboard({}, [file("drawing.SVG", ""), file("photo.jpeg", "")])).files.map((f) => f.name),
+                 ["drawing.SVG", "photo.jpeg"]);                               // told by their names, where no kind is given
+assert.deepEqual(carried(clipboard({ "image/svg+xml": "<svg/>" })), { files: [], svg: "<svg/>", ask: false });
+assert.deepEqual(carried(clipboard({ "image/svg+xml": "" }, [file("image.png", "image/png")])),
+                 { files: [file("image.png", "image/png")], svg: null, ask: true });
+
 // ---- syntax colouring -----------------------------------------------------
 const highlight = makeHighlighter({ units: ["kΩ", "V"], constants: ["π"], functions: ["sqrt"] });
 assert.equal(highlight("R_1 := 10. kΩ  # load"),

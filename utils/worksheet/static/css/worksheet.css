@@ -98,18 +98,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* In a narrow window (half a screen, say) the tools give up their
    labels — their tooltips still name them — so the sheet's name stays
    readable. */
-@media (max-width: 1400px) {
+@media (max-width: 1480px) {
   .tool[data-cmd="insert-math"] span:not(.glyph),
   .tool[data-cmd="insert-text"] span:not(.glyph),
+  .tool[data-cmd="insert-picture"] span,
   .tool[data-cmd="toggle-palette"] span:not(.glyph) { display: none; }
 }
-@media (max-width: 1080px) {
+@media (max-width: 1240px) {
   #arrange, .sep:has(+ #arrange) { display: none; }     /* the Arrange menu has them too */
 }
-@media (max-width: 900px) {
+@media (max-width: 1000px) {
   .tool[data-cmd="calc"] span, .tool[data-cmd="stop"] span { display: none; }
   #status { min-width: 0; }
   #bar .sep { margin: 0 2px; }
+}
+@media (max-width: 700px) {
+  .tool.check span { display: none; }                   /* "Automatic": its box stays */
 }
 
 #banner {
@@ -277,7 +281,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .md .al-right { text-align: right; }
 .md hr { border: 0; border-top: 1px solid var(--line); margin: 9px 0; }
 .md a { color: var(--accent); }
-.md img { max-width: 100%; }
+.md img { max-width: 100%; height: auto; vertical-align: middle; -webkit-user-drag: none; user-select: none; }
+/* A picture alone in its region fills it: the region's width is the
+   picture's (sheet.js: FRAME), and its right edge resizes it. */
+.region.picture .md p { margin: 0; }
+.region.picture .md img { display: block; width: 100%; }
 .md .katex-display { margin: 6px 0; }
 .md .empty { color: #a3a8ae; font-style: italic; }
 

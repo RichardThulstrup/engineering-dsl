@@ -10,12 +10,18 @@
 // A notebook that was never laid out has no stored positions: its
 // regions *flow*, one under the other in file order, until the user
 // places something (`freeze()`).
+//
+// A picture is a text region whose text is one attached picture and
+// nothing else (see pictures.js): it fills its region, so the region's
+// width is the picture's, and a click selects it instead of opening its
+// text.
 
-import { $, clamp, el, snap, uid } from "./util.js";
+import { $, clamp, el, snap, toast, uid } from "./util.js";
 import { aligned, distributed, NEEDED } from "./arrange.js";
 import { SourceEditor } from "./editor.js";
 import { renderMarkdown } from "./markdown.js";
 import { notebookOutputs, outputsNode, renderItems, renderSource } from "./mathview.js";
+import { bringsFiles, carried, collect, KINDS_SAID, lonePicture, named, reference } from "./pictures.js";
 import { blockPadding } from "./textaids.js";
 
 // Page geometry — mirrored in css/worksheet.css.
@@ -25,6 +31,7 @@ const GRID = 8;
 const ROW = 24;                         // one "line" for the cursor
 const GAP = 8;                          // clearance kept between regions
 const DRAG_START = 4;
+const FRAME = 12;                       // a region is this much wider than what is in it
 
 class Region {
   constructor(data) {
@@ -34,6 +41,7 @@ class Region {
     this.y = data.y ?? null;
     this.w = data.w ?? null;
     this.source = data.source ?? "";
+    this.attachments = data.attachments || {};    // of a text region: {name: {type: base64}}
     this.saved = data.saved || null;    // outputs stored in the file (shown until calculated)
     this.result = null;                 // {items, tail, rev} from the kernel
     this.typeset = null;                // {source, items}: typeset without results
@@ -67,6 +75,9 @@ export class Sheet {
     this.sink = $("#sink");
     this.regions = [];
     this.byEl = new WeakMap();
+    // Pictures of every region there has been, by region: a snapshot for
+    // undo holds a region's text, not the megabytes attached to it.
+    this.attic = new Map();
     this.selected = new Set();
     this.editing = null;                // {region, editor, original, fresh}
     this.cross = { x: 0, y: 0 };
@@ -87,6 +98,7 @@ export class Sheet {
   load(doc) {
     this.commitEdit();
     for (const region of this.regions) region.el.remove();
+    this.attic.clear();
     this.regions = (doc.regions || []).map((data) => new Region(data));
     this.flow = this.regions.some((r) => r.y === null || r.x === null);
     this.selected.clear();
@@ -129,7 +141,13 @@ export class Sheet {
       id: r.id, kind: r.kind, source: r.source,
       x: r.x, y: r.y, w: r.kind === "text" ? r.w : null,
       outputs: r.kind === "math" && r.result ? notebookOutputs(r.result, mode) : [],
+      // The pictures a text still names; one it has let go of is not kept.
+      attachments: r.kind === "text" ? named(r.source, r.attachments) : undefined,
     }));
+  }
+
+  isPicture(region) {
+    return region.kind === "text" && lonePicture(region.source) !== null;
   }
 
   // ---- undo ------------------------------------------------------------
@@ -158,7 +176,7 @@ export class Sheet {
         Object.assign(region, { x: data.x, y: data.y, w: data.w, rank: data.rank });
         this.draw(region);
       } else {
-        region = new Region(data);
+        region = new Region({ ...data, attachments: this.attic.get(data.id) });
         region.rank = data.rank;
         this.mount(region);
       }
@@ -194,6 +212,7 @@ export class Sheet {
                    el("div", { class: "grip", title: "Drag to move" }), region.body);
     if (region.kind === "text") region.el.append(el("div", { class: "sizer", title: "Drag to change the width" }));
     this.byEl.set(region.el, region);
+    this.attic.set(region.id, region.attachments);
     this.content.append(region.el);
     this.draw(region);
   }
@@ -202,8 +221,17 @@ export class Sheet {
     if (this.editing && this.editing.region === region) return;
     const node = region.el;
     if (region.kind === "text") {
-      region.body.replaceChildren(renderMarkdown(region.source));
+      // Text is drawn again only when it has changed: a picture in it
+      // would otherwise be read anew, and flicker, at every undo.
+      if (region.drawn === region.source) return;
+      region.drawn = region.source;
+      region.body.replaceChildren(renderMarkdown(region.source, region.attachments));
       node.classList.remove("has-error");
+      node.classList.toggle("picture", this.isPicture(region));
+      // A picture has its size once it has been read: the page is laid out again then.
+      for (const img of region.body.querySelectorAll("img")) {
+        if (!img.complete) img.addEventListener("load", () => this.layout(), { once: true });
+      }
       return;
     }
     const settings = this.hooks.settings();
@@ -277,7 +305,14 @@ export class Sheet {
     for (const region of this.regions) {
       const x = region.x ?? 0;
       if (region.kind === "text") {
-        region.el.style.width = `${Math.max(60, region.w ?? CONTENT_W - x)}px`;
+        // Text without a width of its own reaches to the edge of the
+        // page.  A picture without one (in a notebook from elsewhere) is
+        // as wide as it is — at most that far — once it has been read.
+        // (A picture may be small; text needs room for a word or two.)
+        const picture = this.isPicture(region);
+        const own = picture && region.w == null ? region.body.querySelector("img") : null;
+        const wanted = region.w ?? (own ? Math.min(own.naturalWidth + FRAME, CONTENT_W - x) : CONTENT_W - x);
+        region.el.style.width = `${Math.max(picture ? 3 * GRID : 60, wanted)}px`;
       } else {
         // A formula longer than the rest of the line wraps at the page
         // edge (at an operator) rather than running off the paper.
@@ -482,6 +517,7 @@ export class Sheet {
     editor.area.addEventListener("pointerup", follow);
     region.el.classList.add("editing");
     region.el.classList.remove("has-error", "stale");
+    region.drawn = null;                 // the editor takes the place of what was drawn
     region.body.replaceChildren(editor.el);
     this.crossEl.hidden = true;
     editor.focus(caret);
@@ -700,6 +736,70 @@ export class Sheet {
   }
 
   // ====================================================================
+  // pictures
+  // ====================================================================
+  /**
+   * Take the pictures a clipboard, a drop or a file chooser `offer`s (as
+   * `carried` describes them): into the text being written when `region`
+   * is that text region, and otherwise onto the page.
+   */
+  async takePictures(offer, region = null) {
+    // Where they go is settled now.  Reading them takes a moment — the
+    // browser may even ask before it hands a drawing over — and the
+    // cursor may be somewhere else by then.
+    const writing = this.editing ? this.editing.region : null;
+    const cursor = this.cross;
+    const { made, problems, asked } = await collect(offer);
+    if (problems.length) toast(problems[0], "error");
+    else if (asked && made.length) {
+      toast("Pasted as a bitmap. Allow this page to read the clipboard, and a drawing is pasted as a drawing.");
+    } else if (asked) {
+      toast("The drawing on the clipboard can be pasted once this page is allowed to read the clipboard.", "error");
+    }
+    if (!made.length) return;
+    const editing = this.editing;
+    if (region && editing && editing.region === region) {
+      for (const picture of made) {
+        region.attachments[picture.name] = picture.bundle;
+        editing.editor.insert(reference(picture));
+      }
+      editing.editor.area.focus({ preventScroll: true });
+      return;
+    }
+    // Onto the page: where the cursor was — or, asked for while a region
+    // was being written, below that region.
+    this.commitEdit();
+    const above = writing && this.regions.includes(writing) ? writing : null;
+    this.addPictures(made, above ? { x: above.dx, y: Sheet.under(above) } : cursor);
+  }
+
+  /** New pictures at a place on the page, one under the other and at
+   *  their own size where the page has room for it; they are left selected. */
+  addPictures(pictures, at) {
+    this.checkpoint();
+    this.freeze();
+    // They start one below the other, in order; layout spaces them out
+    // as they are read, and settle() keeps them where they land.
+    const made = pictures.map((picture, i) => {
+      const w = clamp(Math.round(picture.width) + FRAME, 3 * GRID, CONTENT_W);
+      const region = new Region({
+        kind: "text", w, x: Math.max(0, Math.min(at.x, CONTENT_W - w)), y: at.y + i,
+        source: reference(picture), attachments: { [picture.name]: picture.bundle } });
+      region.rank = -(++this.rankCounter);
+      this.regions.push(region);
+      this.mount(region);
+      return region;
+    });
+    this.layout();
+    // The cursor waits below them: typing goes on there.
+    const last = made[made.length - 1];
+    this.placeCross(last.dx, Sheet.under(last), { scroll: false });
+    this.select(made);
+    this.reveal(last.el);
+    this.hooks.changed({ calc: false });
+  }
+
+  // ====================================================================
   // operations on the selection
   // ====================================================================
   deleteSelected() {
@@ -818,7 +918,8 @@ export class Sheet {
     return {
       text: group.map((r) => r.source).join("\n\n"),
       json: JSON.stringify(group.map((r) => (
-        { kind: r.kind, source: r.source, w: r.w, x: r.dx - x0, y: r.dy - y0 }))),
+        { kind: r.kind, source: r.source, w: r.w, x: r.dx - x0, y: r.dy - y0,
+          attachments: r.kind === "text" ? named(r.source, r.attachments) : undefined }))),
     };
   }
 
@@ -832,7 +933,9 @@ export class Sheet {
       const region = new Region({
         kind: item.kind === "text" ? "text" : "math", source: String(item.source ?? ""),
         x: clamp(this.cross.x + (item.x || 0), 0, CONTENT_W - GRID), y: this.cross.y + (item.y || 0),
-        w: item.w ?? null });
+        w: item.w ?? null,
+        // (Shown only as far as they are pictures: see pictureUrl.)
+        attachments: item.attachments && typeof item.attachments === "object" ? { ...item.attachments } : {} });
       region.rank = -(this.rankCounter + items.length - i);
       this.regions.push(region);
       this.mount(region);
@@ -879,17 +982,58 @@ export class Sheet {
         if (type === "cut") this.deleteSelected();
       });
     }
-    this.sink.addEventListener("paste", (event) => {
+    this.paper.addEventListener("paste", (event) => this.paste(event));
+    // A picture file let go of over the page lands where it is dropped;
+    // let go of elsewhere in the window, it goes where a pasted one would.
+    // Either way the browser must not show the file in the sheet's place.
+    window.addEventListener("dragover", (event) => {
+      if (bringsFiles(event.dataTransfer)) event.preventDefault();
+    });
+    window.addEventListener("drop", (event) => {
+      if (!bringsFiles(event.dataTransfer)) return;
+      event.preventDefault();
+      const offer = carried(event.dataTransfer);
+      if (!offer || !offer.files.length) {
+        toast(`Only pictures can be dropped on the page: ${KINDS_SAID}.`, "error");
+        return;
+      }
+      if (event.target.closest?.("#desk")) {
+        this.commitEdit();
+        this.select([]);
+        const point = this.point(event);
+        this.placeCross(clamp(point.x, 0, CONTENT_W), Math.max(0, point.y - 8), { scroll: false });
+      }
+      this.takePictures({ files: offer.files });
+    });
+  }
+
+  /** Ctrl+V on the page or in a region being written. */
+  paste(event) {
+    const data = event.clipboardData;
+    const editing = this.editing;
+    const text = data.getData("text/plain");
+    if (!editing) {
       // Regions travel in a format of their own; a browser that will not
       // carry it still hands back the plain text we put beside it.
-      const text = event.clipboardData.getData("text/plain");
-      const json = event.clipboardData.getData("application/x-edsl-regions")
+      const json = data.getData("application/x-edsl-regions")
         || (this.lastClip && this.lastClip.text === text ? this.lastClip.json : "");
       if (json) {
         event.preventDefault();
         this.pasteRegions(json);
-      }                                    // plain text arrives as an input event
-    });
+        return;
+      }
+    }
+    // A picture: on the page it comes before any words the clipboard has
+    // beside it (and words that are an SVG drawing are a picture); into a
+    // text being written it goes only when there are no words to paste.
+    const offer = carried(data);
+    if (!offer || (editing && text)) return;         // plain text arrives as an input event
+    event.preventDefault();
+    if (editing && editing.region.kind !== "text") {
+      toast("A picture goes on the page or into a text region, not into a math region.");
+      return;
+    }
+    this.takePictures(offer, editing ? editing.region : null);
   }
 
   pointerDown(event) {
@@ -943,7 +1087,8 @@ export class Sheet {
       this.select(hit);
     } else if (press.kind === "size") {
       const region = press.region;
-      region.w = clamp(snap(press.width + dx, GRID), 80, CONTENT_W - region.dx);
+      const least = this.isPicture(region) ? 3 * GRID : 80;
+      region.w = clamp(snap(press.width + dx, GRID), least, CONTENT_W - region.dx);
       region.el.style.width = `${region.w}px`;
     } else {
       if (!press.dragging) {
@@ -985,7 +1130,12 @@ export class Sheet {
       return;
     }
     if (!press.dragging) {
-      if (press.grip) { this.select([press.region]); this.focus(); }
+      // A click on a picture selects it — there is no text in it to edit;
+      // a double click opens the text that names it (for a caption, say).
+      const again = this.clicked && this.clicked.region === press.region
+        && event.timeStamp - this.clicked.at < 500;
+      this.clicked = { region: press.region, at: event.timeStamp };
+      if (press.grip || (this.isPicture(press.region) && !again)) { this.select([press.region]); this.focus(); }
       else this.edit(press.region, { line: press.line });
       return;
     }
@@ -1035,9 +1185,10 @@ export class Sheet {
     if (mod && key.toLowerCase() === "a") { event.preventDefault(); this.selectAll(); }
   }
 
-  /** Tab: edit the next (or previous) region in reading order. */
+  /** Tab: edit the next (or previous) region in reading order — pictures are passed by. */
   step(direction) {
-    const order = this.order();
+    const chosen = this.selected.size === 1 ? [...this.selected][0] : null;
+    const order = this.order().filter((r) => r === chosen || !this.isPicture(r));
     if (!order.length) return;
     const here = this.selected.size === 1 ? order.indexOf([...this.selected][0]) : -1;
     let index;

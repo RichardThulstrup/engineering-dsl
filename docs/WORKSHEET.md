@@ -70,6 +70,7 @@ The white area is an A4 page. A red cross marks the cursor.
 | **Ctrl+Enter** / **Ctrl+Backspace** | open / close a line of space at the cursor |
 | **Ctrl+Z** / **Ctrl+Y** | undo / redo |
 | drag the right edge of a text region | change its width |
+| **Ctrl+V** with a picture on the clipboard | the picture is put at the cursor — see [Pictures](#pictures) |
 
 A region that grows pushes the regions under it down rather than
 overlap them, and a region that fits on a page is never split across
@@ -104,6 +105,47 @@ A notebook that was never laid out — any existing notebook — opens with
 its cells one under the other and keeps flowing like that, growing and
 shrinking as a document does, until you place something yourself. From
 then on regions stay where you put them.
+
+### Pictures
+
+**Ctrl+V** puts the picture on the clipboard at the cursor: a
+screenshot, a picture copied in another program, a picture file copied
+in Explorer. **Picture** in the bar takes pictures from files, and a
+picture file dropped on the page lands where it is dropped (dropped
+beside the page, it goes to the cursor). PNG, JPEG, GIF, WebP and BMP
+are taken as they are, up to 20 MB each.
+
+| Do this | and this happens |
+|---|---|
+| click a picture | it is selected: drag it to move it, **Del** deletes it, Ctrl+C/V copy it |
+| drag its right edge | it gets narrower or wider and keeps its shape |
+| double-click it (or **Enter** when it is selected) | the text that names it opens: write a caption under it there, and the two are one text region |
+| **Ctrl+V** or **Picture** while writing a text region | the picture goes into the text, at the caret |
+
+A picture comes in at its own size, or as wide as the page if it is
+wider, and the cursor waits below it. On the page a picture is taken
+before words the clipboard holds beside it; into a text being written
+the words go.
+
+**Drawings (SVG) stay drawings** — sharp at any size and on paper:
+
+- an `.svg` file, chosen, dropped, or copied in Explorer;
+- SVG source copied as text (cut out of a web page, it need not even
+  have its namespace);
+- a drawing copied in a program that puts SVG on the clipboard. A
+  browser hands such a drawing only to a page that may read the
+  clipboard, and asks you the first time. Refused, the page pastes the
+  bitmap that the program put beside the drawing, and says so.
+
+What a program offers only as a bitmap arrives as a bitmap.
+
+A picture is stored in the sheet's file the way JupyterLab stores a
+pasted one: attached to a text cell that names it
+(`![picture](attachment:….png)`). So it is there in JupyterLab and in
+`hardcopy()` too — at its own size, not the one you gave it on the
+page. A drawing is stored with a bitmap copy beside it, because
+JupyterLab shows bitmaps only; `hardcopy()` and the worksheet show the
+drawing. A sheet is saved with up to 100 MB of pictures.
 
 ## How a sheet calculates
 
@@ -265,6 +307,9 @@ A worksheet is saved as `.ipynb`:
   visible in JupyterLab and on GitHub without running anything (run
   there, a cell shows what a notebook shows — nothing, for a
   definition);
+- a picture is a text cell with the picture attached to it; pictures
+  that a notebook brings along (pasted in JupyterLab, say) are shown,
+  and one that no text names any more is not saved again;
 - tags, attachments and other metadata of existing cells are preserved.
 
 If the file was changed by another program while open, saving asks
@@ -311,8 +356,12 @@ the folder the server was started in.
 
 - Editing is by source text with a live typeset preview; the built-up
   formula itself is not edited in place.
-- No pictures: images referenced from markdown by relative path, and
-  cell attachments, are not shown (they are kept in the file).
+- A picture is part of the sheet's file. One that a text only points to
+  — `![plot](figures/plot.png)`, a file beside the notebook — is not
+  shown (the text is kept as it is).
+- A picture cannot be cropped or turned, and copying one puts its
+  region on the clipboard, for this or another sheet — not a picture
+  that another program could paste.
 - Interactive widgets (`ipywidgets`) and top-level `await` are not
   supported; output is text, typeset math, images and tables.
 - One sheet per browser tab; each has its own kernel. A second tab on

@@ -4,15 +4,19 @@ Both tests skip when their tool is missing (node; Playwright with a
 Chromium).  To point the browser test at a particular Chromium or Edge,
 set ``WORKSHEET_TEST_BROWSER`` to its executable.
 """
+import base64
 import glob
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import time
+import zlib
 
 import nbformat
 import pytest
@@ -500,3 +504,466 @@ def test_text_without_a_width_of_its_own_keeps_its_width_when_it_is_arranged(pag
     page.click("#arrange [data-cmd='align-centre']")
     moved = page.evaluate(BOXES)[1]
     assert (moved["left"], round(moved["width"])) == (50, 580)                 # centred between 0 and 680
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the widths at which the bar gives things up are set for Segoe UI")
+def test_the_bar_fits_its_window_whatever_the_width(page_and_folder):
+    # As the window gets narrower the tools give up their labels, then the
+    # arranging tools go (the Arrange menu has them too), then more labels:
+    # nothing is ever cut off, and the sheet's name keeps some room.
+    page, _ = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    page.evaluate("() => { document.querySelector('#doc-name').textContent = 'A sheet with a fairly long name'; }")
+    seen = {}
+    for width in range(1700, 630, -10):
+        page.set_viewport_size({"width": width, "height": 700})
+        seen[width] = page.evaluate("""() => { const bar = document.querySelector('#bar');
+            const shown = (selector) => getComputedStyle(document.querySelector(selector)).display !== 'none';
+            return {cut: bar.scrollWidth - bar.clientWidth, name: document.querySelector('#doc-title').getBoundingClientRect().width,
+                    labels: shown('[data-cmd=insert-picture] span'), arrange: shown('#arrange')}; }""")
+    assert [width for width, bar in seen.items() if bar["cut"] > 0] == []
+    assert all(bar["name"] >= 100 for bar in seen.values() if bar["labels"])
+    # A window of 1280 still has the arranging tools; a wide one has every label.
+    assert seen[1280]["arrange"] and not seen[1280]["labels"] and seen[1700]["labels"] and not seen[900]["arrange"]
+
+
+# ---- pictures ---------------------------------------------------------------
+
+def png(width, height, rgb=(31, 95, 191)):
+    """A real PNG of one colour."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    row = b"\x00" + bytes(rgb) * width
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(row * height)) + chunk(b"IEND", b""))
+
+
+BITMAP = base64.b64encode(png(120, 60)).decode()
+DRAWING = ('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120" viewBox="0 0 240 120">'
+           '<rect width="240" height="120" fill="#eef3fb"/><path d="M20 100 L80 30 L130 80 L220 100 Z" fill="#1f5fbf"/></svg>')
+FILE = """([name, type, data]) => new File([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], name, {type})"""
+# The paste a browser sends, made by hand — no clipboard is touched.  Given
+# files as [name, kind, base64] and strings as [kind, text]; answers whether
+# the page took the paste for itself.
+PASTE = """([files, strings]) => {
+    const data = new DataTransfer();
+    for (const file of files) data.items.add((%s)(file));
+    for (const [type, text] of strings) data.setData(type, text);
+    const event = new ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true});
+    document.activeElement.dispatchEvent(event);
+    return event.defaultPrevented;
+}""" % FILE
+# A file let go of over a point of the window (or over `on`, an element);
+# answers whether the page took the hovering and the letting go for itself.
+DROP = """([x, y, file, on]) => {
+    const data = new DataTransfer();
+    data.items.add((%s)(file));
+    const target = on ? document.querySelector(on) : document.elementFromPoint(x, y);
+    return ['dragover', 'drop'].map((kind) => {
+        const event = new DragEvent(kind, {bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: data});
+        target.dispatchEvent(event);
+        return event.defaultPrevented;
+    });
+}""" % FILE
+# Every region with a picture in it, in the order of the page's elements.
+PICTURES = """() => [...document.querySelectorAll('.region')].filter((r) => r.querySelector('img')).map((r) => {
+    const img = r.querySelector('img'), box = img.getBoundingClientRect();
+    return {left: parseFloat(r.style.left), top: parseFloat(r.style.top), width: Math.round(r.getBoundingClientRect().width),
+            kind: img.src.slice(5, img.src.indexOf(';')), natural: [img.naturalWidth, img.naturalHeight],
+            shown: [Math.round(box.width), Math.round(box.height)],
+            picture: r.classList.contains('picture'), selected: r.classList.contains('selected')};
+})"""
+TOAST = "(document.querySelector('#toast').hidden ? '' : document.querySelector('#toast').textContent)"
+LIMIT = "async ([name, value]) => { (await import('/static/js/pictures.js')).LIMITS[name] = value; }"
+EDITOR = "document.querySelector('.region .ed textarea').value"
+
+
+def pictures(page, count):
+    """The regions with pictures, once the page shows ``count`` pictures and all have been read."""
+    page.wait_for_function(
+        "(count) => { const all = [...document.querySelectorAll('.region img')];"
+        " return all.length === count && all.every((img) => img.complete && img.naturalWidth > 0); }",
+        arg=count, timeout=20_000)
+    page.wait_for_timeout(100)                                  # the page is laid out again when one is read
+    return page.evaluate(PICTURES)
+
+
+def save_as(page, name):
+    page.keyboard.press("Control+s")
+    page.fill(".dialog input[type=text]", name)
+    page.keyboard.press("Enter")
+
+
+def test_a_picture_is_pasted_at_the_cursor_resized_and_saved_with_the_sheet(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    paper = page.locator("#content").bounding_box()
+
+    # Pasted where the cursor is, at its own size; it is left selected, and
+    # the cursor waits below it.
+    page.mouse.click(paper["x"] + 40, paper["y"] + 120)
+    assert page.evaluate(PASTE, [[["image.png", "image/png", BITMAP]], []]) is True
+    [shown] = pictures(page, 1)
+    assert shown == {"left": 40, "top": 112, "width": 132, "kind": "image/png", "natural": [120, 60],
+                     "shown": [120, 60], "picture": True, "selected": True}
+    assert page.evaluate("[document.querySelector('#cross').style.left, document.querySelector('#cross').style.top]") \
+        == ["40px", "192px"]
+    assert page.evaluate("!document.querySelector('#doc-dirty').hidden")
+    keys.press("Control+z")                                     # pasting is one step to take back, and to redo
+    assert pictures(page, 0) == []
+    keys.press("Control+y")
+    assert pictures(page, 1)[0]["shown"] == [120, 60]
+
+    # So typing goes on below it.
+    keys.type("k_one := 1")
+    keys.press("Enter")
+    settled(page)
+    below = page.evaluate(BOXES)[1]
+    assert (below["left"], below["top"]) == (40, 192)
+
+    # Tab, which opens the next region, passes a picture by.
+    page.mouse.click(paper["x"] + 40, paper["y"] + 40)
+    keys.press("Tab")
+    assert page.evaluate("document.querySelector('.region.editing').classList.contains('math')")
+    keys.press("Escape")
+
+    # A click selects a picture (there is no text in it to edit); its right
+    # edge makes it narrower or wider, and it keeps its shape.
+    page.locator(".region.picture").click()
+    assert page.query_selector(".region.editing") is None and pictures(page, 1)[0]["selected"]
+    page.wait_for_timeout(600)
+    page.locator(".region.picture").click()                    # not a double click: too long after the first
+    assert page.query_selector(".region.editing") is None
+    page.evaluate("() => { window.kept = document.querySelector('.region.picture img'); }")
+    box = page.locator(".region.picture").bounding_box()
+    page.mouse.move(box["x"] + box["width"] + 1, box["y"] + 20)
+    page.mouse.down()
+    page.mouse.move(box["x"] + box["width"] + 125, box["y"] + 20, steps=4)
+    page.mouse.up()
+    assert (pictures(page, 1)[0]["width"], pictures(page, 1)[0]["shown"]) == (256, [244, 122])
+    page.mouse.move(box["x"] + 257, box["y"] + 20)
+    page.mouse.down()
+    page.mouse.move(box["x"] - 200, box["y"] + 20, steps=4)                            # as narrow as it gets
+    page.mouse.up()
+    assert pictures(page, 1)[0]["width"] == 24
+    keys.press("Control+z")
+    keys.press("Control+z")
+    assert pictures(page, 1)[0]["shown"] == [120, 60]
+    # (A picture is not read again for an undo: it is the very element it was.)
+    assert page.evaluate("document.querySelector('.region.picture img') === window.kept")
+    # A double click opens the text that names it — for a caption, say.
+    page.locator(".region.picture").dblclick()
+    assert re.fullmatch(r"!\[picture\]\(attachment:[0-9a-f]{12}\.png\)", page.evaluate(EDITOR))
+    keys.press("Escape")
+    assert pictures(page, 1)[0]["shown"] == [120, 60]           # and closed, the text is the picture again
+
+    # Saved, it is a text cell with the picture attached, as a notebook keeps one.
+    save_as(page, "pictured")
+    page.wait_for_function("document.title.startsWith('pictured')", timeout=20_000)
+    notebook = nbformat.read(str(folder / "pictured.ipynb"), as_version=4)
+    nbformat.validate(notebook)
+    cell = notebook.cells[1]
+    name = re.fullmatch(r"!\[picture\]\(attachment:([0-9a-f]{12}\.png)\)", cell.source).group(1)
+    assert cell.cell_type == "markdown" and cell.attachments == {name: {"image/png": BITMAP}}
+    assert cell.metadata["edsl"] == {"x": 40, "y": 112, "w": 132}
+
+    # Opened again, it is where it was, as large as it was.
+    page.reload()
+    assert pictures(page, 1)[0] == dict(shown, selected=False)
+
+    # One pasted low on the screen is brought into view when it has been read.
+    page.mouse.click(paper["x"] + 300, 880)
+    page.evaluate(PASTE, [[["image.png", "image/png", base64.b64encode(png(60, 300)).decode()]], []])
+    pictures(page, 2)
+    assert page.evaluate("document.querySelector('.region.selected').getBoundingClientRect().bottom <= window.innerHeight")
+    page.evaluate("() => { document.querySelector('#desk').scrollTop = 0; }")
+
+    # Where a picture goes is settled when it is pasted: the cursor, put
+    # elsewhere while the picture was being read, does not take it along.
+    page.mouse.click(paper["x"] + 400, paper["y"] + 40)
+    page.evaluate("""([paste, file, x, y]) => {
+        eval(paste)([[file], []]);
+        const point = {bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0};
+        document.querySelector('#content').dispatchEvent(new PointerEvent('pointerdown', point));
+        window.dispatchEvent(new PointerEvent('pointerup', point));
+    }""", [PASTE, ["image.png", "image/png", BITMAP], paper["x"] + 40, paper["y"] + 600])
+    settled_at = pictures(page, 3)[2]
+    assert (settled_at["left"], settled_at["top"]) == (400, 32)
+
+    # One wider than the page is as wide as the page, and starts at its left edge.
+    page.mouse.click(paper["x"] + 304, paper["y"] + 304)
+    page.evaluate(PASTE, [[["image.png", "image/png", base64.b64encode(png(1000, 50)).decode()]], []])
+    wide = pictures(page, 4)[3]
+    assert (wide["left"], wide["top"], wide["width"], wide["shown"]) == (0, 296, 680, [668, 33])
+
+
+def test_a_drawing_is_pasted_as_a_drawing_and_kept_with_a_bitmap_beside_it(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    paper = page.locator("#content").bounding_box()
+    drawn = lambda: [p["kind"] for p in page.evaluate(PICTURES)]             # noqa: E731
+
+    # SVG as plain text — here cut out of a web page, so without its
+    # namespace — is a picture; other text is left to be pasted as text.
+    page.mouse.click(paper["x"] + 40, paper["y"] + 40)
+    assert page.evaluate(PASTE, [[], [["text/plain", "x := 5 V"]]]) is False
+    assert page.evaluate(PASTE, [[], [["text/plain", "<svg> is how a drawing starts, </svg> how it ends"]]]) is False
+    assert page.evaluate(PASTE, [[], [["text/plain", "<svg><rect></svg>"]]]) is False       # not well-formed
+    cut_out = DRAWING.replace(' xmlns="http://www.w3.org/2000/svg"', "").replace(
+        "</svg>", '<defs><circle id="dot" r="9"/></defs><use xlink:href="#dot" x="200" y="30"/></svg>')
+    assert page.evaluate(PASTE, [[], [["text/plain", cut_out]]]) is True
+    [first] = pictures(page, 1)
+    assert (first["kind"], first["width"], first["shown"]) == ("image/svg+xml", 252, [240, 120])
+
+    # An application's drawing: the browser names it in the paste and hands
+    # it over only to a page that may read the clipboard.  Allowed, the
+    # drawing is taken — not the bitmap or the words put beside it …
+    page.evaluate("""(svg) => { window.asked = 0; Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {
+        read: async () => { window.asked += 1; if (window.refuse) throw new DOMException('no', 'NotAllowedError');
+                            return [{types: ['text/plain', 'image/svg+xml'],
+                                     getType: async (type) => new Blob([svg], {type})}]; }}}); }""", DRAWING)
+    announced = [[["image.png", "image/png", BITMAP]], [["image/svg+xml", ""], ["text/plain", "Chart title"]]]
+    page.mouse.click(paper["x"] + 40, paper["y"] + 200)
+    assert page.evaluate(PASTE, announced) is True
+    pictures(page, 2)
+    assert drawn() == ["image/svg+xml"] * 2 and page.evaluate("window.asked") == 1
+    # … and refused, the bitmap is, and the page says what would help.
+    page.evaluate("window.refuse = true")
+    page.mouse.click(paper["x"] + 40, paper["y"] + 360)
+    page.evaluate(PASTE, announced)
+    pictures(page, 3)
+    assert drawn() == ["image/svg+xml", "image/svg+xml", "image/png"]
+    assert "Allow this page to read the clipboard" in page.evaluate(TOAST)
+    # With no bitmap beside it either, nothing is pasted, and that is said.
+    page.evaluate(PASTE, [[], [["image/svg+xml", ""]]])
+    page.wait_for_function(f"{TOAST}.includes('can be pasted once this page is allowed')")
+    assert len(page.evaluate(PICTURES)) == 3
+
+    # A drawing says how large it is — in units of its own, perhaps — or
+    # not at all; one wider than the page is as wide as the page.
+    shape = '<rect width="10" height="10"/></svg>'
+    for count, ((x, y), drawing) in enumerate((
+            ((40, 440), '<svg xmlns="http://www.w3.org/2000/svg" width="50mm" height="25mm">' + shape),
+            ((304, 440), '<svg xmlns="http://www.w3.org/2000/svg">' + shape),
+            ((40, 620), '<svg xmlns="http://www.w3.org/2000/svg" width="3000" height="100">' + shape)), start=4):
+        page.mouse.click(paper["x"] + x, paper["y"] + y)
+        page.evaluate(PASTE, [[], [["text/plain", drawing]]])
+        pictures(page, count)                                   # (on the page before the next click: the cursor goes below it)
+    sized = pictures(page, 6)[3:]
+    assert [(p["left"], p["width"], p["shown"]) for p in sized] == [(40, 201, [189, 95]), (304, 312, [300, 150]), (0, 680, [668, 22])]
+
+    # In the file a drawing has its bitmap copy first: JupyterLab shows the
+    # first of an attachment's forms and no drawings; nbconvert takes the drawing.
+    save_as(page, "drawn")
+    page.wait_for_function("document.title.startsWith('drawn')", timeout=20_000)
+    cells = [c for c in json.loads((folder / "drawn.ipynb").read_text(encoding="utf-8"))["cells"] if c["cell_type"] == "markdown"]
+    assert ["".join(c["source"])[:11] for c in cells] == ["![drawing](", "![drawing](", "![picture]("] + ["![drawing]("] * 3
+    copies = []
+    for cell in cells[:2] + cells[3:]:
+        [forms] = cell["attachments"].values()
+        assert list(forms) == ["image/png", "image/svg+xml"]
+        kept = base64.b64decode("".join(forms["image/svg+xml"])).decode("utf-8")
+        assert kept.startswith('<svg xmlns="http://www.w3.org/2000/svg"') and kept.endswith("</svg>")
+        assert ('xmlns:xlink="http://www.w3.org/1999/xlink"' in kept) == (cell is cells[0])     # given to the one that needs it
+        copy = base64.b64decode(forms["image/png"])
+        assert copy[:8] == b"\x89PNG\r\n\x1a\n"
+        copies.append(struct.unpack(">II", copy[16:24]))
+    # The copy has the size the drawing asks for (JupyterLab shows it pixel for pixel) — within reason.
+    assert copies == [(240, 120), (240, 120), (189, 94), (300, 150), (2400, 80)]
+    nbformat.validate(nbformat.read(str(folder / "drawn.ipynb"), as_version=4))
+
+    page.reload()
+    pictures(page, 6)
+    assert drawn() == ["image/svg+xml", "image/svg+xml", "image/png"] + ["image/svg+xml"] * 3
+
+
+def test_pictures_come_from_files_go_into_text_and_survive_copying_and_undo(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    paper = page.locator("#content").bounding_box()
+    (folder / "plot [v2].png").write_bytes(png(120, 60))
+    (folder / "sketch.svg").write_text('<?xml version="1.0"?>\n' + DRAWING.replace(' width="240" height="120"', ""),
+                                       encoding="utf-8")                    # a drawing without a size of its own
+    for name in ("notes.txt", "broken.png", "broken.svg"):
+        (folder / name).write_text("words")
+    choose = lambda *names: page.set_input_files("#picture-file", [str(folder / name) for name in names])     # noqa: E731
+
+    # Chosen with the Picture button: at the cursor, one under the other,
+    # called what their files are called (as far as markdown can say it).
+    page.mouse.click(paper["x"] + 24, paper["y"] + 24)
+    choose("plot [v2].png", "sketch.svg")
+    chosen = pictures(page, 2)
+    assert [(p["kind"], p["shown"], p["left"]) for p in chosen] == [("image/png", [120, 60], 24), ("image/svg+xml", [240, 120], 24)]
+    assert chosen[1]["top"] >= chosen[0]["top"] + 66 and all(p["selected"] for p in chosen)
+    assert page.evaluate("[...document.querySelectorAll('.region img')].map((img) => img.alt)") == ["plot v2", "sketch"]
+    # What cannot be taken is refused in so many words.
+    page.evaluate(LIMIT, ["picture", 100])                                  # (bytes: less than the picture has)
+    for name, said in (("notes.txt", "is not a picture"), ("broken.png", "cannot be read as a picture"),
+                       ("broken.svg", "is not an SVG drawing"), ("plot [v2].png", "is too large")):
+        choose(name)
+        page.wait_for_function(f"{TOAST}.includes('{said}')")
+    page.evaluate(LIMIT, ["picture", 20e6])
+    assert len(page.evaluate(PICTURES)) == 2
+
+    # A picture file let go of over the page lands there (moved in from the
+    # right edge as far as it needs to fit); another kind of file is refused.
+    assert page.evaluate(DROP, [paper["x"] + 640, paper["y"] + 400, ["dropped.png", "image/png", BITMAP], None]) == [True, True]
+    dropped = pictures(page, 3)[2]
+    assert (dropped["left"], dropped["top"], dropped["selected"]) == (680 - 132, 392, True)
+    page.evaluate(DROP, [paper["x"] + 100, paper["y"] + 500, ["notes.txt", "text/plain", "d29yZHM="], None])
+    page.wait_for_function(f"{TOAST}.includes('Only pictures can be dropped')")
+    assert len(page.evaluate(PICTURES)) == 3
+
+    # Copied and pasted on the sheet, a picture takes what it shows along;
+    # deleted, it comes back with undo.
+    copied = page.evaluate("""() => { window.copied = new DataTransfer();
+        document.activeElement.dispatchEvent(new ClipboardEvent('copy', {clipboardData: window.copied, bubbles: true, cancelable: true}));
+        return [...window.copied.types]; }""")
+    assert "application/x-edsl-regions" in copied
+    page.mouse.click(paper["x"] + 304, paper["y"] + 24)
+    page.evaluate("document.activeElement.dispatchEvent(new ClipboardEvent('paste', {clipboardData: window.copied, bubbles: true, cancelable: true}))")
+    copy = pictures(page, 4)[3]
+    assert (copy["left"], copy["kind"], copy["shown"], copy["selected"]) == (304, "image/png", [120, 60], True)
+    keys.press("Delete")
+    assert len(pictures(page, 3)) == 3
+    keys.press("Control+z")
+    assert pictures(page, 4)[3]["shown"] == [120, 60]
+
+    # While a text is being written a picture goes into it, at the caret —
+    # pasted or chosen — unless the clipboard has words, which are then
+    # what is pasted.
+    page.mouse.click(paper["x"] + 24, paper["y"] + 560)
+    keys.type('"')
+    keys.type("Before  after")
+    for _ in range(6):
+        keys.press("ArrowLeft")
+    assert page.evaluate(PASTE, [[["image.png", "image/png", BITMAP]], [["text/plain", "words"]]]) is False
+    assert page.evaluate(PASTE, [[["image.png", "image/png", BITMAP]], []]) is True
+    page.wait_for_function(f"{EDITOR}.includes('attachment:')")
+    assert re.fullmatch(r"Before !\[picture\]\(attachment:[0-9a-f]{12}\.png\) after", page.evaluate(EDITOR))
+    choose("plot [v2].png")
+    page.wait_for_function(f"{EDITOR}.split('attachment:').length === 3")
+    assert re.fullmatch(r"Before !\[picture\]\(attachment:\w+\.png\)!\[plot v2\]\(attachment:\w+\.png\) after", page.evaluate(EDITOR))
+    keys.press("Escape")
+    within = pictures(page, 6)[4]
+    assert (within["picture"], within["shown"]) == (False, [120, 60])          # a text with pictures in it
+    # One of them is taken out of the text again (and so, further down, is not saved).
+    page.locator(".region.text:not(.picture)").click(position={"x": 30, "y": 30})
+    page.evaluate("() => { const area = document.querySelector('.region .ed textarea');"
+                  " area.setSelectionRange(area.value.indexOf('![plot v2]'), area.value.indexOf(' after')); }")
+    keys.press("Backspace")
+    keys.press("Escape")
+    assert len(pictures(page, 5)) == 5
+
+    # One that arrives when its text has been finished goes below the text.
+    page.mouse.click(paper["x"] + 24, paper["y"] + 640)
+    keys.type('"')
+    keys.type("A caption")
+    page.evaluate("""(paste) => { const area = document.querySelector('.region .ed textarea');
+        eval(paste)([[['image.png', 'image/png', '%s']], []]);
+        area.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true})); }""" % BITMAP, PASTE)
+    late = pictures(page, 6)[5]
+    caption = page.evaluate(BOXES)[5]
+    assert late["picture"] and late["left"] == 24 and late["top"] >= caption["top"] + caption["height"]
+    assert page.evaluate("document.querySelectorAll('.region')[5].innerText.trim()") == "A caption"
+
+    # A math region takes no picture, and the page says where one goes.
+    # Chosen while one is being written, a picture goes below it.
+    page.mouse.click(paper["x"] + 304, paper["y"] + 128)
+    keys.type("k_one := 1")
+    assert page.evaluate(PASTE, [[["image.png", "image/png", BITMAP]], []]) is True
+    assert "not into a math region" in page.evaluate(TOAST)
+    assert page.evaluate(EDITOR) == "k_one := 1"
+    choose("plot [v2].png")
+    under = pictures(page, 7)[6]
+    settled(page)
+    math = page.evaluate(BOXES)[7]
+    assert page.query_selector(".region.editing") is None
+    assert under["left"] == math["left"] == 304 and under["top"] >= math["top"] + math["height"]
+    # Dropped while one is being written, it still lands where it is dropped.
+    page.mouse.click(paper["x"] + 480, paper["y"] + 128)
+    keys.type("k_two := 2")
+    page.evaluate(DROP, [paper["x"] + 480, paper["y"] + 300, ["dropped.png", "image/png", BITMAP], None])
+    landed = pictures(page, 8)[7]
+    settled(page)
+    assert (landed["left"], landed["top"]) == (480, 296) and page.query_selector(".region.editing") is None
+    # Let go of beside the page — over the bar, say — a picture goes to the
+    # cursor, as a pasted one does; the browser never shows a file instead.
+    assert page.evaluate(DROP, [0, 0, ["dropped.png", "image/png", BITMAP], "#bar"]) == [True, True]
+    beside = pictures(page, 9)[8]
+    assert (beside["left"], beside["top"], beside["selected"]) == (480, 376, True)
+    assert page.evaluate(DROP, [0, 0, ["notes.txt", "text/plain", "d29yZHM="], "#bar"]) == [True, True]
+
+    # A sheet with more pictures than can be sent to the server is not sent, and that is said.
+    page.evaluate(LIMIT, ["sheet", 1000])
+    save_as(page, "filed")
+    page.wait_for_function(f"{TOAST}.includes('more than the')")
+    assert not (folder / "filed.ipynb").exists()
+    page.evaluate(LIMIT, ["sheet", 100e6])
+
+    # The server says how many pictures it stored.  One that does not —
+    # one started before pictures could be kept, say — is not believed:
+    # the sheet stays unsaved, and the page says why.
+    def from_before(route):
+        reply = route.fetch()
+        answer = reply.json()
+        answer.pop("pictures", None)
+        route.fulfill(response=reply, json=answer)
+
+    page.route("**/api/doc?*", lambda route: from_before(route) if route.request.method == "PUT" else route.continue_())
+    save_as(page, "filed")
+    page.wait_for_function(f"{TOAST}.includes('stored 0 of the 9 pictures')")
+    assert page.evaluate("!document.querySelector('#doc-dirty').hidden")
+    page.unroute("**/api/doc?*")
+
+    # All of it is in the file, and nothing that is not named any more.
+    page.keyboard.press("Control+s")
+    page.wait_for_function("document.querySelector('#doc-dirty').hidden", timeout=20_000)
+    notebook = nbformat.read(str(folder / "filed.ipynb"), as_version=4)
+    texts = [c for c in notebook.cells if c.cell_type == "markdown"]
+    assert [len(c.attachments) for c in texts if "attachments" in c] == [1] * 9
+    assert sum("image/svg+xml" in forms for c in texts for forms in c.get("attachments", {}).values()) == 1
+    assert all(f"attachment:{name}" in c.source for c in texts for name in c.get("attachments", {}))
+
+
+def test_a_notebook_with_pictures_pasted_in_jupyterlab_shows_them_as_they_are(page_and_folder):
+    # JupyterLab keeps a pasted picture attached to its text cell.  Such a
+    # notebook has no page layout: its cells flow, and none has a width.
+    page, folder = page_and_folder
+    pasted = "6f3c1d0e-2a7b-4c55-9d0e-0a1b2c3d4e5f.png"
+    nbformat.write(nbformat.v4.new_notebook(cells=[
+        nbformat.v4.new_markdown_cell(f"![image.png](attachment:{pasted})", attachments={pasted: {"image/png": BITMAP}}),
+        nbformat.v4.new_markdown_cell("Words under the picture."),
+        nbformat.v4.new_markdown_cell("![sketch](attachment:sketch.svg)", attachments={      # a drawing with no bitmap beside it
+            "sketch.svg": {"image/svg+xml": base64.b64encode(DRAWING.encode()).decode()}}),
+        nbformat.v4.new_markdown_cell("![wide](attachment:wide.png)", attachments={
+            "wide.png": {"image/png": base64.b64encode(png(1000, 50)).decode()}}),
+        nbformat.v4.new_markdown_cell(f"Words, and a picture among them: ![image.png](attachment:{pasted})",
+                                      attachments={pasted: {"image/png": BITMAP}}),
+    ]), str(folder / "fromlab.ipynb"))
+    page.goto(page.url.split("?")[0] + "?open=fromlab.ipynb")
+    first, drawing, wide, among = pictures(page, 4)
+
+    # A picture is as large as it is — not as wide as the page, as a text
+    # without a width of its own is, unless it is wider than that — and
+    # the cells under it make room for it once it has been read.
+    assert (first["picture"], first["width"], first["shown"]) == (True, 132, [120, 60])
+    assert (drawing["kind"], drawing["width"], drawing["shown"]) == ("image/svg+xml", 252, [240, 120])
+    assert (wide["width"], wide["shown"]) == (680, [668, 33])
+    assert (among["picture"], among["width"], among["shown"]) == (False, 680, [120, 60])       # that one is a text
+    boxes = page.evaluate(BOXES)
+    assert round(boxes[1]["width"]) == 680
+    assert boxes[1]["top"] >= boxes[0]["top"] + 66 and boxes[2]["top"] >= boxes[1]["top"] + boxes[1]["height"]
+    assert page.evaluate("document.querySelector('#doc-dirty').hidden")            # looking has changed nothing
+
+    # Its right edge makes it wider (or narrower) all the same.
+    box = page.locator(".region.picture").first.bounding_box()
+    page.mouse.move(box["x"] + 60, box["y"] + 20)               # (the edge shows its handle to a pointer over the picture)
+    page.mouse.move(box["x"] + box["width"] + 1, box["y"] + 20)
+    page.mouse.down()
+    page.mouse.move(box["x"] + box["width"] + 125, box["y"] + 20, steps=4)
+    page.mouse.up()
+    wider = pictures(page, 4)[0]
+    assert (wider["width"], wider["shown"]) == (256, [244, 122])

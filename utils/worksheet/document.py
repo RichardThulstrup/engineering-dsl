@@ -5,6 +5,8 @@ regions are code cells, text regions are markdown cells — stored in
 reading order, so JupyterLab, VS Code and ``hardcopy()`` run the very
 same calculation.  Where a region sits on the page is kept in the
 cell's metadata (``edsl``), which other tools carry along untouched.
+A picture is kept the way JupyterLab keeps a pasted one: attached to
+the text cell that names it.
 
 Opening a sheet does not, by itself, run it: a notebook that was not
 last saved on this machine (Jupyter's own trust record decides) is
@@ -43,6 +45,13 @@ FORMAT_VERSION = 1
 _SAFE_MIMES = ("text/plain", "text/latex", "image/png", "image/jpeg")
 # What the front end may store as output (it comes from the user's own kernel).
 _STORED_MIMES = _SAFE_MIMES + ("text/html", "text/markdown", "image/svg+xml")
+
+# Pictures a text region may carry: the attachments of its markdown cell,
+# base64 whatever their kind.  The page shows them through <img> only,
+# where a drawing (SVG) can neither run a script nor fetch anything.
+_PICTURE_MIMES = ("image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp",
+                  "image/svg+xml")
+_BASE64 = re.compile(r"[A-Za-z0-9+/]+={0,2}\Z")
 
 _IMPORT_LINE = re.compile(r"^\s*from\s+utils\.(Engineer|dsl_setup)\s+import\s+\*\s*$", re.M)
 
@@ -101,6 +110,54 @@ def _saved_outputs(cell):
     return out
 
 
+def _pictures(attachments) -> dict:
+    """The pictures among a cell's attachments, as {name: {type: base64}}.
+
+    This is what the page is given, and so what it answers for when the
+    sheet is saved; anything else attached to a cell is not its business.
+    """
+    found = {}
+    for name, bundle in (attachments or {}).items():
+        if not (isinstance(name, str) and name.strip() and isinstance(bundle, dict)):
+            continue
+        kept = {}
+        for mime, data in bundle.items():
+            if mime in _PICTURE_MIMES and isinstance(data, str):
+                data = "".join(data.split())            # some tools break base64 into lines
+                if _BASE64.match(data):
+                    kept[mime] = data
+        if kept:
+            found[name] = kept
+    return found
+
+
+def _attach(cell, offered):
+    """Give a text cell the pictures its region holds now.
+
+    ``offered`` is what the page has for the region: the pictures its
+    text still names.  They take the place of the pictures the page was
+    given; whatever else is attached to the cell stays.  A page that says
+    nothing about pictures (``None``) changes none.  Returns how many
+    pictures were taken from the page.
+    """
+    if not isinstance(offered, dict):
+        return 0
+    old = cell.get("attachments") or {}
+    given, offered = _pictures(old), _pictures(offered)
+    attachments = {}
+    for name in [*old, *(name for name in offered if name not in old)]:
+        bundle = {mime: data for mime, data in (old.get(name) or {}).items()
+                  if mime not in given.get(name, {})}
+        bundle.update(offered.get(name, {}))
+        if bundle:
+            attachments[name] = bundle
+    if attachments:
+        cell["attachments"] = nbformat.from_dict(attachments)
+    else:
+        cell.pop("attachments", None)
+    return len(offered)
+
+
 def load(path: Path) -> dict:
     """Read a notebook as a worksheet document for the front end."""
     warm_up()
@@ -129,6 +186,10 @@ def load(path: Path) -> dict:
             saved = _saved_outputs(cell)
             if saved:
                 region["saved"] = saved
+        else:
+            pictures = _pictures(cell.get("attachments"))
+            if pictures:
+                region["attachments"] = pictures
         regions.append(region)
     return {
         "name": path.stem, "trusted": trusted, "mtime": _stamp(path),
@@ -198,7 +259,7 @@ def save(path: Path, doc: dict, *, expect_mtime=None, force=False) -> dict:
         cell.outputs, cell.execution_count = [], None
         cells.append(cell)
 
-    count = 0
+    count = pictures = 0
     for region in regions:
         want = "code" if region.get("kind") == "math" else "markdown"
         cell = old.get(region.get("id"))
@@ -219,6 +280,8 @@ def save(path: Path, doc: dict, *, expect_mtime=None, force=False) -> dict:
             count += 1
             cell.outputs = _clean_outputs(region.get("outputs"))
             cell.execution_count = count if cell.outputs else None
+        else:
+            pictures += _attach(cell, region.get("attachments"))
         cells.append(cell)
     nb.cells = cells
     nb.metadata["edsl_worksheet"] = {"version": FORMAT_VERSION,
@@ -233,8 +296,11 @@ def save(path: Path, doc: dict, *, expect_mtime=None, force=False) -> dict:
     os.replace(tmp, path)
     if doc.get("trusted"):
         trust(path)
+    # (How many pictures were stored is said, so that a page can tell when
+    # one it sent was turned down — or when a server from before pictures
+    # could be kept has answered it.)
     return {"mtime": _stamp(path), "name": path.stem,
-            "ids": [c.get("id") for c in cells]}
+            "ids": [c.get("id") for c in cells], "pictures": pictures}
 
 
 def trust(path: Path, expect_mtime=None) -> bool:

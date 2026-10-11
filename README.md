@@ -154,6 +154,9 @@ type, and the line becomes a typeset formula with its value beside it.
 - **Results in place** — a calculated definition shows `= value` after
   it; `x ▸ mV` shows a value in the unit you ask for; errors are flagged
   on the statement that failed without stopping the rest.
+- **Pictures** — Ctrl+V puts a screenshot or a copied picture at the
+  cursor; picture files can be chosen or dropped on the page. SVG
+  drawings stay drawings. They are stored in the sheet's file.
 - **Still a notebook** — a worksheet is saved as `.ipynb` (positions in
   cell metadata), so JupyterLab, VS Code, `hardcopy()` and GitHub all
   read it, and every existing notebook opens as a worksheet.

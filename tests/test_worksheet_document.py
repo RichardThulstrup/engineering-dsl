@@ -147,3 +147,72 @@ def test_listing_shows_notebooks_and_folders_only(tmp_path):
     (tmp_path / "__pycache__").mkdir()
     names = [(e["name"], e["type"]) for e in document.listing(tmp_path, "")["entries"]]
     assert names == [("project", "dir"), ("sheet.ipynb", "notebook")]
+
+
+# Pictures: a notebook keeps one as an attachment of a markdown cell,
+# base64 whatever its kind.  (Any base64 will do here: nothing looks inside.)
+PNG, OTHER, DRAWING = "iVBORw0KGgo=", "R0lGODlhAQABAAAAACw=", "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4="
+
+
+def pictured(tmp_path):
+    """A text cell with two pictures, and two attachments that are none."""
+    return write(tmp_path / "pictures.ipynb", [new_markdown_cell(
+        "![one](attachment:one.png) and ![two](attachment:two.svg)", attachments={
+            "one.png": {"image/png": PNG[:4] + "\n" + PNG[4:] + "\n"},      # broken into lines, as some tools do
+            "two.svg": {"image/png": PNG, "image/svg+xml": DRAWING},      # a drawing, and its bitmap copy
+            "notes.pdf": {"application/pdf": PNG},
+            "odd.svg": {"image/svg+xml": "<svg xmlns='http://www.w3.org/2000/svg'/>"}})])     # not base64
+
+
+def attached(path):
+    cell = nbformat.read(str(path), as_version=4).cells[-1]
+    return {name: dict(bundle) for name, bundle in cell.get("attachments", {}).items()}
+
+
+def test_the_pictures_attached_to_a_text_cell_come_with_its_region(tmp_path):
+    region = document.load(pictured(tmp_path))["regions"][0]
+    assert region["attachments"] == {"one.png": {"image/png": PNG},
+                                     "two.svg": {"image/png": PNG, "image/svg+xml": DRAWING}}
+
+
+def test_saving_keeps_the_pictures_the_page_still_has_and_lets_go_of_the_others(tmp_path):
+    path = pictured(tmp_path)
+    before = attached(path)
+    doc = document.load(path)
+    region = doc["regions"][0]
+    region["source"] = "![one](attachment:one.png) and ![new](attachment:new.gif)"
+    region["attachments"] = {"one.png": region["attachments"]["one.png"], "new.gif": {"image/gif": OTHER}}
+    assert document.save(path, doc)["pictures"] == 2        # it says how many it took
+    nbformat.validate(nbformat.read(str(path), as_version=4))
+    assert attached(path) == {"one.png": {"image/png": PNG}, "new.gif": {"image/gif": OTHER},
+                              # What the page was never given, it has not touched.
+                              "notes.pdf": before["notes.pdf"], "odd.svg": before["odd.svg"]}
+
+    region["attachments"] = {}                              # the text names no picture any more
+    document.save(path, doc)
+    assert attached(path) == {"notes.pdf": before["notes.pdf"], "odd.svg": before["odd.svg"]}
+
+
+def test_a_page_that_says_nothing_about_pictures_changes_none(tmp_path):
+    path = pictured(tmp_path)
+    before = attached(path)
+    doc = document.load(path)
+    del doc["regions"][0]["attachments"]                    # as a page from before pictures would save
+    assert document.save(path, doc)["pictures"] == 0
+    assert attached(path) == before
+
+
+def test_only_pictures_are_taken_from_the_page(tmp_path):
+    path = tmp_path / "new.ipynb"
+    region = {"id": "p1", "kind": "text", "source": "![a](attachment:a.png)", "x": 0, "y": 0, "w": 132,
+              "attachments": {"a.png": {"image/png": PNG, "text/html": "<script>alert(1)</script>"},
+                              "b.png": {"image/png": "\"><script>alert(1)</script>"},     # no base64
+                              "c.html": {"text/html": PNG}, "d.png": "iVBORw0KGgo=", "": {"image/png": PNG}}}
+    assert document.save(path, {"regions": [region]})["pictures"] == 1     # of the five it was offered
+    nbformat.validate(nbformat.read(str(path), as_version=4))
+    assert attached(path) == {"a.png": {"image/png": PNG}}
+    assert document.load(path)["regions"][0]["attachments"] == {"a.png": {"image/png": PNG}}
+
+    region["attachments"] = {}
+    document.save(path, {"regions": [region]})
+    assert "attachments" not in nbformat.read(str(path), as_version=4).cells[-1]
