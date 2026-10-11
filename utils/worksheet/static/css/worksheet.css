@@ -503,7 +503,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #toast.error { background: var(--danger); }
 
 /* ---- printing --------------------------------------------------------- */
-@page { size: A4; margin: 15mm; }
+/* Top and bottom margin in px, as the page's own lengths are: a browser
+   gives a page a whole number of px, and with 15 mm (56.7 px) each that
+   is 1010 — one more than a page of the sheet has (PAGE_H in sheet.js),
+   so that everything came out one px higher up with every page. */
+@page { size: A4; margin: 57px 15mm; }
 @media print {
   html, body { height: auto; overflow: visible; background: #fff; }
   body { display: block; }

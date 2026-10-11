@@ -400,9 +400,10 @@ JupyterLab agrees — and it opens calculated from then on.
 margins, no grid or controls. Choose "Save as PDF" in the browser's
 dialog for a PDF. A sheet prints on the pages it fills: the room the
 screen keeps below the last region, for the cursor and for going on,
-is not paper. For the linear notebook rendering instead, the
-existing `print_view()` / `hardcopy()` work on the same file. They show
-a sheet as it was saved: `hardcopy(execute=True)` and
+is not paper. Every page comes out of the printer as the screen has
+it, however long the sheet is. For the linear notebook rendering
+instead, the existing `print_view()` / `hardcopy()` work on the same
+file. They show a sheet as it was saved: `hardcopy(execute=True)` and
 `python hardcopy.py`, which run a notebook fresh before exporting it,
 do not run a sheet, because a notebook shows no value for a definition
 and the results would be gone.

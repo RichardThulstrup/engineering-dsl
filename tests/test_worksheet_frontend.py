@@ -437,6 +437,70 @@ def test_a_sheet_prints_on_the_pages_it_fills_and_no_more(page_and_folder):
     assert (shown, printed) == (3, 2) and 1818 < ends == long <= 2018
 
 
+def linked(pdf):
+    """Where the links of a printed sheet are: ``([(address, page, px down the paper), ...], pages)``.
+
+    Chromium writes a PDF's pages, and the links on each with their
+    places, as plain text into the file: that is read here, so that a
+    test can tell what was printed where without a library for PDFs.
+    """
+    objects = {int(m.group(1)): m.group(2) for m in re.finditer(rb"(\d+) 0 obj\s*(.*?)\s*endobj", pdf, re.S)}
+
+    def leaves(number):                 # (the pages hang in a tree, eight to a branch)
+        body = objects[number]
+        if b"/Type /Pages" not in body:
+            return [number]
+        kids = re.search(rb"/Kids \[(.*?)\]", body, re.S).group(1)
+        return [leaf for kid in re.findall(rb"(\d+) 0 R", kids) for leaf in leaves(int(kid))]
+
+    pages = leaves(next(number for number, body in objects.items() if b"/Type /Pages" in body and b"/Parent" not in body))
+    found = []
+    for number, sheet in enumerate(pages, start=1):
+        high = float(re.search(rb"/MediaBox \[0 0 [\d.]+ ([\d.]+)\]", objects[sheet]).group(1))
+        named = re.search(rb"/Annots (\d+) 0 R|/Annots \[(.*?)\]", objects[sheet], re.S)
+        if not named:
+            continue
+        for ref in re.findall(rb"(\d+) 0 R", objects[int(named.group(1))] if named.group(1) else named.group(2)):
+            address = re.search(rb"/URI \((.*?)\)", objects[int(ref)])
+            box = re.search(rb"/Rect \[([\d.\s-]+)\]", objects[int(ref)])
+            if address and box:
+                corners = [float(value) for value in box.group(1).split()]
+                found.append((address.group(1).decode(), number, round((high - max(corners[1], corners[3])) * 96 / 72, 2)))
+    return found, len(pages)
+
+
+def test_every_page_of_a_long_sheet_is_printed_where_the_screen_has_it(page_and_folder):
+    # A page of the sheet is 1009 px high.  A printed page took 1010 of the
+    # sheet — a browser gives a page a whole number of px, and A4 less two
+    # margins of 15 mm is 1009.6 — so that everything came out one px
+    # higher up with each page, and from the 32nd page on a region at the
+    # top of a page was printed at the foot of the page before.
+    page, folder = page_and_folder
+    cells = [nbformat.v4.new_code_cell("from utils.Engineer import *")]
+    count = 12
+    for k in range(count):
+        for where, y in (("top", k * 1009 + 16), ("end", (k + 1) * 1009 - 48)):
+            cell = nbformat.v4.new_markdown_cell(f"[{where} {k + 1}](https://example.org/{where}/{k + 1})")
+            cell.metadata["edsl"] = {"x": 40, "y": y, "w": 200}
+            cells.append(cell)
+    nbformat.write(nbformat.v4.new_notebook(cells=cells), str(folder / "long.ipynb"))
+    page.goto(page.url.split("?")[0] + f"?token={TOKEN}&open=long.ipynb")
+    page.wait_for_function(f"document.querySelectorAll('.region a').length === {2 * count}")
+    tops = page.evaluate("[...document.querySelectorAll('.region')].map((r) => parseFloat(r.style.top))")
+    assert tops == [y for k in range(count) for y in (k * 1009 + 16, (k + 1) * 1009 - 48)]             # (as they were placed)
+    found, pages = linked(page.pdf(prefer_css_page_size=True))
+    places = {address: (number, down) for address, number, down in found}
+    assert pages == count and len(found) == len(places) == 2 * count
+    for where in ("top", "end"):
+        first = places[f"https://example.org/{where}/1"][1]
+        for k in range(count):
+            number, down = places[f"https://example.org/{where}/{k + 1}"]
+            assert number == k + 1 and abs(down - first) < 0.3, (where, k + 1, number, down, first)
+    # (57 px of margin above the sheet's page: the first link is some px into its region.)
+    assert 57 + 16 < places["https://example.org/top/1"][1] < 57 + 16 + 12
+    assert places["https://example.org/end/1"][1] - places["https://example.org/top/1"][1] == 1009 - 48 - 16
+
+
 BOXES = """() => [...document.querySelectorAll('.region')].map((r) => {
     const box = r.getBoundingClientRect();
     return {left: parseFloat(r.style.left), top: parseFloat(r.style.top), width: box.width, height: box.height};
