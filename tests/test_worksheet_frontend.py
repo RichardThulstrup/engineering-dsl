@@ -384,6 +384,55 @@ def test_roots_arrows_and_braces_end_at_their_box_while_a_page_is_printed(page_a
     assert page.evaluate(LONG_DRAWINGS) == drawn                 # and afterwards they are KaTeX's again
 
 
+def test_a_sheet_prints_on_the_pages_it_fills_and_no_more(page_and_folder):
+    # On screen a sheet always has room below its last region and below the
+    # cursor: another page is shown before the last one is full.  That room
+    # is not paper — it used to come out of the printer as an empty page.
+    page, _ = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+
+    def click(y):
+        """Click on the sheet at height y, scrolled into view."""
+        page.evaluate("(y) => { document.querySelector('#desk').scrollTop = Math.max(0, y - 300); }", y)
+        paper = page.locator("#content").bounding_box()
+        page.mouse.click(paper["x"] + 40, paper["y"] + y)
+
+    def sheet():
+        """[pages shown on screen, pages printed, where the last region ends, how long the sheet is on paper]"""
+        ends = page.evaluate("Math.max(...[...document.querySelectorAll('.region')].map("
+                             "(r) => parseFloat(r.style.top) + r.getBoundingClientRect().height))")
+        pdf = page.pdf(prefer_css_page_size=True)               # the sheet's own paper: A4, 15 mm margins
+        page.emulate_media(media="print")
+        long = page.evaluate("document.querySelector('#content').getBoundingClientRect().height")
+        page.emulate_media(media="null")
+        return [page.evaluate("document.querySelectorAll('.pagebreak').length + 1"),
+                len(re.findall(rb"/Type\s*/Page\b", pdf)), round(ends), round(long)]
+
+    # A region low on the first page: the screen shows a second page already.
+    click(808)
+    keys.type("k_one := 1")
+    keys.press("Enter")
+    settled(page)
+    assert sheet() == [2, 1, 830, 830]
+    # The cursor on that second page does not make paper of it …
+    click(1300)
+    assert page.evaluate("parseFloat(document.querySelector('#cross').style.top)") > 1009
+    assert sheet() == [2, 1, 830, 830]
+    # … a region there does, and a full second page is still two pages.
+    click(1300)                                 # (switching the print layout on, as sheet() does, costs the sheet the keyboard)
+    keys.type("k_two := 2")
+    keys.press("Enter")
+    settled(page)
+    assert sheet()[:2] == [2, 2]
+    click(1880)
+    keys.type("k_three := 3")
+    keys.press("Enter")
+    settled(page)
+    shown, printed, ends, long = sheet()
+    assert (shown, printed) == (3, 2) and 1818 < ends == long <= 2018
+
+
 BOXES = """() => [...document.querySelectorAll('.region')].map((r) => {
     const box = r.getBoundingClientRect();
     return {left: parseFloat(r.style.left), top: parseFloat(r.style.top), width: box.width, height: box.height};

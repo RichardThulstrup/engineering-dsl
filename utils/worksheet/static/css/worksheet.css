@@ -474,6 +474,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .errpop, .flag { display: none !important; }
   #work, #desk { display: block; overflow: visible; padding: 0; }
   #paper { width: 680px; margin: 0; padding: 0; box-shadow: none; zoom: 1 !important; }
+  /* As long as what is on it, and no longer (sheet.js: drawBreaks). */
+  #content { min-height: var(--printed, 0) !important; }
   #paper.grid #content { background-image: none; }
   .region { border-color: transparent !important; background: none !important; box-shadow: none !important; }
   .region.stale .res, .region.stale .eq, .region.stale .outs { opacity: 1; }

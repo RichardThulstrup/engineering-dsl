@@ -330,7 +330,9 @@ JupyterLab agrees — and it opens calculated from then on.
 
 *File → Print* (Ctrl+P) prints the page as you see it — A4, 15 mm
 margins, no grid or controls. Choose "Save as PDF" in the browser's
-dialog for a PDF. For the linear notebook rendering instead, the
+dialog for a PDF. A sheet prints on the pages it fills: the room the
+screen keeps below the last region, for the cursor and for going on,
+is not paper. For the linear notebook rendering instead, the
 existing `print_view()` / `hardcopy()` work on the same file. They show
 a sheet as it was saved: `hardcopy(execute=True)` and
 `python hardcopy.py`, which run a notebook fresh before exporting it,

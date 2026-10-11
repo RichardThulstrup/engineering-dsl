@@ -364,6 +364,10 @@ export class Sheet {
   drawBreaks() {
     const pages = Math.max(1, Math.ceil((Math.max(this.bottom(), this.cross.y) + 200) / PAGE_H));
     this.content.style.minHeight = `${pages * PAGE_H}px`;
+    // On paper the sheet ends with its last region (see the print rules
+    // in worksheet.css): the room kept here for the cursor, and for
+    // going on, would come out of the printer as an empty page.
+    this.content.style.setProperty("--printed", `${this.bottom()}px`);
     while (this.breaks.length > pages - 1) this.breaks.pop().remove();
     while (this.breaks.length < pages - 1) {
       const n = this.breaks.length + 1;
