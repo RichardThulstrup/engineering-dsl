@@ -22,13 +22,19 @@ Compared with the stock "lab" rendering the ``edsl-print`` template
 * print pagination niceties (no page break right after a heading, no
   break inside a code block or figure).
 
+The PDF variant prints on A4, as the worksheet's own pages are
+(nbconvert's own ``webpdf`` prints on US Letter); another paper is
+``c.EDSLPDFExporter.paper = "Letter"`` in a Jupyter config file.
+
 After ``pip install -e .`` the entry points exist; a running Jupyter
 server must be restarted once to see them.
 """
 
 import os
+import subprocess
+import sys
 
-from traitlets import Enum, default
+from traitlets import CaselessStrEnum, Enum, default
 from traitlets.config import Config
 
 from nbconvert.exporters.html import HTMLExporter
@@ -273,11 +279,19 @@ class EDSLPDFExporter(EDSLPrintExporter, WebPDFExporter):
     export_from_notebook = "EDSL PDF"
     svg_math = True
 
+    paper = CaselessStrEnum(
+        ("A4", "A3", "A5", "Letter", "Legal", "Tabloid", "Ledger", "A0", "A1", "A2", "A6"),
+        default_value="A4",
+        config=True,
+        help="The paper the PDF is printed on: A4, as the worksheet's own "
+             "pages, or another size Chromium knows by name.",
+    )
+
     def run_playwright(self, html):
         """Windows: give Playwright an event loop that can spawn Chromium.
 
-        ``WebPDFExporter.run_playwright`` calls ``asyncio.run`` in a
-        worker thread, which builds its loop from the *global* policy.
+        The printing (``_printed``) calls ``asyncio.run`` in a worker
+        thread, which builds its loop from the *global* policy.
         Both the nbconvert CLI and jupyter-server force the Selector
         policy on Windows (their ZMQ/tornado sides need it), and
         Selector loops cannot spawn subprocesses — so a plain export
@@ -287,13 +301,68 @@ class EDSLPDFExporter(EDSLPrintExporter, WebPDFExporter):
         exist (the server's own) are unaffected by a policy swap.
         """
         import asyncio
-        import sys as _sys
 
-        if not _sys.platform.startswith("win"):
-            return super().run_playwright(html)
+        if not sys.platform.startswith("win"):
+            return self._printed(html)
         previous = asyncio.get_event_loop_policy()
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
         try:
-            return super().run_playwright(html)
+            return self._printed(html)
         finally:
             asyncio.set_event_loop_policy(previous)
+
+    def _printed(self, html):
+        """The page, printed to PDF by Chromium on ``paper``.
+
+        This is what ``WebPDFExporter.run_playwright`` does, but for the
+        paper: that has no setting for it, and prints on US Letter,
+        Chromium's own default.  Chromium is handed the page as a file,
+        closed first (on Windows a file that is open cannot be opened by
+        another process), from a thread of its own (a server that
+        exports is running an event loop already).  A PDF of one long
+        page (``paginate = False``) is left to nbconvert, as it was.
+        """
+        import asyncio
+        import concurrent.futures
+        import tempfile
+
+        if not self.paginate:
+            return super().run_playwright(html)
+        handle = tempfile.NamedTemporaryFile(suffix=".html", delete=False)
+        with handle:
+            handle.write(html.encode("utf-8"))
+        try:
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                return pool.submit(asyncio.run, self._print(handle.name)).result()
+        finally:
+            os.unlink(handle.name)
+
+    async def _print(self, path):
+        try:
+            from playwright.async_api import async_playwright
+        except ModuleNotFoundError as error:
+            raise RuntimeError("Playwright is not installed to support Web PDF conversion. "
+                               "Please install `nbconvert[webpdf]` to enable.") from error
+        if self.allow_chromium_download:
+            subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
+        async with async_playwright() as playwright:
+            try:
+                browser = await playwright.chromium.launch(
+                    handle_sigint=False, handle_sigterm=False, handle_sighup=False,
+                    args=[*self.browser_args, *(["--no-sandbox"] if self.disable_sandbox else [])])
+            except Exception as error:
+                # (nbconvert's own words, which hardcopy() knows: it says
+                # how to fetch the browser, and makes HTML instead.)
+                raise RuntimeError(
+                    "No suitable chromium executable found on the system. Please use "
+                    "'--allow-chromium-download' to allow downloading one,"
+                    "or install it using `playwright install chromium`.") from error
+            try:
+                page = await browser.new_page()
+                await page.emulate_media(media="print")
+                await page.wait_for_timeout(100)
+                await page.goto(f"file://{path}", wait_until="networkidle")
+                await page.wait_for_timeout(self.page_render_timeout)
+                return await page.pdf(print_background=True, format=self.paper)
+            finally:
+                await browser.close()

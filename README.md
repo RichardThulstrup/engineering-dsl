@@ -335,7 +335,12 @@ ships two replacements that work out of the box:
   when the saved file has no outputs; `hardcopy(execute=True)` runs the
   notebook fresh during export instead of relying on what was saved
   (a sheet made in the [worksheet](docs/WORKSHEET.md#printing) is
-  exported as saved either way).
+  exported as saved either way). The PDF is printed on A4, as the
+  worksheet's pages are. For US Letter (or A3, A5, Legal, Tabloid …)
+  put `c.EDSLPDFExporter.paper = "Letter"` in `jupyter_nbconvert_config.py`
+  — for Lab's *Save and Export Notebook As* menu, in
+  `jupyter_server_config.py` — in the folder
+  `python -m jupyter --config-dir` names.
   PDF output needs a browser to print with, fetched once and again
   whenever Playwright has been upgraded:
 

@@ -249,8 +249,9 @@ def hardcopy(notebook=None, to=None, timeout=600, execute=False):
 
     ``to`` is any nbconvert exporter name; the default picks the
     toolkit's own Chromium-based PDF rendering (``edsl_pdf`` —
-    math-style code typesetting, ``no-print`` tags honoured) when
-    installed, else stock ``webpdf``.  When Chromium/Playwright is
+    math-style code typesetting, ``no-print`` tags honoured, on A4 or
+    the paper ``c.EDSLPDFExporter.paper`` names) when installed, else
+    stock ``webpdf``, on US Letter.  When Chromium/Playwright is
     missing, falls back to a standalone ``.html`` and prints the
     one-time install commands that unlock PDF.
 
