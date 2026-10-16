@@ -3754,6 +3754,25 @@ def test_a_figure_is_as_large_in_the_sheets_file_as_it_is_on_the_page(page_and_f
     assert not page.is_visible("#banner") and figures(page, 1) == [drawn]
 
 
+def test_a_figure_that_a_statement_comes_to_is_as_large_as_one_that_is_shown(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    # The figure is shown at the end of the first region (it is left open there), and is what the second comes to.
+    typed(page, "ax := plot([1, 2, 3], [2, 3, 5], figsize=(3, 2), show=False, return_ax=True)", "ax.figure")
+    settled(page)
+    shown, value = figures(page, 2)
+    assert value == shown and shown["dots"][0] > 2 * 100
+    # In the sheet's file both have the size; where the sheet is not calculated, both are drawn by it.
+    save_as(page, "value.ipynb")
+    named(page, "value")
+    stored = [output for cell in nbformat.read(str(folder / "value.ipynb"), as_version=4).cells if cell.cell_type == "code"
+              for output in cell.outputs if "image/png" in output.get("data", {})]
+    assert [output.metadata for output in stored] == [{"image/png": dict(zip(("width", "height"), shown["said"]))}] * 2
+    rewritten(folder, "value.ipynb", lambda sheet: sheet["settings"]["about"].update(author="Someone else"))
+    opened(page, "value.ipynb")
+    assert page.is_visible("#banner") and figures(page, 2) == [shown, value]
+
+
 # ---- what a sheet reads outside itself ------------------------------------------
 
 # Each line of the math regions as it reads (without the blanks KaTeX sets), and the marks on what is kept.

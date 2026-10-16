@@ -870,12 +870,14 @@ class Engine:
         if plt is not None and plt.get_fignums():
             plt.close("all")
 
-    def _format(self, value):
-        """MIME bundle for a value, as a notebook would display it."""
+    def _display(self, value):
+        """A value as a notebook would display it: its MIME bundle, and
+        what the formatter says about it besides.  (A figure is drawn with
+        twice the dots, and says how large it is meant to be.)"""
         try:
-            data, _ = self.shell.display_formatter.format(value, include=set(_SHOW_MIMES))
+            data, said = self.shell.display_formatter.format(value, include=set(_SHOW_MIMES))
         except Exception:
-            data = {}
+            data = said = {}
         if not data:
             try:
                 data = {"text/plain": repr(value)}
@@ -888,7 +890,21 @@ class Engine:
         plain = data.get("text/plain")
         if isinstance(plain, str) and len(plain) > _MAX_TEXT:
             data["text/plain"] = plain[:_MAX_TEXT] + " …"
-        return data
+        return data, _jsonable(said or {})
+
+    def _format(self, value):
+        """MIME bundle for a value, as a notebook would display it."""
+        return self._display(value)[0]
+
+    def _result(self, out, values):
+        """Show these values as what a statement came to (``result``),
+        each as a notebook would display it — and beside them, one for
+        each, what the formatter said about them (``metadata``), where it
+        said something: how large a figure is meant to be."""
+        shown = [self._display(value) for value in values]
+        out["result"] = [data for data, _ in shown]
+        if any(said for _, said in shown):
+            out["metadata"] = [said for _, said in shown]
 
     @staticmethod
     def _shows_value(value):
@@ -1181,7 +1197,7 @@ class Engine:
         elif exc is not None:
             out["error"] = self._error(exc, item)
         elif self._shows_value(result.result):
-            out["result"] = [self._format(result.result)]
+            self._result(out, [result.result])
 
     def _brief(self, value, most=2000):
         """How a value is displayed, in brief — for the list another sheet
@@ -1246,12 +1262,12 @@ class Engine:
                 out["given"] = [{"name": n, "latex": self._name_latex(n), "value": self._format(ns[n])} for n in names]
         elif item.mode == "eval":
             if self._shows_value(value):
-                out["result"] = [self._format(value)]
+                self._result(out, [value])
         elif len(item.nodes) == 1:
             names = self._assigned_names(item.nodes[0])
             values = [ns.get(n, MISSING) for n in names]
             if names and all(v is not MISSING and self._shows_value(v) for v in values):
-                out["result"] = [self._format(v) for v in values]
+                self._result(out, values)
                 if "kind" in out and out["kind"] == "other":
                     out["kind"] = "assign"
 
@@ -1275,6 +1291,10 @@ class Engine:
 
     def run_item(self, item, use_memo=True, given=False):
         """Result for one item — replayed if nothing it reads has changed.
+
+        What a statement came to is in ``result``, a MIME bundle for each
+        value it shows; what the formatter said about them besides — how
+        large a figure is meant to be — is beside it, in ``metadata``.
 
         ``given`` runs a statement of a region that holds values given
         by another sheet, which the page draws by itself: what the

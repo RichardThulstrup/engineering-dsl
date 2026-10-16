@@ -5,8 +5,10 @@
 One kernel serves the whole module; each test hands it a complete sheet,
 so tests do not depend on each other's variables.
 """
+import base64
 import random
 import re
+import struct
 import threading
 
 import pytest
@@ -265,6 +267,33 @@ def test_a_figure_left_open_is_not_replayed_as_if_closed(kernel):
     first = kernel.calc([region], fresh=True).regions[0]["tail"][0]["data"]["image/png"]
     again = kernel.calc([region]).regions[0]["tail"][0]["data"]["image/png"]
     assert first == again
+
+
+def dots(png):
+    """How many dots wide and high a PNG (as base64) is."""
+    return struct.unpack(">II", base64.b64decode(png)[16:24])
+
+
+def test_a_figure_that_is_a_value_says_how_large_it_is_meant_to_be(kernel):
+    # A figure is drawn with twice the dots, and says how large it is meant
+    # to be — whether it is shown, or is what a statement came to: as an
+    # expression, as what was assigned, in plain Python, through a magic.
+    sheet = ["ax := plot([1, 2, 3] s, [2, 3, 5] V, figsize=(3, 2), show=False, return_ax=True)\n"
+             "ax.figure\nfig := ax.figure\nn := 5",
+             "%%python\nimport matplotlib.pyplot as plt\nother, axes = plt.subplots(figsize=(2, 1.5))\nplt.close(other)\nother",
+             "%time ax.figure"]
+    for p in (kernel.calc(sheet, fresh=True), kernel.calc(sheet)):
+        plot, value, assigned, number = p.items(0)
+        shown, = p.regions[0]["tail"]           # (the figure left open, shown at the end of its region)
+        across, down = dots(shown["data"]["image/png"])
+        assert shown["metadata"] == {"image/png": {"width": across // 2, "height": down // 2}}
+        for item in (value, assigned, p.item(2)):
+            assert item["metadata"] == [shown["metadata"]] and item["result"][0]["image/png"] == shown["data"]["image/png"]
+        python = p.items(1)[-1]
+        across, down = dots(python["result"][0]["image/png"])
+        assert python["metadata"] == [{"image/png": {"width": across // 2, "height": down // 2}}]
+        # What nothing more is said about has nothing beside it.
+        assert "metadata" not in plot and "metadata" not in number and number["result"][0]["text/plain"] == "5"
 
 
 def test_calls_into_other_modules_always_run(kernel):

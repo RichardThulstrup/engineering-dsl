@@ -187,7 +187,9 @@ export function showsResult(item, mode) {
 }
 
 function resultNode(item) {
-  const nodes = item.result.map((bundle) => bundleNode(bundle, null, { inline: true }));
+  // (What the kernel said about each value besides, beside it: how large a figure is meant to be.)
+  const said = item.metadata || [];
+  const nodes = item.result.map((bundle, at) => bundleNode(bundle, said[at], { inline: true }));
   if (nodes.length === 1) return nodes[0];
   const group = el("span", { class: "res" }, "(");
   nodes.forEach((node, i) => group.append(i ? ", " : "", node));
@@ -338,7 +340,7 @@ export function notebookOutputs(result, mode) {
           if (item.result[0][mime]) data[mime] = item.result[0][mime];
         }
       }
-      outs.push({ output_type: "display_data", data, metadata: {} });
+      outs.push({ output_type: "display_data", data, metadata: sizes((item.metadata || [])[0], data) });
     }
     push(item.outputs);
     if (item.error) {

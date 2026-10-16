@@ -892,24 +892,37 @@ else {
   }
 
   // So in the outputs of a region's cell: what its statements displayed,
-  // and what was displayed after them.  (The value of a statement comes
-  // from the kernel without a size: nothing is said about it.)
+  // what they came to (the kernel says that of each value, beside it),
+  // and what was displayed after them.
   const result = {
     items: [{ t: "comment", text: "# drawn", lines: [1, 1] },
             { t: "stmt", src: "plot(x)", lines: [2, 2], kind: "other",
               outputs: [{ type: "stream", name: "stdout", text: "drawn\n" }, { type: "display", data: figure, metadata: said },
                         { type: "display", data: { "text/plain": "4" }, metadata: {} }] },
-            { t: "stmt", src: "drawing", lines: [3, 3], kind: "expr", result: [{ "image/png": "BBBB", "text/plain": "<Figure>" }] }],
+            { t: "stmt", src: "drawing", lines: [3, 3], kind: "expr", result: [{ "image/png": "BBBB", "text/plain": "<Figure>" }],
+              metadata: [{ "image/png": { width: 271, height: 197 }, needs_background: "light" }] },
+            { t: "stmt", src: "sketch", lines: [4, 4], kind: "expr", result: [{ "image/png": "EEEE", "text/plain": "<Figure>" }] }],
     tail: [{ type: "display", data: { "image/png": "CCCC" }, metadata: { "image/png": { width: 271, height: 197 }, isolated: true } },
            { type: "display", data: { "image/png": "DDDD" } }] };
   assert.deepEqual(view.notebookOutputs(result, "auto"), [
     { output_type: "stream", name: "stdout", text: "drawn\n" },
     { output_type: "display_data", data: figure, metadata: size },
     { output_type: "display_data", data: { "text/plain": "4" }, metadata: {} },
-    { output_type: "display_data", data: { "text/plain": "drawing = <Figure>", "image/png": "BBBB" }, metadata: {} },
+    { output_type: "display_data", data: { "text/plain": "drawing = <Figure>", "image/png": "BBBB" }, metadata: { "image/png": { width: 271, height: 197 } } },
+    { output_type: "display_data", data: { "text/plain": "sketch = <Figure>", "image/png": "EEEE" }, metadata: {} },
     { output_type: "display_data", data: { "image/png": "CCCC" }, metadata: { "image/png": { width: 271, height: 197 } } },
     { output_type: "display_data", data: { "image/png": "DDDD" }, metadata: {} }]);
   assert.deepEqual(view.notebookOutputs(null, "auto"), []);
+
+  // On the page, too, a figure that a statement came to is as large as it is meant to be — each value by what is said of it.
+  const drawnAt = (items) => {
+    const body = document.createElement("div");
+    view.renderItems(body, items, { mode: "auto", highlight: (text) => text });
+    return body.find("img").map((img) => [img.width, img.height]);
+  };
+  assert.deepEqual(drawnAt(result.items.slice(2)), [[271, 197], [undefined, undefined]]);
+  assert.deepEqual(drawnAt([{ t: "stmt", src: "a, b := two()", lines: [1, 1], kind: "assign", result: [{ "text/plain": "1" }, figure],
+                              metadata: [{}, said] }]), [[534, 412.5]]);
 }
 
 // ---- what was read outside the sheet, and is kept ------------------------------
