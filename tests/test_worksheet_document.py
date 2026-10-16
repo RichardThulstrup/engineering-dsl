@@ -96,7 +96,7 @@ def test_saved_output_shown_before_calculating_is_inert(tmp_path):
     ])
     doc = document.load(write(tmp_path / "foreign.ipynb", [cell]))
     saved = doc["regions"][0]["saved"]
-    assert saved == [{"type": "display", "data": {"text/plain": "1"}},
+    assert saved == [{"type": "display", "data": {"text/plain": "1"}, "metadata": {}},
                      {"type": "stream", "name": "stdout", "text": "hello\n"}]
 
 
@@ -216,6 +216,70 @@ def test_only_pictures_are_taken_from_the_page(tmp_path):
     region["attachments"] = {}
     document.save(path, {"regions": [region]})
     assert "attachments" not in nbformat.read(str(path), as_version=4).cells[-1]
+
+
+# ---------------------------------------------------------------------------
+# figures: how large one is shown
+# ---------------------------------------------------------------------------
+
+# What is said about something displayed, and what is kept of that: how
+# large its pictures are shown.  (A figure is drawn with twice the dots,
+# and says how large it is meant to be.)
+SAID = {"image/png": {"width": 534, "height": 412.5, "onload": "alert(1)", "depth": [1]}, "text/plain": {"width": 9},
+        "image/jpeg": {"width": 9}, "application/x-widget": {"width": 9}, "needs_background": "light", "isolated": True}
+SIZE = {"image/png": {"width": 534, "height": 412.5}}
+# What is no size: no number, or none a picture can be told (it is not shown then).
+NO_SIZE = ("534", True, None, [534], {"px": 534}, float("nan"), float("inf"), -534, 0, 0.99, 2 ** 31, 10 ** 400)
+
+
+def test_a_figure_is_saved_with_the_size_it_is_shown_at(tmp_path):
+    # JupyterLab and a hardcopy go by the size a file says a figure has:
+    # without one they show every dot, twice as large as the page does.
+    path = tmp_path / "figure.ipynb"
+    shown = lambda data, **more: dict({"output_type": "display_data", "data": data}, **more)       # noqa: E731
+    outputs = [shown({"image/png": PNG, "text/plain": "<Figure>", "application/x-widget": "{}"}, metadata=SAID),
+               shown({"image/svg+xml": "<svg/>", "text/html": "<b>4</b>"},
+                     metadata={"image/svg+xml": {"height": 30}, "text/html": {"height": 30}}),
+               shown({"image/png": PNG}, metadata={"image/png": {"width": 1, "height": 2 ** 31 - 1}}),
+               shown({"image/png": PNG}), shown({"image/png": PNG}, metadata="large"),             # (nothing is said of them)
+               shown({"image/png": PNG}, metadata={"image/png": [534, 413]}),
+               shown({"image/png": PNG}, metadata={"image/png": {"width": 0, "height": "60"}}),
+               *(shown({"image/png": PNG}, metadata={"image/png": {"width": none, "height": 60}}) for none in NO_SIZE)]
+    document.save(path, {"regions": [{"id": "f1", "kind": "math", "source": "plot(x)", "x": 0, "y": 0, "outputs": outputs}]})
+    nb = nbformat.read(str(path), as_version=4)
+    nbformat.validate(nb)
+    assert [output.metadata for output in nb.cells[-1].outputs] == [
+        SIZE, {"image/svg+xml": {"height": 30}}, {"image/png": {"width": 1, "height": 2 ** 31 - 1}}, {}, {}, {}, {},
+        *[{"image/png": {"height": 60}}] * len(NO_SIZE)]
+
+
+def test_a_stored_figure_comes_with_its_size_and_with_no_more_of_what_its_file_says(tmp_path):
+    # A sheet from elsewhere shows its stored figures until it is calculated:
+    # as large as its file says.  A size that is none is not handed to the
+    # page — NaN and Infinity least of all: Python reads them from a file,
+    # and a page that is sent them cannot read the sheet.
+    import json
+    odd = [{"image/png": {"width": none, "height": 60}} for none in NO_SIZE]
+    read = dict(READ, outputs=[{"type": "display", "data": {"image/png": PNG}, "metadata": said} for said in odd])
+    cell = new_code_cell("plot(x)", metadata={"edsl": {"x": 0, "y": 0, "kept": [read]}}, outputs=[
+        new_output("display_data", data={"image/png": PNG, "text/plain": "<Figure>", "text/html": "<b>no</b>"}, metadata=SAID),
+        new_output("execute_result", data={"image/jpeg": PNG, "image/svg+xml": "<svg/>"}, execution_count=1,
+                   metadata={"image/jpeg": {"width": 271}, "image/svg+xml": {"width": 271}}),
+        new_output("display_data", data={"text/plain": "4"}),
+        *(new_output("display_data", data={"image/png": PNG}, metadata=said) for said in odd)])
+    path = write(tmp_path / "elsewhere.ipynb", [cell])
+    written = path.read_text(encoding="utf-8")
+    assert all(none in written for none in ("NaN", "Infinity", "1" + 400 * "0"))          # (the file does say them)
+    doc = document.load(path)
+    region = doc["regions"][0]
+    assert region["saved"] == [
+        {"type": "display", "data": {"image/png": PNG, "text/plain": "<Figure>"}, "metadata": SIZE},
+        {"type": "display", "data": {"image/jpeg": PNG}, "metadata": {"image/jpeg": {"width": 271}}},
+        {"type": "display", "data": {"text/plain": "4"}, "metadata": {}},
+        *[{"type": "display", "data": {"image/png": PNG}, "metadata": {"image/png": {"height": 60}}}] * len(NO_SIZE)]
+    # So for what a statement that read outside the sheet displayed.
+    assert [event["metadata"] for event in region["kept"][0]["outputs"]] == [{"image/png": {"height": 60}}] * len(NO_SIZE)
+    json.dumps(doc, allow_nan=False)                        # the page can read all of it
 
 
 # ---------------------------------------------------------------------------

@@ -868,6 +868,50 @@ else {
                    { "text/plain": "x = 1" });
 }
 
+// ---- figures: how large one is shown, in the sheet's file -----------------------
+{
+  const view = await import(js("mathview.js"));
+  // A figure is drawn with twice the dots, and says how large it is meant
+  // to be.  Of what is said about something displayed, that goes into the
+  // file — JupyterLab and a hardcopy go by it — and no more.
+  const figure = { "image/png": "AAAA", "text/plain": "<Figure>" };
+  const said = { "image/png": { width: 534, height: 412.5, onload: "alert(1)", depth: [1] }, "text/plain": { width: 9 },
+                 "image/jpeg": { width: 9 }, needs_background: "light", isolated: true };
+  const size = { "image/png": { width: 534, height: 412.5 } };
+  assert.deepEqual(view.sizes(said, figure), size);
+  assert.deepEqual(view.sizes({ "image/svg+xml": { height: 30 }, "text/html": { height: 30 } }, { "image/svg+xml": "<svg/>", "text/html": "<b>4</b>" }),
+                   { "image/svg+xml": { height: 30 } });
+  assert.deepEqual(view.sizes({ "image/png": { width: 1, height: 2 ** 31 - 1 } }, figure), { "image/png": { width: 1, height: 2 ** 31 - 1 } });
+  // What is no size is none: no number, or none a picture can be told (it is not shown then).
+  for (const none of ["534", true, null, undefined, [534], { px: 534 }, NaN, Infinity, -534, 0, 0.99, 2 ** 31, 1e300]) {
+    assert.deepEqual(view.sizes({ "image/png": { width: none, height: 60 } }, figure), { "image/png": { height: 60 } }, String(none));
+  }
+  for (const nothing of [undefined, null, "large", 534, [], [{ width: 9 }], { "image/png": [534, 413] }, { "image/png": null }, { "image/png": "534" },
+                         { "image/png": { width: 0, height: "60" } }, JSON.parse('{"__proto__": {"width": 9}, "constructor": {"width": 9}}')]) {
+    assert.deepEqual(view.sizes(nothing, figure), {}, JSON.stringify(nothing));
+  }
+
+  // So in the outputs of a region's cell: what its statements displayed,
+  // and what was displayed after them.  (The value of a statement comes
+  // from the kernel without a size: nothing is said about it.)
+  const result = {
+    items: [{ t: "comment", text: "# drawn", lines: [1, 1] },
+            { t: "stmt", src: "plot(x)", lines: [2, 2], kind: "other",
+              outputs: [{ type: "stream", name: "stdout", text: "drawn\n" }, { type: "display", data: figure, metadata: said },
+                        { type: "display", data: { "text/plain": "4" }, metadata: {} }] },
+            { t: "stmt", src: "drawing", lines: [3, 3], kind: "expr", result: [{ "image/png": "BBBB", "text/plain": "<Figure>" }] }],
+    tail: [{ type: "display", data: { "image/png": "CCCC" }, metadata: { "image/png": { width: 271, height: 197 }, isolated: true } },
+           { type: "display", data: { "image/png": "DDDD" } }] };
+  assert.deepEqual(view.notebookOutputs(result, "auto"), [
+    { output_type: "stream", name: "stdout", text: "drawn\n" },
+    { output_type: "display_data", data: figure, metadata: size },
+    { output_type: "display_data", data: { "text/plain": "4" }, metadata: {} },
+    { output_type: "display_data", data: { "text/plain": "drawing = <Figure>", "image/png": "BBBB" }, metadata: {} },
+    { output_type: "display_data", data: { "image/png": "CCCC" }, metadata: { "image/png": { width: 271, height: 197 } } },
+    { output_type: "display_data", data: { "image/png": "DDDD" }, metadata: {} }]);
+  assert.deepEqual(view.notebookOutputs(null, "auto"), []);
+}
+
 // ---- what was read outside the sheet, and is kept ------------------------------
 {
   const view = await import(js("mathview.js"));

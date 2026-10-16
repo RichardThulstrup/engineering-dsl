@@ -3709,6 +3709,51 @@ def test_a_server_started_before_sheets_handed_values_on_is_not_asked_to(page_an
     assert page.locator(".dialog").count() == 0
 
 
+# ---- figures ------------------------------------------------------------------
+
+# The figures the math regions show: the size each one's element says, the dots of its file, and how large it is drawn.
+FIGURES = """() => [...document.querySelectorAll('.region.math img')].map((img) => {
+    const box = img.getBoundingClientRect();
+    return {said: [Number(img.getAttribute('width')), Number(img.getAttribute('height'))],
+            dots: [img.naturalWidth, img.naturalHeight], drawn: [Math.round(box.width), Math.round(box.height)]};
+})"""
+
+
+def figures(page, count):
+    """The figures, once the page shows ``count`` of them and all have been read."""
+    page.wait_for_function(
+        "(count) => { const all = [...document.querySelectorAll('.region.math img')];"
+        " return all.length === count && all.every((img) => img.complete && img.naturalWidth > 0); }",
+        arg=count, timeout=20_000)
+    return page.evaluate(FIGURES)
+
+
+def test_a_figure_is_as_large_in_the_sheets_file_as_it_is_on_the_page(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    typed(page, "plot([1, 2, 3], [2, 3, 5], figsize=(3, 2))")
+    settled(page)
+    # A figure is drawn with twice the dots, and says how large it is meant to be: the page goes by that.
+    (drawn,) = figures(page, 1)
+    (wide, high), (across, down) = drawn["said"], drawn["dots"]
+    assert wide > 100 and abs(across - 2 * wide) <= 1 and abs(down - 2 * high) <= 1
+    assert abs(drawn["drawn"][0] - wide) <= 1 and abs(drawn["drawn"][1] - high) <= 1
+    # So do JupyterLab and a hardcopy, which show the sheet's file: the size is saved with the figure.
+    save_as(page, "figure.ipynb")
+    named(page, "figure")
+    stored = [output for cell in nbformat.read(str(folder / "figure.ipynb"), as_version=4).cells if cell.cell_type == "code"
+              for output in cell.outputs if "image/png" in output.get("data", {})]
+    assert [output.metadata for output in stored] == [{"image/png": {"width": wide, "height": high}}]
+    # Where the sheet has not been calculated — on another computer, say — its
+    # stored figure is shown until it is: as large as the calculated one.
+    rewritten(folder, "figure.ipynb", lambda sheet: sheet["settings"]["about"].update(author="Someone else"))
+    opened(page, "figure.ipynb")
+    assert page.is_visible("#banner") and figures(page, 1) == [drawn]
+    page.click("#banner .btn.primary")
+    settled(page)
+    assert not page.is_visible("#banner") and figures(page, 1) == [drawn]
+
+
 # ---- what a sheet reads outside itself ------------------------------------------
 
 # Each line of the math regions as it reads (without the blanks KaTeX sets), and the marks on what is kept.

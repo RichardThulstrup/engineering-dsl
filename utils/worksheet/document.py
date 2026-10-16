@@ -103,8 +103,32 @@ def _is_preamble(source: str) -> bool:
     return len(lines) == 1 and _IMPORT_LINE.match(lines[0]) is not None
 
 
+# The most px a picture can be told it is wide, or high.
+_MOST_PX = 2 ** 31 - 1
+
+
+def _sizes(said, data) -> dict:
+    """How large the pictures among what was displayed are shown: all that
+    is kept of what is said about it.  (A figure is drawn with twice the
+    dots, and says how large it is meant to be.)  A size is a number of
+    px that a picture can be told: told less than one, or more than the
+    most, it is not shown at all — and ``NaN`` and ``Infinity``, which
+    Python reads from a file, are no JSON: a page that is handed one
+    cannot read the sheet."""
+    sizes = {}
+    for kind, size in said.items() if isinstance(said, dict) else ():
+        if kind in data and kind.startswith("image/") and isinstance(size, dict):
+            sides = {side: size[side] for side in ("width", "height")
+                     if isinstance(size.get(side), (int, float)) and not isinstance(size[side], bool)
+                     and 1 <= size[side] <= _MOST_PX}
+            if sides:
+                sizes[kind] = sides
+    return sizes
+
+
 def _saved_outputs(cell):
-    """A cell's stored outputs, reduced to inert text and pictures."""
+    """A cell's stored outputs, reduced to inert text and pictures — a
+    picture with how large it is shown."""
     out = []
     for o in cell.get("outputs", []):
         kind = o.get("output_type")
@@ -114,7 +138,7 @@ def _saved_outputs(cell):
         elif kind in ("display_data", "execute_result"):
             data = {k: _text(v) for k, v in o.get("data", {}).items() if k in _SAFE_MIMES}
             if data:
-                out.append({"type": "display", "data": data})
+                out.append({"type": "display", "data": data, "metadata": _sizes(o.get("metadata"), data)})
         elif kind == "error":
             out.append({"type": "error", "ename": o.get("ename", ""),
                         "evalue": o.get("evalue", "")})
@@ -207,20 +231,6 @@ def _values(listed) -> list:
 
 def _texts(held) -> bool:
     return isinstance(held, dict) and all(isinstance(text, str) for text in held.values())
-
-
-def _sizes(said, data) -> dict:
-    """How large what was displayed is shown: all that is kept of what is
-    said about it.  (A figure is drawn with twice the dots, and says how
-    large it is meant to be.)"""
-    sizes = {}
-    for kind, size in said.items() if isinstance(said, dict) else ():
-        if kind in data and isinstance(size, dict):
-            sides = {side: size[side] for side in ("width", "height")
-                     if isinstance(size.get(side), (int, float)) and not isinstance(size[side], bool)}
-            if sides:
-                sizes[kind] = sides
-    return sizes
 
 
 def _events(events):
@@ -387,7 +397,7 @@ def _clean_outputs(outputs):
                     if k in _STORED_MIMES and isinstance(v, str)}
             if data:
                 out.append(nbformat.from_dict({"output_type": "display_data", "data": data,
-                                               "metadata": {}}))
+                                               "metadata": _sizes(o.get("metadata"), data)}))
         elif kind == "error":
             out.append(nbformat.from_dict({
                 "output_type": "error", "ename": str(o.get("ename", "")),

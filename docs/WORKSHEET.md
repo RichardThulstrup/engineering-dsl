@@ -514,7 +514,9 @@ A worksheet is saved as `.ipynb`:
 - what a region shows is saved as the cell's output, so results are
   visible in JupyterLab and on GitHub without running anything (run
   there, a cell shows what a notebook shows — nothing, for a
-  definition);
+  definition). A figure is saved with its size — it is drawn with
+  twice the dots it is shown at — which JupyterLab and `hardcopy()` go
+  by, as the page does;
 - a text region is a markdown cell, formatted as markdown formats
   (with `<u>`, `<sub>` and `<sup>` for what markdown has no mark for);
 - a picture is a text cell with the picture attached to it; pictures

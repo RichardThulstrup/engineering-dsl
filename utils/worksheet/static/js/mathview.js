@@ -290,6 +290,25 @@ export function renderSource(body, source, highlight) {
 
 // ---- saving ----------------------------------------------------------------
 
+const MOST_PX = 2 ** 31 - 1;            // the most a picture can be told it is wide, or high
+
+/**
+ * Of what is said about something displayed, how large its pictures are
+ * shown: all of it that goes into the file (document.py: _sizes).  A
+ * figure is drawn with twice the dots, and says how large it is meant
+ * to be — which JupyterLab and a hardcopy go by, as this page does.
+ */
+export function sizes(said, data) {
+  const kept = {};
+  for (const [kind, size] of Object.entries(said || {})) {
+    if (!kind.startsWith("image/") || !Object.hasOwn(data, kind) || !size) continue;
+    const sides = Object.fromEntries(["width", "height"].map((side) => [side, size[side]])
+      .filter(([, px]) => typeof px === "number" && px >= 1 && px <= MOST_PX));
+    if (Object.keys(sides).length) kept[kind] = sides;
+  }
+  return kept;
+}
+
 /** What a region shows, as notebook outputs — so the saved file reads
  *  the same in JupyterLab or on GitHub as it does here. */
 export function notebookOutputs(result, mode) {
@@ -298,7 +317,9 @@ export function notebookOutputs(result, mode) {
   const push = (events) => {
     for (const event of events || []) {
       if (event.type === "stream") outs.push({ output_type: "stream", name: event.name, text: event.text });
-      else if (event.type === "display") outs.push({ output_type: "display_data", data: event.data, metadata: {} });
+      else if (event.type === "display") {
+        outs.push({ output_type: "display_data", data: event.data, metadata: sizes(event.metadata, event.data) });
+      }
     }
   };
   for (const item of result.items) {
