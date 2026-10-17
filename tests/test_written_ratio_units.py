@@ -52,6 +52,12 @@ def test_written_ratio_display(expression, shown):
     ("5 MeV_per_c2", r"$5\ \mathrm{MeV/c^{2}}$"),
     # The space in ``100 km`` survives math mode.
     ("5 L/100 km", r"$5\ \mathrm{L}/\mathrm{100\ km}$"),
+    # But a Greek letter is not set apart from the letter after it:
+    # ``\mu{}N`` is µN, where ``\mu\ N`` would be µ N.
+    ("10**6 µN m", r"$1000000\ \mathrm{\mu{}N} \cdot \mathrm{m}$"),
+    ("4.7 µF", r"$4.7\ \mathrm{\mu{}F}$"),
+    ("33 µH", r"$33\ \mathrm{\mu{}H}$"),
+    ("4.7 kΩ", r"$4.7\ \mathrm{k\Omega}$"),
 ])
 def test_written_ratio_latex(expression, tex):
     assert run(expression)._repr_latex_() == tex

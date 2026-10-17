@@ -148,8 +148,9 @@ def _unit_label_to_latex(label: str) -> str:
             # unit string.  Greek glyphs become their LaTeX commands
             # (``kΩ`` → ``k\Omega``, ``μH`` → ``\mu H``) so they typeset
             # exactly as forallpeople's own LaTeX did; a command is
-            # followed by a space when a letter comes next, so
-            # ``\Omega`` never swallows it.
+            # followed by ``{}`` when a letter comes next, so ``\mu``
+            # never swallows it (``\mu{}N``) — not by a space, which
+            # ``_tex_unit_text`` keeps as one (``\mu\ N`` is µ N).
             run = run.replace("%", r"\%").replace("&", r"\&")
             tex = ""
             for k, c in enumerate(run):
@@ -158,7 +159,7 @@ def _unit_label_to_latex(label: str) -> str:
                     tex += c
                 else:
                     nxt = run[k + 1] if k + 1 < len(run) else ""
-                    tex += cmd + (" " if nxt.isalpha() else "")
+                    tex += cmd + ("{}" if nxt.isascii() and nxt.isalpha() else "")
             out.append(r"\mathrm{" + _tex_unit_text(tex) + "}")
             i = j
     return "".join(out)
