@@ -660,11 +660,12 @@ export class Sheet {
    * looks, with the caret at `point` of the window — unless text is to
    * be written as markdown (prefs().markdown).
    */
-  edit(region, { line = null, fresh = false, point = null } = {}) {
+  edit(region, { line = null, fresh = false, point = null, mark = false } = {}) {
     if (region.given) {
-      // (Nobody writes the code that holds what a region was given: what it holds is chosen.)
+      // (Nobody writes the code that holds what a region was given: what
+      // it holds is chosen — `mark`: asked for on its mark.)
       this.select([region]);
-      this.hooks.given?.(region);
+      this.hooks.given?.(region, { mark });
       return;
     }
     this.commitEdit();
@@ -956,15 +957,28 @@ export class Sheet {
 
   /** Give a region that holds values of another sheet other ones — or the same ones as they are at another revision. */
   regive(region, given) {
-    const made = new Region({ kind: "math", source: sourceOf(given), given });
+    this.regiveAll([[region, given]]);
+  }
+
+  /** So for several regions at once — each [region, given] — as one step, which undo takes back as one. */
+  regiveAll(pairs) {
     this.checkpoint();
-    const calc = made.source !== region.source;
-    // (It has what the other sheet delivers now: that is where it was taken from.)
-    Object.assign(region, { given: made.given, source: made.source, mark: null });
-    this.keep(region);
-    this.draw(region);
+    let calc = false;
+    for (const [region, given] of pairs) {
+      const made = new Region({ kind: "math", source: sourceOf(given), given });
+      calc = calc || made.source !== region.source;
+      // (It has what the other sheet delivers now: that is where it was taken from.)
+      Object.assign(region, { given: made.given, source: made.source, mark: null });
+      this.keep(region);
+      this.draw(region);
+    }
     this.layout();
     this.hooks.changed({ calc });
+  }
+
+  /** The regions that show an error, as the sheet is drawn. */
+  failed() {
+    return this.regions.filter((region) => region.el.classList.contains("has-error"));
   }
 
   /** Say on a region how what it was given stands to what the other sheet delivers now (given.js: standing). */
@@ -1442,7 +1456,7 @@ export class Sheet {
       this.clicked = again ? null : { region: press.region, at: event.timeStamp };      // (a third click is a first one)
       const whole = this.isPicture(press.region) || Boolean(press.region.given);
       if (press.grip || (whole && !again && !press.mark)) { this.select([press.region]); this.focus(); }
-      else this.edit(press.region, { line: press.line, point: { x: event.clientX, y: event.clientY } });
+      else this.edit(press.region, { line: press.line, point: { x: event.clientX, y: event.clientY }, mark: press.mark });
       return;
     }
     const dx = point.x - press.start.x, dy = point.y - press.start.y;

@@ -258,8 +258,11 @@ function givenRows(given, told) {
 export function renderGiven(body, given, { told = null, error = null, mark = null } = {}) {
   const head = el("div", { class: "whence" }, el("span", { text: caption(given), title: given.sheet }));
   if (mark) {
-    head.append(el("span", { class: "mark" + (mark.lost ? " lost" : ""), text: markText(mark), role: "button",
-                             title: mark.lost ? "Choose the sheet again, or other values" : "See what has changed, and take the new values" }));
+    const title = mark.lost ? "Choose the sheet again, or other values"
+      : mark.behind ? "That sheet takes values that have been saved anew since: bring them up to date"
+        : "See what has changed, and take the new values";
+    head.append(el("span", { class: "mark" + (mark.lost ? " lost" : mark.behind ? " behind" : ""), text: markText(mark),
+                             role: "button", title }));
   }
   body.replaceChildren(head);
   for (const row of givenRows(given, told)) {

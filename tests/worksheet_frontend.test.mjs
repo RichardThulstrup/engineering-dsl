@@ -796,8 +796,9 @@ else {
   assert.deepEqual(given.standing(kept, { name: "a", revision: 9, saved: "x", values: null }), { lost: "keeps no values" });
   assert.deepEqual(given.standing(kept, null), { lost: "not found" });
   assert.deepEqual([{ revision: 4, saved: "" }, { revision: "B", saved: "" }, { revision: null, saved: "x" }, { revision: "", saved: "x" }, { revision: 0, saved: "" },
-                    { lost: "not found" }].map(given.markText),
-                   ["rev. 4 is there", "rev. B is there", "newer values are there", "newer values are there", "rev. 0 is there", "not found"]);
+                    { lost: "not found" }, { behind: "supply" }].map(given.markText),
+                   ["rev. 4 is there", "rev. B is there", "newer values are there", "newer values are there", "rev. 0 is there", "not found",
+                    "supply is behind"]);
 
   // The other sheet is named as it is reached from this sheet's folder.
   for (const [folder, whole, reference] of [["", "a.ipynb", "a.ipynb"], ["", "x/a.ipynb", "x/a.ipynb"], ["x", "x/a.ipynb", "a.ipynb"],
@@ -838,6 +839,10 @@ else {
                whence + '<span class="mark" role="button" title="See what has changed, and take the new values">rev. 4 is there</span></div>' + fromFile);
   assert.equal(drawn({ mark: { lost: "not found" } }),
                whence + '<span class="mark lost" role="button" title="Choose the sheet again, or other values">not found</span></div>' + fromFile);
+  // (It has what its sheet hands on — but that sheet is behind the sheets it takes from: chain.js.)
+  assert.equal(drawn({ mark: { behind: "a" } }),
+               whence + '<span class="mark behind" role="button" title="That sheet takes values that have been saved anew since: ' +
+               'bring them up to date">a is behind</span></div>' + fromFile);
   assert.equal(drawn({ error: { ename: "ValueError", evalue: "this is <no> stored value" } }),
                whence + "</div>" + fromFile + '<div class="err"><b>ValueError</b>: this is &lt;no&gt; stored value</div>');
   assert.ok(drawn({ error: { ename: "Stopped" } }).endsWith(fromFile + '<div class="err"><b>Stopped</b>: </div>'));
@@ -971,6 +976,135 @@ else {
     .startsWith("Read from outside the sheet (the clock, a random number, a file, the day's currency rates) on "));
   view.renderItems(body, items, { mode: "auto", highlight: (text) => text, results: false });
   assert.equal(body.find("span").filter((node) => node.className === "kept").length, 0);
+}
+
+// ---- sheets that build on each other --------------------------------------------
+{
+  const chain = await import(js("chain.js"));
+  const at = (revision) => `2026-10-${10 + revision}T10:00:00.000Z`;
+  // What a sheet takes of another one, as of a revision; and a sheet that
+  // hands on the values of its own revision.
+  const take = (sheet, revision, saved = at(revision)) => ({ sheet, revision, saved });
+  const sheet = (name, revision, takes = [], more = {}) => (
+    { name, revision, saved: at(revision), values: { revision, saved: at(revision), count: 1 }, takes, ...more });
+  const said = (made) => ({ steps: made.steps.map((step) => `${step.name} (rev. ${step.revision}): ${chain.newsText(step.news)}`),
+                            here: chain.newsText(made.here), behind: [...made.behind].sort(), held: made.held.map(chain.heldText),
+                            circle: made.circle });
+  const nothing = { steps: [], here: "", behind: [], held: [], circle: null };
+
+  // Limits has been saved anew (rev. 7).  Supply has rev. 5 of it, Stage
+  // has what Supply hands on, and the sheet at hand what Stage does: each
+  // is behind, and they are brought up to date from the first to the last.
+  const sheets = {
+    "common/limits.ipynb": sheet("limits", 7),
+    "supply.ipynb": sheet("supply", 3, [take("common/limits.ipynb", 5)]),
+    "stage.ipynb": sheet("stage", 2, [take("supply.ipynb", 3)]),
+  };
+  const own = [take("stage.ipynb", 2)];
+  const made = chain.plan({ own, self: "amp.ipynb", sheets });
+  assert.deepEqual(said(made), {
+    steps: ["supply (rev. 3): rev. 7 of limits (it has rev. 5)", "stage (rev. 2): supply as it is saved then"],
+    here: "stage as it is saved then", behind: ["stage.ipynb", "supply.ipynb"], held: [], circle: null });
+  assert.deepEqual(made.steps[0], { path: "supply.ipynb", name: "supply", revision: 3, news: [
+    { sheet: "common/limits.ipynb", name: "limits", has: { revision: 5, saved: at(5) }, there: { revision: 7, saved: at(7) }, anew: false }] });
+  assert.deepEqual(made.here, [{ sheet: "stage.ipynb", name: "stage", has: { revision: 2, saved: at(2) }, there: null, anew: true }]);
+  // (A sheet that has no file yet builds on others like any — and is none
+  // of those above the folder, which have no path either.)
+  assert.deepEqual(said(chain.plan({ own, sheets })), said(made));
+  assert.deepEqual(said(chain.plan({ own: [...own, take(null, 1)], sheets })), said(made));
+  // With Supply at what Limits delivers, nothing is behind and nothing is to be done.
+  const current = { ...sheets, "supply.ipynb": sheet("supply", 3, [take("common/limits.ipynb", 7)]) };
+  assert.deepEqual(said(chain.plan({ own, self: "amp.ipynb", sheets: current })), nothing);
+  assert.deepEqual(said(chain.plan({ own: [], self: "amp.ipynb", sheets })), nothing);
+  // The same revision saved at another moment is another one (a sheet whose revision was typed counts none).
+  const again = { ...sheets, "supply.ipynb": sheet("supply", 3, [take("common/limits.ipynb", 7, at(6))]) };
+  assert.deepEqual(said(chain.plan({ own, self: "amp.ipynb", sheets: again })).steps[0], "supply (rev. 3): rev. 7 of limits, saved anew");
+  // (So is another revision of the same moment — were there such a thing.)
+  const renamed = { ...sheets, "supply.ipynb": sheet("supply", 3, [take("common/limits.ipynb", 6, at(7))]) };
+  assert.deepEqual(said(chain.plan({ own, self: "amp.ipynb", sheets: renamed })).steps[0], "supply (rev. 3): rev. 7 of limits (it has rev. 6)");
+  // What the sheet at hand takes itself may be all there is to take.
+  assert.deepEqual(said(chain.plan({ own: [take("common/limits.ipynb", 5)], self: "amp.ipynb", sheets })),
+                   { ...nothing, here: "rev. 7 of limits (it has rev. 5)" });
+
+  // A sheet is brought up to date once, after all it takes from — however many take from it.
+  const wide = {
+    "limits.ipynb": sheet("limits", 7),
+    "supply.ipynb": sheet("supply", 3, [take("limits.ipynb", 5)]),
+    "stage.ipynb": sheet("stage", 2, [take("limits.ipynb", 7), take("supply.ipynb", 2)]),
+    "load.ipynb": sheet("load", 4, [take("stage.ipynb", 2), take("supply.ipynb", 3)]),
+  };
+  assert.deepEqual(said(chain.plan({ own: [take("load.ipynb", 4), take("stage.ipynb", 2), take("limits.ipynb", 7)], self: "amp.ipynb", sheets: wide })), {
+    steps: ["supply (rev. 3): rev. 7 of limits (it has rev. 5)",
+            // (Stage is behind twice over: Supply was saved since, and will be again.)
+            "stage (rev. 2): rev. 3 of supply (it has rev. 2), or what is saved then",
+            "load (rev. 4): stage as it is saved then, supply as it is saved then"],
+    here: "load as it is saved then, stage as it is saved then",
+    behind: ["load.ipynb", "stage.ipynb", "supply.ipynb"], held: [], circle: null });
+
+  // A sheet that has not been calculated on this computer is not: it is
+  // left as it is, and so is what waits for it alone — what is there to
+  // take without it is taken.
+  const strange = { ...wide, "supply.ipynb": { ...wide["supply.ipynb"], trusted: false }, "limits.ipynb": { ...wide["limits.ipynb"], trusted: true } };
+  assert.deepEqual(said(chain.plan({ own: [take("load.ipynb", 4)], self: "amp.ipynb", sheets: strange })), {
+    steps: ["stage (rev. 2): rev. 3 of supply (it has rev. 2)", "load (rev. 4): stage as it is saved then"],
+    here: "load as it is saved then", behind: ["load.ipynb", "stage.ipynb", "supply.ipynb"],
+    held: ["supply has not been calculated on this computer yet: open it and choose Calculate. It is left as it is."], circle: null });
+  const waiting = { ...sheets, "supply.ipynb": { ...sheets["supply.ipynb"], trusted: false } };
+  assert.deepEqual(said(chain.plan({ own, self: "amp.ipynb", sheets: waiting })), {
+    ...nothing, behind: ["stage.ipynb", "supply.ipynb"],
+    held: ["supply has not been calculated on this computer yet: open it and choose Calculate. It is left as it is.",
+           "stage waits for supply, and is left as it is."] });
+
+  // A sheet that is not there, one above the folder, and one that keeps
+  // no values give nothing to take — though one that keeps none yet may
+  // be saved with some.
+  const gaps = {
+    "limits.ipynb": sheet("limits", 7),
+    "gone.ipynb": null,
+    "bare.ipynb": { ...sheet("bare", 1), values: null },
+    "new.ipynb": { ...sheet("new", 1, [take("limits.ipynb", 5)]), values: null },
+    "supply.ipynb": sheet("supply", 3, [take("gone.ipynb", 1), take(null, 1), take("bare.ipynb", 1), take("unsaid.ipynb", 1), take("new.ipynb", 1)]),
+  };
+  assert.deepEqual(said(chain.plan({ own: [take("supply.ipynb", 3), take("gone.ipynb", 1), take(null, 1)], self: "amp.ipynb", sheets: gaps })), {
+    steps: ["new (rev. 1): rev. 7 of limits (it has rev. 5)", "supply (rev. 3): new as it is saved then"],
+    here: "supply as it is saved then", behind: ["new.ipynb", "supply.ipynb"], held: [], circle: null });
+
+  // Revisions are said as they are: one that was typed, and none.  What
+  // several regions take alike is said once.
+  const typed = { "limits.ipynb": { ...sheet("limits", 7), values: { revision: "B", saved: at(7), count: 1 } },
+                  "old.ipynb": { ...sheet("old", 1), values: { revision: null, saved: at(1), count: 1 } } };
+  assert.equal(chain.newsText(chain.plan({ own: [take("limits.ipynb", "A"), { ...take("old.ipynb", null), saved: "" },
+                                                 { ...take("limits.ipynb", ""), saved: "once" }, take("limits.ipynb", "B", at(6)),
+                                                 take("limits.ipynb", "A"), take("limits.ipynb", "A", at(2))], sheets: typed }).here),
+               "rev. B of limits (it has rev. A), a later save of old, rev. B of limits, rev. B of limits, saved anew");
+
+  // Sheets that take from each other in a circle have no first: nothing is done.
+  const round = { "a.ipynb": sheet("a", 1, [take("b.ipynb", 1)]), "b.ipynb": sheet("b", 2, [take("c.ipynb", 1)]),
+                  "c.ipynb": sheet("c", 2, [take("a.ipynb", 0)]) };
+  assert.deepEqual(said(chain.plan({ own: [take("a.ipynb", 1)], self: "amp.ipynb", sheets: round })),
+                   { ...nothing, behind: ["a.ipynb", "b.ipynb", "c.ipynb"], circle: ["a", "b", "c", "a"] });
+  // (So where the sheet at hand is one of them.  A circle is no reason
+  // to call a sheet behind: none of these holds anything that is saved anew.)
+  const back = { "a.ipynb": sheet("a", 1, [take("amp.ipynb", 1)]), "amp.ipynb": sheet("amp", 1) };
+  assert.deepEqual(said(chain.plan({ own: [take("a.ipynb", 1)], self: "amp.ipynb", sheets: back })),
+                   { ...nothing, circle: ["this sheet", "a", "this sheet"] });
+  assert.equal(chain.plan({ own: [take("a.ipynb", 1)], self: "other.ipynb", sheets: back }).circle, null);
+  // (Of several circles, the one that is come upon first is said.)
+  const rounds = { "a.ipynb": sheet("a", 1, [take("b.ipynb", 1), take("c.ipynb", 1)]), "b.ipynb": sheet("b", 1, [take("a.ipynb", 1)]),
+                   "c.ipynb": sheet("c", 1, [take("c.ipynb", 1)]) };
+  assert.deepEqual(chain.plan({ own: [take("a.ipynb", 1)], self: "amp.ipynb", sheets: rounds }).circle, ["a", "b", "a"]);
+  // A sheet that waits for several says the one it comes to last.
+  const both = { "limits.ipynb": sheet("limits", 7), "x.ipynb": { ...sheet("x", 1, [take("limits.ipynb", 5)]), trusted: false },
+                 "y.ipynb": { ...sheet("y", 1, [take("limits.ipynb", 5)]), trusted: false },
+                 "z.ipynb": sheet("z", 1, [take("x.ipynb", 1), take("y.ipynb", 1)]) };
+  assert.equal(chain.plan({ own: [take("z.ipynb", 1)], self: "amp.ipynb", sheets: both }).held.map(chain.heldText)[2],
+               "z waits for y, and is left as it is.");
+
+  // A revision as it is said, and what came of bringing a sheet up to date, in a few words.
+  assert.deepEqual([4, 0, "B", "", null, undefined].map(chain.revisionText), ["rev. 4", "rev. 0", "rev. B", "", "", ""]);
+  assert.deepEqual([{ saved: true, revision: 4 }, { saved: true, revision: "B" }, { saved: true, revision: "" }, { same: true },
+                    { left: "it could not be calculated" }].map(chain.outcomeText),
+                   ["saved as rev. 4", "saved as rev. B", "saved", "has what there is", "left as it is: it could not be calculated"]);
 }
 
 console.log("FRONTEND_OK");

@@ -166,7 +166,9 @@ type, and the line becomes a typeset formula with its value beside it.
   Templates are ready-made, or your own.
 - **Sheets that build on each other** — a sheet takes values from
   another sheet, as that sheet had them at a revision, and says which
-  sheet and which revision. When the other sheet moves on, it is told.
+  sheet and which revision. When the other sheet moves on, it is told;
+  and a whole chain of sheets is brought up to date in one go, each
+  saved as a new revision.
 - **A revision shows what it showed** — random numbers, the clock,
   files and currency rates are read once and kept with the sheet, until
   you ask for them to be read again.

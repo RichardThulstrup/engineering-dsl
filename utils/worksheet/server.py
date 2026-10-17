@@ -182,8 +182,9 @@ class _Info(_Base):
         self.require_auth()
         config = self.config
         # (``values``: this server hands a sheet's values to another sheet,
-        # and keeps what a region was given — a page asks before it relies on that.)
-        self.json({"root": str(config.root), "name": config.root.name, "values": True})
+        # and keeps what a region was given; ``chain``: it says how sheets
+        # that build on each other stand — a page asks before it relies on these.)
+        self.json({"root": str(config.root), "name": config.root.name, "values": True, "chain": True})
 
 
 class _Prefs(_Base):
@@ -301,6 +302,17 @@ class _Values(_Doc):
         self.json(said)
 
 
+class _Chain(_Base):
+    """The sheets that sheets build on, and how they stand to each other (see ``document.chain``)."""
+
+    async def get(self):
+        self.require_auth()
+        trusted = self.get_argument("trusted", "") == "1"
+        if trusted:
+            await self.notebooks_ready()
+        self.json(document.chain(self.config.root, self.get_arguments("path"), trusted=trusted))
+
+
 class _Trust(_Doc):
     """The user chose to calculate a sheet: remember it as trusted."""
 
@@ -406,6 +418,14 @@ class _Socket(tornado.websocket.WebSocketHandler):
             path = message.get("path")
             _spawn(kernel.restart(self._cwd(self.application.settings["config"], path)
                                   if isinstance(path, str) else None))
+        elif op == "bye":
+            # A page that worked out of sight for another one is done (the
+            # sheets a sheet builds on are brought up to date that way):
+            # its kernel goes with it, at once.
+            config: Config = self.application.settings["config"]
+            if config.sessions.get(self.sid) is session:
+                del config.sessions[self.sid]
+            self._retire(session)
 
     def on_close(self):
         session = getattr(self, "session", None)
@@ -443,6 +463,7 @@ def make_app(config: Config) -> tornado.web.Application:
         (r"/api/list", _List),
         (r"/api/doc", _Doc),
         (r"/api/values", _Values),
+        (r"/api/chain", _Chain),
         (r"/api/trust", _Trust),
         (r"/ws", _Socket),
         (r"/static/(.*)", _Static, {"path": str(STATIC)}),

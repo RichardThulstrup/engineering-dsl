@@ -14,8 +14,20 @@ import { band, BUILT_IN, heights, normal } from "./pageframe.js";
 import { frameDialog } from "./framedialog.js";
 import { relative, resolve, standing, taken } from "./given.js";
 import { givenDialog } from "./givendialog.js";
+import { outcomeText, plan } from "./chain.js";
+import { chainDialog } from "./chaindialog.js";
+import { openWorker } from "./chainwork.js";
 
 const DEFAULTS = { showResults: "auto" };          // of a sheet: saved with it
+
+// A page that works out of sight for another one (chainwork.js) is opened
+// with ?worker in its address: it opens the sheets it is told to, brings
+// them up to date and saves them (bringUp), and asks nobody anything.
+const WORKER = new URL(location.href).searchParams.has("worker");
+// It must not take the keyboard from the page in front — which a frame
+// does as soon as something in it is given the keyboard, though nobody
+// can click or tab into it (chainwork.js: inert).  Nothing in it is.
+if (WORKER) HTMLElement.prototype.focus = () => {};
 
 const state = {
   path: null,               // relative to the server's folder; null = never saved
@@ -48,6 +60,7 @@ const state = {
   waiting: new Set(),       // what is woken when a pass comes to its end (a save: ownValues)
   asked: new Map(),         // seq → what takes the kernel's word on the sheet's values
   values: false,            // the server hands a sheet's values on (one started before it could does not)
+  chain: false,             // ... and says how sheets that build on each other stand
   // What statements read outside the sheet — the clock, a random number,
   // a file — as the engine recorded it, by what names each record: from
   // the sheet's file, and from the kernel as it reads.  A kernel that has
@@ -83,13 +96,16 @@ const sheet = new Sheet({
   },
   preview: (region, source) => requestPreview(region, source),
   frame: () => run("page-frame"),
-  given: (region) => takeValues(region),
+  // (On the mark that says its sheet is behind, what is asked for is that the sheets be brought up to date.)
+  given: (region, { mark }) => (mark && region.mark.behind ? updateValues() : takeValues(region)),
   kept: (id) => state.kept.get(id) ?? null,
   again: (id) => { state.anew.add(id); scheduleCalc({ now: true }); },
 });
 
-const session = sessionStorage.getItem("edsl-session") || uid();
-sessionStorage.setItem("edsl-session", session);
+// (A page that works out of sight is in the tab of the page it works for,
+// and would find that page's session there: it is one of its own.)
+const session = WORKER ? uid() : sessionStorage.getItem("edsl-session") || uid();
+if (!WORKER) sessionStorage.setItem("edsl-session", session);
 
 const conn = new Conn({
   session,
@@ -425,11 +441,37 @@ async function takeValues(region = null) {
   }
 }
 
-/** See how what the regions were given stands to what their sheets deliver now, and mark those that have not got that. */
+/**
+ * See how what the regions were given stands to what their sheets deliver
+ * now, and mark those that have not got that — and those whose sheet is
+ * itself behind the sheets it takes values from (chain.js).
+ */
 function checkGiven() {
+  const regions = sheet.givenRegions();
+  if (!state.chain) { checkEach(regions); return; }
+  if (!regions.length) return;
+  const takes = ownTakes();
+  const givens = regions.map((region) => region.given);
+  chainOf(takes, false).then((said) => {
+    // A server that does not answer says nothing of the sheets: the
+    // marks stay as they are.  Nor is an answer that comes after a region
+    // was given something else an answer about what it has.
+    if (!said) return;
+    const made = plan({ own: takes, self: state.path, sheets: said.sheets });
+    regions.forEach((region, at) => {
+      if (region.given !== givens[at]) return;
+      const path = takes[at].sheet;         // (null: outside the folder the server has — and it says nothing of that)
+      const there = said.sheets[path] || null;
+      sheet.setMark(region, standing(region.given, there) || (made.behind.has(path) ? { behind: there.name } : null));
+    });
+  });
+}
+
+/** So with a server that was started before it could say how sheets stand to each other: sheet by sheet. */
+function checkEach(regions) {
   const home = folder(state.path);
   const asked = new Map();                  // path → what the server says of that sheet
-  for (const region of sheet.givenRegions()) {
+  for (const region of regions) {
     const given = region.given;
     const path = resolve(home, given.sheet);        // (null: outside the folder the server has — which it says is not there)
     if (!asked.has(path)) asked.set(path, api("GET", `/api/values?path=${encodeURIComponent(path ?? "")}&brief=1`));
@@ -441,6 +483,171 @@ function checkGiven() {
       if (region.given === given) sheet.setMark(region, standing(given, ok ? data : null));
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// sheets that build on each other: bringing their values up to date
+// ---------------------------------------------------------------------------
+
+/** What this sheet's regions hold of other sheets, region by region: {sheet, revision, saved} (chain.js). */
+function ownTakes() {
+  const home = folder(state.path);
+  return sheet.givenRegions().map(({ given }) => ({ sheet: resolve(home, given.sheet), revision: given.revision, saved: given.saved }));
+}
+
+/**
+ * How the sheets that `takes` are of stand, and the sheets those build
+ * on in turn, as the server reads it in their files (/api/chain):
+ * {sheets, cut} — or null, where it does not say.  `trusted`: and
+ * whether each may be calculated here without asking.
+ */
+async function chainOf(takes, trusted) {
+  const paths = takes.map((take) => take.sheet).filter((path) => path !== null);
+  const query = paths.map((path) => `path=${encodeURIComponent(path)}`).concat(trusted ? ["trusted=1"] : []).join("&");
+  const { ok, data } = await api("GET", `/api/chain?${query}`);
+  return ok ? data : null;
+}
+
+/**
+ * What the regions that hold values of other sheets would be given now:
+ * `takes`, each [region, given], for those whose sheet delivers another
+ * revision than they have — and `gone`, in words, for those that cannot
+ * take it: their sheet no longer hands on a name they hold.
+ */
+async function newerGiven() {
+  const home = folder(state.path);
+  const asked = new Map();                  // path → what the server says that sheet delivers
+  const takes = [], gone = [];
+  for (const region of sheet.givenRegions()) {
+    const given = region.given;
+    const path = resolve(home, given.sheet);
+    if (path === null) continue;
+    if (!asked.has(path)) asked.set(path, api("GET", `/api/values?path=${encodeURIComponent(path)}`));
+    const { ok, data } = await asked.get(path);
+    const mark = ok ? standing(given, data) : { lost: "not found" };
+    if (!mark || mark.lost) continue;       // (it has what there is — or nothing is to be had)
+    const names = given.values.map((entry) => entry.name);
+    const fresh = taken(data, given.sheet, names);
+    const missing = names.filter((name) => !fresh || !fresh.values.some((entry) => entry.name === name));
+    if (missing.length) gone.push(`${data.name} no longer hands on ${missing.join(", ")}`);
+    else takes.push([region, fresh]);
+  }
+  return { takes, gone };
+}
+
+/**
+ * Edit ▸ Bring values up to date…  The sheets this one takes values from
+ * may hold values that have been saved anew since.  What is to be done is
+ * shown first.  Then each such sheet is brought up to date by a page that
+ * works out of sight (chainwork.js) — the first first — and this sheet
+ * takes what they hand on then.  It is not saved: that is left to
+ * whoever is at it.
+ */
+async function updateValues() {
+  sheet.commitEdit();
+  if (!state.chain) {
+    toast("The worksheet server running here was started before it could say how sheets stand to each other: " +
+          "close the worksheet and start it again.", "error");
+    return;
+  }
+  const own = ownTakes();
+  if (!own.length) { toast("This sheet takes no values from other sheets."); return; }
+  const said = await chainOf(own, true);
+  if (!said) { toast("The worksheet server does not say how the sheets stand.", "error"); return; }
+  const made = plan({ own, self: state.path, sheets: said.sheets });
+  await chainDialog({ plan: made, cut: said.cut === true, work: (tell) => bringChain(made, tell) });
+  sheet.focus();
+}
+
+/** Do what `made` (chain.js: plan) says is to be done, telling how it goes: {done, stop} (chaindialog.js). */
+function bringChain(made, tell) {
+  let worker = null, stopped = false;
+  const done = (async () => {
+    let saved = 0, left = 0;
+    for (const step of made.steps) {
+      if (stopped) break;
+      tell(step.path, "at work…", "work");
+      // (The page that does it is there from the first sheet on; where it
+      // trips over a sheet, that is said, and it goes on to the next.)
+      const said = await (async () => {
+        worker = worker || await openWorker();
+        return worker.update(step.path);
+      })().catch((error) => ({ left: worker ? `it tripped (${error.message})` : error.message }));
+      if (said.saved) saved += 1; else if (said.left) left += 1;
+      tell(step.path, outcomeText(said), said.saved || said.same ? "done" : "left");
+    }
+    if (worker) worker.close();
+    // This sheet takes what there is to take now, whatever came of the
+    // others — unless it was all called off.  As they do: all of it, or
+    // (where a name it holds is no longer handed on) nothing.
+    const { takes, gone } = stopped ? { takes: [], gone: ["stopped"] } : await newerGiven();
+    const took = takes.length > 0 && !gone.length;
+    if (took) sheet.regiveAll(takes);
+    tell(null, took ? "has the new values — it is not saved yet" : gone.length ? `left as it is: ${gone.join("; ")}` : "has what there is",
+         gone.length ? "left" : "done");
+    checkGiven();
+    const sheets = (count) => `${count} ${count === 1 ? "sheet" : "sheets"}`;
+    const came = [saved ? `${sheets(saved)} saved as a new revision` : null, left ? `${sheets(left)} left as it was` : null,
+                  took ? "this sheet has the new values, and is yours to save" : gone.length && !stopped ? "this sheet is left as it is" : null,
+                  stopped ? "stopped" : null].filter(Boolean);
+    // (Nothing of all that: what was to be taken when this was asked for has been taken, or is no longer there.)
+    return came.length ? came.join("; ").replace(/^./, (first) => first.toUpperCase()) + "." : "Every sheet has what there is to take.";
+  })();
+  return { done, stop: () => { stopped = true; if (worker) worker.stop(); } };
+}
+
+// ---- the page that works out of sight ------------------------------------
+
+const work = { stopped: false };
+
+/** Has the page lost its kernel for good — it went down, or the server will have no more of this page? */
+const kernelGone = () => ["dead", "moved", "signedout"].includes(state.kernel);
+
+/**
+ * Wait for the kernel to have been through the sheet as it stands, and
+ * for the page to have its letters (it is laid out for good once it has).
+ * Resolves to whether that came to be: not where it was told to stop —
+ * which holds at once, whatever its kernel is at — or no kernel is to be
+ * had.  (A server that is away for a while is waited for, as a page in
+ * front waits for it.)
+ */
+async function calculated() {
+  for (;;) {
+    if (work.stopped || kernelGone()) return false;
+    if (passed() && !calculating() && document.fonts.status === "loaded") return true;
+    await new Promise((wake) => setTimeout(wake, 100));
+  }
+}
+
+/**
+ * Open the sheet at `path`, give it what the sheets it takes values from
+ * deliver now, and save it once it is calculated with that — as a new
+ * revision, which hands on what it comes to.  Resolves to what came of
+ * it: {saved: true, revision}; {same: true} — it has what there is, and
+ * is as it was; or {left: why}, and it is as it was, too.
+ */
+async function bringUp(path) {
+  work.stopped = false;
+  // (A kernel that the sheet before this one brought down is started anew — nobody is there to do that.)
+  if (state.kernel === "dead") { state.died = false; restartKernel(); setKernel("starting"); }
+  if (!(await openPath(path))) return { left: "it cannot be opened" };
+  if (!state.trusted) return { left: "it has not been calculated on this computer yet" };
+  if (!(await calculated())) return { left: work.stopped ? "stopped" : "it could not be calculated" };
+  const { takes, gone } = await newerGiven();
+  if (gone.length) return { left: gone.join("; ") };
+  if (!takes.length) return { same: true };
+  // (A region that had an error before is its author's business; one that
+  // has an error with the new values is a reason to look before it is saved.)
+  const before = new Set(sheet.failed());
+  sheet.regiveAll(takes);
+  scheduleCalc({ now: true });
+  if (!(await calculated())) return { left: work.stopped ? "stopped" : "it could not be calculated" };
+  if (sheet.failed().some((region) => !before.has(region))) return { left: "the new values lead to an error in it" };
+  // (It is saved with what its variables are, or not at all — a pass that
+  // was stopped, or failed, leaves none to be had: see write.  Why a save
+  // came to nothing is said on the page, which nobody sees.)
+  if (!(await save(false))) return { left: `it could not be saved (${toast.said})` };
+  return { saved: true, revision: state.settings.about.revision };
 }
 
 // ---------------------------------------------------------------------------
@@ -767,6 +974,8 @@ async function write(as) {
   sheet.commitEdit();
   if (sheet.settle()) scheduleCalc({ now: true });      // (regions were moved into another order: calculated anew)
   const values = said && said.wanted === state.wanted ? said : null;
+  // (A page that works out of sight saves a sheet for what it hands on: without its values, not at all.)
+  if (WORKER && !values) { toast("Its kernel did not say what its values are.", "error"); return false; }
   const changes = state.changes;            // (what is changed from here on is not in what is saved)
   const about = stamp(state.settings, state.dirty);
   // In another folder, the sheets it was given values by are reached another way.
@@ -837,6 +1046,7 @@ async function write(as) {
     if (status === 409) {
       const what = data.exists ? "A worksheet with that name already exists."
         : "This file was changed by another program since it was opened.";
+      if (WORKER) { toast(what, "error"); return false; }          // (nobody is there to ask)
       const choice = await ask("Overwrite?", what, [
         { label: "Cancel", value: null }, { label: "Overwrite", value: "force", primary: true }]);
       if (choice !== "force") return false;
@@ -917,6 +1127,7 @@ const COMMANDS = {
   "insert-text": () => sheet.create("text"),
   "insert-picture": () => $("#picture-file").click(),
   "take-values": () => takeValues(),
+  "update-values": () => updateValues(),
   "toggle-palette": () => togglePalette(),
   "search-symbols": searchSymbols,
   "toggle-grid": () => setPref("grid", !state.prefs.grid),
@@ -967,6 +1178,9 @@ const HELP = [
     ["click what another sheet gave", "select it: drag it to move it, Del deletes it"],
     ["double-click it", "choose other values, or another sheet"],
     ["a mark such as “rev. 4 is there”", "the other sheet has been saved with other values since: a click shows what is different, for you to take"],
+    ["a mark such as “supply is behind”", "the other sheet itself holds values that have been saved anew since: a click shows what is to be done"],
+    ["Edit ▸ Bring values up to date…", "each sheet this one builds on is given what there is to take, calculated, and saved as a new revision " +
+                                        "— the first first; then this sheet takes what they hand on"],
     ["saving a sheet", "keeps what its variables are with the revision that makes — once it is calculated"],
   ]],
   ["Calculating", [
@@ -1156,9 +1370,29 @@ async function start() {
   if (own.ok) state.templates = templatesOf(own.data);
   if (where.ok) state.root = String(where.data.root || "");
   state.values = where.ok && where.data.values === true;
+  state.chain = where.ok && where.data.chain === true;
+  if (state.chain) checkGiven();            // (how the sheets it builds on stand to each other, too)
   // A sheet that is new starts with the template chosen for new sheets.
   if (state.path === null && !state.settings.frame) Object.assign(state.settings, usualFrame());
   showFrame();
 }
 
-start();
+const started = start();
+if (WORKER) {
+  // What the page it works for calls (chainwork.js).  It is `ready` once
+  // it has all a page starts with — what the server can do, above all:
+  // a sheet is saved with its values only by one that knows — and a
+  // kernel that has said what it is, or will have none: a kernel is told
+  // where a sheet is as the sheet is opened, and must be within reach.
+  const ready = started.then(async () => {
+    while (state.vocab === null && !kernelGone()) {
+      await new Promise((wake) => setTimeout(wake, 50));
+    }
+  });
+  window.edslWorker = {
+    ready,
+    update: bringUp,
+    stop: () => { work.stopped = true; conn.send({ op: "interrupt" }); },
+    bye: () => conn.send({ op: "bye" }),
+  };
+}

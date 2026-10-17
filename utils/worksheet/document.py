@@ -16,7 +16,9 @@ There, too, is what the region's statements read outside the sheet —
 the clock, a random number, a file — so that the sheet shows on another
 day what it showed (``kept``; the records are the engine's).  All of it
 is text and data — see ``values.py`` — and nothing here reads more out
-of it than that it has the shape it should.
+of it than that it has the shape it should.  Which sheet takes values
+of which is read out of the files, too (``chain``), for the page to
+work out which of them are behind.
 
 Opening a sheet does not, by itself, run it: a notebook that was not
 last saved on this machine (Jupyter's own trust record decides) is
@@ -32,7 +34,7 @@ from pathlib import Path
 
 from .protocol import PREAMBLE
 
-__all__ = ["load", "save", "trust", "listing", "published", "Conflict", "resolve", "warm_up"]
+__all__ = ["load", "save", "trust", "listing", "published", "chain", "Conflict", "resolve", "warm_up"]
 
 # nbformat takes a second or two to import (its schema validator), which
 # the server would rather spend opening the page: it is imported when
@@ -314,6 +316,19 @@ def _record(record):
             "values": _values(record.get("values"))}
 
 
+def _delivered(book, name: str, brief: bool) -> dict:
+    """What a notebook — as the JSON it is — says its sheet delivers (see ``published``)."""
+    meta = book.get("metadata") if isinstance(book, dict) and isinstance(book.get("metadata"), dict) else {}
+    sheet = meta.get("edsl_worksheet") if isinstance(meta.get("edsl_worksheet"), dict) else {}
+    settings = sheet.get("settings") if isinstance(sheet.get("settings"), dict) else {}
+    about = settings.get("about") if isinstance(settings.get("about"), dict) else {}
+    record = _record(sheet.get("values"))
+    if record is not None and brief:
+        record = {"revision": record["revision"], "saved": record["saved"], "count": sum("form" in e for e in record["values"])}
+    return {"name": name, "revision": _revision(about.get("revision")),
+            "saved": about["saved"] if isinstance(about.get("saved"), str) else "", "values": record}
+
+
 def published(path: Path, brief: bool = False) -> dict:
     """What the sheet in ``path`` delivers to other sheets: its name, its
     revision, and the values its variables had when it was last saved
@@ -324,15 +339,109 @@ def published(path: Path, brief: bool = False) -> dict:
     read as the text it is; nothing of it is run.
     """
     import json
-    meta = json.loads(path.read_text(encoding="utf-8")).get("metadata") or {}
-    sheet = meta.get("edsl_worksheet") if isinstance(meta.get("edsl_worksheet"), dict) else {}
-    settings = sheet.get("settings") if isinstance(sheet.get("settings"), dict) else {}
-    about = settings.get("about") if isinstance(settings.get("about"), dict) else {}
-    record = _record(sheet.get("values"))
-    if record is not None and brief:
-        record = {"revision": record["revision"], "saved": record["saved"], "count": sum("form" in e for e in record["values"])}
-    return {"name": path.stem, "revision": _revision(about.get("revision")),
-            "saved": about["saved"] if isinstance(about.get("saved"), str) else "", "values": record}
+    return _delivered(json.loads(path.read_text(encoding="utf-8")), path.stem, brief)
+
+
+# ---------------------------------------------------------------------------
+# sheets that build on each other
+# ---------------------------------------------------------------------------
+
+CHAIN = 100         # how many sheets are looked at, at most, when a chain is followed
+
+_standings = {}     # file → (what it was when it was read, what it said): a file that is as it was is not read again
+
+
+def _reach(folder: str, reference):
+    """What ``reference`` names as seen from ``folder`` — both as the page
+    has them: from the top folder, with "/" between the parts — or
+    ``None`` where that is above the top folder.  (As the page works it
+    out itself: ``given.js``, ``resolve``.)"""
+    parts = [part for part in folder.split("/") if part]
+    for part in str(reference).split("/"):
+        if part in ("", "."):
+            continue
+        if part != "..":
+            parts.append(part)
+        elif not parts:
+            return None
+        else:
+            parts.pop()
+    return "/".join(parts)
+
+
+def _standing(path: Path) -> dict:
+    """What a sheet's file says of the sheet as one of several that build
+    on each other: what it delivers (as ``published`` says it, briefly),
+    and what its regions were given by which sheets — ``takes``, each
+    ``{sheet, revision, saved}`` with the sheet as the region names it.
+    The file is read as the text it is; nothing of it is run."""
+    import json
+    stat = path.stat()
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    held = _standings.get(path)
+    if held is not None and held[0] == stamp:
+        return held[1]
+    book = json.loads(path.read_text(encoding="utf-8"))
+    said = _delivered(book, path.stem, True)
+    said["takes"] = takes = []
+    cells = book.get("cells") if isinstance(book, dict) else None
+    for cell in cells if isinstance(cells, list) else []:
+        meta = cell.get("metadata") if isinstance(cell, dict) and cell.get("cell_type") == "code" else None
+        place = meta.get("edsl") if isinstance(meta, dict) else None
+        given = _given(place.get("given")) if isinstance(place, dict) else None
+        if given:
+            takes.append({"sheet": given["sheet"], "revision": given["revision"], "saved": given["saved"]})
+    if len(_standings) >= 4 * CHAIN:
+        _standings.clear()
+    _standings[path] = (stamp, said)
+    return said
+
+
+def _trusted(path: Path) -> bool:
+    """May this notebook be calculated here without asking?  (As ``load`` says it.)"""
+    notary = _notary()
+    try:
+        return bool(notary and notary.check_signature(nbformat.read(str(path), as_version=4)))
+    except Exception:
+        return False
+
+
+def chain(root: Path, paths, trusted: bool = False) -> dict:
+    """The sheets ``paths`` and the sheets they build on — the ones they
+    were given values by, and those in turn.
+
+    ``sheets`` has each by its path from ``root``: what it delivers
+    (``name``, ``revision``, ``saved`` and ``values`` — briefly, as
+    ``published`` says it) and what it takes from which sheets
+    (``takes``: each with its ``sheet`` as a path from ``root`` — ``None``
+    for one above it — and the ``revision`` and ``saved`` its values are
+    of).  A sheet that is not there, or cannot be read, is ``None``.
+    With ``trusted``, each says whether it may be calculated here
+    without asking.  ``cut`` says that there are more sheets than are
+    looked at.  Nothing of any sheet is run.
+    """
+    sheets, waiting = {}, [_reach("", path) for path in paths]
+    while waiting:
+        relative = waiting.pop(0)
+        if relative is None or relative in sheets:
+            continue
+        if len(sheets) >= CHAIN:
+            return {"sheets": sheets, "cut": True}
+        said = None
+        try:
+            if relative.lower().endswith(".ipynb"):
+                path = resolve(root, relative)
+                said = dict(_standing(path))
+        except Exception:
+            pass                                # (outside the folder, not there, or no notebook that can be read)
+        if said is not None:
+            folder = relative.rpartition("/")[0]
+            said["takes"] = [dict(take, sheet=_reach(folder, take["sheet"])) for take in said["takes"]]
+            if trusted:
+                said["trusted"] = _trusted(path)
+            waiting += [take["sheet"] for take in said["takes"]]
+        sheets[relative] = said
+    return {"sheets": sheets, "cut": False}
 
 
 def load(path: Path) -> dict:

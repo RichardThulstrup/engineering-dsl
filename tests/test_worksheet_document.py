@@ -1,4 +1,9 @@
 """A worksheet is a notebook on disk: what the page adds must not cost the notebook anything."""
+import json
+import os
+import pathlib
+import shutil
+
 import nbformat
 from nbformat.v4 import new_code_cell, new_markdown_cell, new_notebook, new_output
 import pytest
@@ -457,4 +462,141 @@ def test_a_sheet_says_which_toolkit_its_values_were_made_with(tmp_path):
     made = {"revision": 3, "saved": "2026-10-11T10:00:00.000Z", "toolkit": "0.1.0", "values": VALUES}
     document.save(path, dict(sheet, values=made))
     assert document.load(path)["toolkit"] == "0.1.0"
+
+
+# ---------------------------------------------------------------------------
+# sheets that build on each other: how they stand, as their files say it
+# ---------------------------------------------------------------------------
+
+def at(revision):
+    """The moment a revision was saved, for these tests."""
+    return f"2026-10-{10 + revision}T10:00:00.000Z"
+
+
+def sheet(path, revision, names=("U",), takes=(), **more):
+    """The file of a sheet at a revision that hands on ``names``, and was given values by other sheets:
+    ``takes`` is, for each, how the region names the sheet, the revision its values are of, and their names."""
+    values = lambda held: [dict(VALUES[0], name=name) for name in held]         # noqa: E731
+    regions = [{"id": f"g{n}", "kind": "math", "source": "# what it was given", "x": 0, "y": 40 * n,
+                "given": {"sheet": reference, "name": reference.rpartition("/")[2][:-6], "revision": had, "saved": at(had),
+                          "values": values(held)}}
+               for n, (reference, had, held) in enumerate(takes)]
+    regions.append({"id": "own", "kind": "math", "source": "k := 2", "x": 0, "y": 400})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    about = {"revision": revision, "saved": at(revision)}
+    made = dict(about, toolkit="0.1.0", values=values(names))
+    document.save(path, dict({"regions": regions, "settings": {"about": about}, "values": made}, **more))
+
+
+def taken(sheet, revision):
+    """What a file says a sheet takes from another one, as ``chain`` says it."""
+    return {"sheet": sheet, "revision": revision, "saved": at(revision)}
+
+
+def test_the_sheets_a_sheet_builds_on_are_found_through_what_each_was_given(tmp_path, monkeypatch):
+    sheet(tmp_path / "common" / "limits.ipynb", 7, names=("U", "I"), trusted=True)
+    sheet(tmp_path / "amp" / "supply.ipynb", 3, names=("P",), takes=[("../common/limits.ipynb", 5, ("U", "I"))])
+    sheet(tmp_path / "amp" / "stage.ipynb", 2, takes=[("supply.ipynb", 3, ("P",)), ("./../common//limits.ipynb", 7, ("U",)),
+                                                      ("../../outside.ipynb", 1, ("x",)), ("gone.ipynb", 1, ("y",))])
+    said = document.chain(tmp_path, ["amp/stage.ipynb"])
+    # Each sheet once, by its path from the top folder, from the one asked
+    # about to the ones it builds on.  One that is not there is none.
+    assert said["cut"] is False
+    assert list(said["sheets"]) == ["amp/stage.ipynb", "amp/supply.ipynb", "common/limits.ipynb", "amp/gone.ipynb"]
+    assert said["sheets"]["amp/gone.ipynb"] is None
+    # What a sheet delivers, briefly; and what it takes of which sheet, at
+    # which revision — the sheet named as the top folder has it (or not at
+    # all, where it is above that).
+    assert said["sheets"]["amp/stage.ipynb"] == {
+        "name": "stage", "revision": 2, "saved": at(2), "values": {"revision": 2, "saved": at(2), "count": 1},
+        "takes": [taken("amp/supply.ipynb", 3), taken("common/limits.ipynb", 7), taken(None, 1), taken("amp/gone.ipynb", 1)]}
+    assert said["sheets"]["amp/supply.ipynb"]["takes"] == [taken("common/limits.ipynb", 5)]
+    assert said["sheets"]["common/limits.ipynb"] == {"name": "limits", "revision": 7, "saved": at(7),
+                                                      "values": {"revision": 7, "saved": at(7), "count": 2}, "takes": []}
+    # Asked for, each says whether it may be calculated here without asking.
+    trusted = document.chain(tmp_path, ["amp/stage.ipynb"], trusted=True)["sheets"]
+    assert {path: sheet and sheet["trusted"] for path, sheet in trusted.items()} == {
+        "amp/stage.ipynb": False, "amp/supply.ipynb": False, "common/limits.ipynb": True, "amp/gone.ipynb": None}
+    assert all("trusted" not in sheet for sheet in said["sheets"].values() if sheet)
+
+    # Several may be asked about — as the page names them, or nearly so;
+    # what is no notebook in the folder is none (a notebook is one by its
+    # name, however that is written), and what is above the folder is not
+    # looked at.
+    shutil.copy(tmp_path / "common" / "limits.ipynb", tmp_path / "amp" / "words.txt")
+    shutil.copy(tmp_path / "common" / "limits.ipynb", tmp_path / "amp" / "Loud.IPYNB")
+    (tmp_path / "amp" / "broken.ipynb").write_text("{ not a notebook", encoding="utf-8")
+    (tmp_path / "amp" / "list.ipynb").write_text("[1, 2]", encoding="utf-8")
+    (tmp_path.parent / "outside.ipynb").write_text("{}", encoding="utf-8")
+    several = document.chain(tmp_path, ["common/limits.ipynb", "./amp//supply.ipynb", "common/limits.ipynb", "amp", "amp/words.txt",
+                                        "amp/Loud.IPYNB", "amp/broken.ipynb", "amp/list.ipynb", "../outside.ipynb", "",
+                                        "amp/../../outside.ipynb"])
+    nothing = {"revision": None, "saved": "", "values": None, "takes": []}
+    limits, supply = said["sheets"]["common/limits.ipynb"], said["sheets"]["amp/supply.ipynb"]
+    assert several["sheets"] == {"common/limits.ipynb": limits, "amp/supply.ipynb": supply, "amp": None, "amp/words.txt": None,
+                                 "amp/Loud.IPYNB": dict(limits, name="Loud"), "amp/broken.ipynb": None,
+                                 "amp/list.ipynb": dict(nothing, name="list"), "": None}
+    # A file may say anything: what a sheet was given is what a region of
+    # calculation says in the shape it should have — as when it is opened.
+    given = {"sheet": "supply.ipynb", "revision": 3, "saved": at(3), "values": [dict(VALUES[0], name="P")]}
+    cells = [5, {"cell_type": "markdown", "metadata": {"edsl": {"given": given}}}, {"cell_type": "code", "metadata": 5},
+             {"cell_type": "code", "metadata": {"edsl": 5}},
+             {"cell_type": "code", "metadata": {"edsl": {"given": dict(given, sheet="")}}},
+             {"cell_type": "code", "metadata": {"edsl": {"given": dict(given, values=[])}}},
+             {"cell_type": "code", "metadata": {"edsl": {"given": given}}}]
+    (tmp_path / "amp" / "odd.ipynb").write_text(json.dumps({"cells": cells}), encoding="utf-8")
+    (tmp_path / "amp" / "none.ipynb").write_text(json.dumps({"cells": 5}), encoding="utf-8")
+    odd = document.chain(tmp_path, ["amp/odd.ipynb", "amp/none.ipynb", "amp/list.ipynb"], trusted=True)["sheets"]
+    assert odd["amp/odd.ipynb"] == dict(nothing, name="odd", takes=[taken("amp/supply.ipynb", 3)], trusted=False)
+    assert odd["amp/none.ipynb"] == dict(nothing, name="none", trusted=False)
+    assert odd["amp/list.ipynb"] == dict(nothing, name="list", trusted=False)
+    assert list(odd) == ["amp/odd.ipynb", "amp/none.ipynb", "amp/list.ipynb", "amp/supply.ipynb", "common/limits.ipynb"]
+
+    # Sheets that take from each other are each looked at once.
+    sheet(tmp_path / "a.ipynb", 1, takes=[("b.ipynb", 1, ("U",))])
+    sheet(tmp_path / "b.ipynb", 1, takes=[("a.ipynb", 1, ("U",)), ("b.ipynb", 1, ("U",))])
+    assert list(document.chain(tmp_path, ["a.ipynb"])["sheets"]) == ["a.ipynb", "b.ipynb"]
+    # No more are looked at than there is use for.
+    monkeypatch.setattr(document, "CHAIN", 2)
+    assert document.chain(tmp_path, ["amp/stage.ipynb"]) == {
+        "cut": True, "sheets": {name: said["sheets"][name] for name in ("amp/stage.ipynb", "amp/supply.ipynb")}}
+    assert document.chain(tmp_path, ["a.ipynb"])["cut"] is False
+
+
+def test_a_file_that_is_as_it_was_is_not_read_again_to_say_how_its_sheet_stands(tmp_path, monkeypatch):
+    sheet(tmp_path / "limits.ipynb", 1)
+    sheet(tmp_path / "supply.ipynb", 1, takes=[("limits.ipynb", 1, ("U",))])
+    first = json.loads(json.dumps(document.chain(tmp_path, ["supply.ipynb"])))      # (as it is said: not what may be said again)
+    reads = []
+    read_text = pathlib.Path.read_text
+    monkeypatch.setattr(pathlib.Path, "read_text",
+                        lambda path, *args, **kwargs: reads.append(path.name) or read_text(path, *args, **kwargs))
+    assert document.chain(tmp_path, ["supply.ipynb"]) == first and reads == []
+    # Saved anew, it is: what it delivers now is what is said of it.
+    sheet(tmp_path / "limits.ipynb", 2, names=("U", "I"))
+    reads.clear()
+    second = document.chain(tmp_path, ["supply.ipynb"])
+    assert reads == ["limits.ipynb"] and second["sheets"]["limits.ipynb"]["values"] == {"revision": 2, "saved": at(2), "count": 2}
+    assert second["sheets"]["supply.ipynb"] == first["sheets"]["supply.ipynb"]
+    # A file is told by when it was written and by how long it is: either
+    # may be as it was.
+    was = (tmp_path / "limits.ipynb").stat()
+    sheet(tmp_path / "limits.ipynb", 3, names=("U", "I"))
+    assert (tmp_path / "limits.ipynb").stat().st_size == was.st_size
+    assert document.chain(tmp_path, ["supply.ipynb"])["sheets"]["limits.ipynb"]["revision"] == 3
+    was = (tmp_path / "limits.ipynb").stat()
+    sheet(tmp_path / "limits.ipynb", 4)
+    os.utime(tmp_path / "limits.ipynb", ns=(was.st_atime_ns, was.st_mtime_ns))
+    assert (tmp_path / "limits.ipynb").stat().st_mtime_ns == was.st_mtime_ns
+    assert document.chain(tmp_path, ["supply.ipynb"])["sheets"]["limits.ipynb"]["revision"] == 4
+    # (What is said of a sheet is not what is remembered of it: who is told may do with it as they please.)
+    second["sheets"]["supply.ipynb"]["takes"].clear()
+    assert document.chain(tmp_path, ["supply.ipynb"])["sheets"]["supply.ipynb"] == first["sheets"]["supply.ipynb"]
+    # No more files are remembered than there is use for.
+    assert len(document._standings) <= 4 * document.CHAIN
+    monkeypatch.setattr(document, "CHAIN", 1)
+    for n in range(6):
+        sheet(tmp_path / f"s{n}.ipynb", 1)
+        document.chain(tmp_path, [f"s{n}.ipynb"])
+    assert len(document._standings) <= 4
 

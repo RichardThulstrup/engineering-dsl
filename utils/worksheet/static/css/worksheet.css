@@ -561,6 +561,26 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .values .was .katex { font-size: 1em; }
 .values .plain { font: 12.5px/1.4 var(--mono); white-space: inherit; }
 .values code { font: 12.5px var(--mono); }
+/* The dialog in which the sheets a sheet builds on are brought up to date
+   (js/chaindialog.js): each with what it takes, and how that goes. */
+.dialog.chain { width: 680px; max-height: 80vh; }
+.dialog.chain .note { color: var(--muted); font-size: 12px; }
+.dialog.chain p.note { margin: 6px 0 0; }
+.dialog.chain p.end { margin: 10px 0 0; font-weight: 600; }
+/* (One grid for all the rows, so that what each takes begins where the others' does.) */
+.steps {
+  display: grid; grid-template-columns: max-content 1fr minmax(0, max-content); column-gap: 14px;
+  border: 1px solid var(--line); border-radius: 6px; overflow: auto; max-height: 46vh;
+}
+.steps .step { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: baseline; padding: 5px 11px; }
+.steps .step + .step { border-top: 1px solid var(--line); }
+.steps .what { color: #0d2f66; }
+.steps .state { color: var(--muted); font-size: 12px; max-width: 280px; }
+.steps .step.done .state { color: #1b6e3c; }
+.steps .step.left .state { color: var(--danger); }
+/* A page that works out of sight for this one (js/chainwork.js): laid
+   out as any page is, where nobody sees it or reaches it. */
+iframe.worker { position: fixed; left: -3000px; top: 0; width: 1280px; height: 900px; opacity: 0; pointer-events: none; }
 /* The dialog for header and footer (js/framedialog.js): wide enough to
    show both as wide as they are on the page. */
 .dialog.frame { width: 760px; max-height: 86vh; }
@@ -616,7 +636,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   html, body { height: auto; overflow: visible; background: #fff; }
   body { display: block; }
   #bar, #banner, #palette, #overlay, #toast, #cross, #band, #sink, .pagebreak, .grip, .sizer, .preview, .popup,
-  .errpop, .flag, .pageframe.ahead, .region.given .mark, .line .kept { display: none !important; }
+  .errpop, .flag, .pageframe.ahead, .region.given .mark, .line .kept, iframe.worker { display: none !important; }
   #work, #desk { display: block; overflow: visible; padding: 0; }
   #paper { width: 680px; margin: 0; padding: 0; box-shadow: none; zoom: 1 !important; }
   /* As long as what is on it, and no longer (sheet.js: drawBreaks). */

@@ -109,6 +109,9 @@ export function caption(given) {
  * do) — null for a sheet that is not there.  Null: the region has what
  * the sheet delivers.  Otherwise {lost: why} — nothing is delivered — or
  * {revision, saved}: the revision whose values are there to take.
+ * (A region that has what its sheet delivers may still be marked: with
+ * {behind: name}, where that sheet is itself behind the sheets it takes
+ * values from — see chain.js.)
  */
 export function standing(given, said) {
   if (!said) return { lost: "not found" };
@@ -118,9 +121,10 @@ export function standing(given, said) {
   return { revision: revisionOf(record.revision), saved: typeof record.saved === "string" ? record.saved : "" };
 }
 
-/** What a mark on a region says of `standing` that is not null. */
+/** What a mark on a region says: of `standing` that is not null, or of a sheet that is behind. */
 export function markText(mark) {
   if (mark.lost) return mark.lost;
+  if (mark.behind) return `${mark.behind} is behind`;
   return mark.revision === null || mark.revision === "" ? "newer values are there" : `rev. ${mark.revision} is there`;
 }
 

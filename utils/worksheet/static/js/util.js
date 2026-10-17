@@ -55,6 +55,7 @@ export function toast(message, kind = "") {
   box.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { box.hidden = true; }, kind === "error" ? 6000 : 2200);
+  toast.said = message;                 // (what was said last: a page nobody sees is asked for it)
 }
 
 /** fetch() for the JSON API; resolves to {ok, status, data}. */

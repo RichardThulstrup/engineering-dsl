@@ -322,9 +322,43 @@ marked as well.
 
 **A chain.** What a sheet was given is its own from there on, and is
 handed on with the rest: a third sheet can take it from the second.
-Every step is taken by hand. A new revision of the first sheet marks
-the second; once the second has taken it and is saved, the third is
-marked.
+When the first is saved anew, the second is behind it — and the third
+says so, too, though it has all the second hands on: *Supply is
+behind*.
+
+**Bringing a chain up to date.** *Edit → Bring values up to date…* (or
+a click on such a mark) shows what there is to do: the sheets that are
+behind, the first first, each with what it would take. *Bring up to
+date* does it. Each of them is opened out of sight, given the new
+values, calculated, and saved as a new revision — which hands on what
+it comes to, for the next one to take. Last, the sheet in front of you
+takes what there is. It is not saved: you can look first, and undo
+takes it back in one step.
+
+A sheet is left as it is, and the dialog says why, when
+
+- it has not been calculated on this computer yet — nothing of a sheet
+  from elsewhere is run behind your back: open it, and choose
+  *Calculate*;
+- the new values lead to an error in it (an error it had before holds
+  nothing up);
+- a sheet it takes from no longer hands on a name it holds — a sheet
+  takes all there is for it, or nothing, and so does the one in front
+  of you;
+- it cannot be calculated or saved as it should be: its kernel went
+  down, or does not say what its values are, or another program has
+  written its file meanwhile;
+- it is one of several that take from each other in a circle.
+
+The sheets after it take what there is without it. A sheet that is no
+longer there, or keeps no values, gives nothing to take and holds
+nothing up: the region that has its values stays as it is, and says
+so. What a sheet
+[read outside itself](#what-is-read-from-outside-the-sheet) — the
+clock, a random number, a file — stays as it was read, but for what it
+made of the values it was given. *Stop* leaves off: the sheet that is
+being calculated is not saved, the ones after it are not begun, and
+the one in front of you takes nothing.
 
 What is handed on: numbers, text, quantities with their unit and
 significant figures, tolerances and intervals, values shown in a unit
@@ -643,9 +677,13 @@ the folder the server was started in.
 - One sheet per browser tab; each has its own kernel. A second tab on
   the same address opens another sheet.
 - The page is A4 portrait.
-- A value from another sheet is taken, and brought up to a newer
-  revision, by hand and sheet by sheet: a chain of sheets is not
-  brought up to date in one go.
+- A chain of sheets is brought up to date sheet by sheet, and each is
+  saved by itself: where one is left as it is, the ones before it stay
+  saved as they are by then. A sheet that is open in another window
+  while it is brought up to date keeps showing what it had there: open
+  it again. No more than a hundred sheets are looked at. A revision
+  that was typed (`B`) stays as it was typed, as with any save: what
+  such a sheet hands on is told apart by when it was saved.
 - What a sheet reads outside itself is kept by the worksheet, not by
   the notebook: run in JupyterLab, the notebook reads everything again.
   Kept are random numbers, the clock, files and currency rates as far
@@ -721,6 +759,16 @@ document only what the tree can say), and `richtext.js` is the editor.
 What was edited is written back from the tree — plainly where nobody
 would misread it, with backslashes or tags where it must — and every
 block written is read once more to see that it says what was shown.
+
+A chain of sheets is brought up to date by the page itself.
+`document.py` reads in the sheets' files which takes values of which
+(`chain`), `static/js/chain.js` works out which are behind and in
+which order they are done, and `chainwork.js` starts a second page of
+the worksheet in a frame that nobody sees — with a kernel of its own
+— which opens each sheet, gives it what there is to take, calculates
+it and saves it, as a page in front does when that is done by hand.
+So a sheet that is brought up to date is saved by the same code as
+any other, down to where its regions are.
 
 The header and footer of a page are `static/js/pageframe.js`: what one
 may hold, how it is drawn, and how high it is — worked out from its

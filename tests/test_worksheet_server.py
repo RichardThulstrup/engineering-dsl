@@ -297,6 +297,31 @@ def test_a_sheets_values_are_asked_of_its_kernel_and_handed_to_another_sheets_pa
         (server.folder / "deep").rmdir()
 
 
+def test_how_sheets_that_build_on_each_other_stand_is_read_from_their_files(server):
+    # (A page asks whether the server it talks to says this: one started before it could does not.)
+    assert json.loads(fetch(server, "/api/info")[2])["chain"] is True
+    given = {"sheet": "../a.ipynb", "name": "a", "revision": 1, "saved": "2026-10-11T10:00:00.000Z",
+             "values": [{"name": "x", "form": '["f","2.0"]', "shown": {"text/plain": "2.0"}}]}
+    doc = {"regions": [{"id": "g1", "kind": "math", "source": "# what it was given", "x": 0, "y": 0, "given": given}], "trusted": True}
+    (server.folder / "far").mkdir()
+    try:
+        assert fetch(server, "/api/doc?path=far/taking.ipynb", method="PUT", body={"doc": doc, "create": True})[0] == 200
+        assert fetch(server, "/api/chain?path=far/taking.ipynb", cookie=False)[0] == 403
+        status, _, text = fetch(server, "/api/chain?path=far/taking.ipynb&path=missing.ipynb&path=../outside.ipynb")
+        took = {"sheet": "a.ipynb", "revision": 1, "saved": given["saved"]}
+        assert status == 200 and json.loads(text) == {"cut": False, "sheets": {
+            "far/taking.ipynb": {"name": "taking", "revision": None, "saved": "", "values": None, "takes": [took]},
+            "missing.ipynb": None,
+            "a.ipynb": {"name": "a", "revision": None, "saved": "", "values": None, "takes": []}}}
+        # Whether each may be calculated here without asking is said where that is asked.
+        said = json.loads(fetch(server, "/api/chain?path=far/taking.ipynb&trusted=1")[2])["sheets"]
+        assert said["far/taking.ipynb"]["trusted"] is True and said["a.ipynb"]["trusted"] is False
+        assert json.loads(fetch(server, "/api/chain")[2]) == {"cut": False, "sheets": {}}
+    finally:
+        (server.folder / "far" / "taking.ipynb").unlink(missing_ok=True)
+        (server.folder / "far").rmdir()
+
+
 # ---------------------------------------------------------------------------
 # kernels: one is started ahead, so a sheet is calculated sooner
 # ---------------------------------------------------------------------------
@@ -339,6 +364,22 @@ def test_a_tab_that_moves_to_a_sheet_in_another_folder_gets_a_kernel_there(tmp_p
     assert shown(first) == repr(tmp_path.name)
     assert moved[0] == {"op": "status", "kernel": "none"} and shown(moved) == "'sub'"
     assert stayed[0] == {"op": "status", "kernel": "idle"} and shown(stayed) == "'sub'"
+
+
+def test_a_page_that_says_it_is_done_takes_its_kernel_with_it(tmp_path):
+    # A tab that goes away is waited for, and finds its kernel when it is
+    # back (a reload).  A page that worked out of sight for another one
+    # says when it is done: its kernel is stopped at once.
+    which = [{"op": "hello", "seq": 1},
+             {"op": "calc", "seq": 2, "regions": [{"id": "r1", "source": "%%python\nimport os\nos.getpid()"}]}]
+    with launch(tmp_path) as fresh:
+        first = socket_session(fresh, which)
+        back = socket_session(fresh, which)
+        left = socket_session(fresh, [{"op": "bye", "seq": 1}])
+        after = socket_session(fresh, which)
+    assert back[0] == {"op": "status", "kernel": "idle"} and shown(back) == shown(first)
+    assert left[-1] == {"op": "closed", "code": 4000}
+    assert after[0] == {"op": "status", "kernel": "none"} and shown(after) not in (shown(first), "")
 
 
 @pytest.fixture

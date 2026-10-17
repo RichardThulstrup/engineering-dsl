@@ -3049,11 +3049,11 @@ def test_a_sheet_is_told_when_the_other_sheet_delivers_other_values(page_and_fol
     named(page, "top")
     assert page.evaluate(MARKS) == []
     # (A server that does not answer says nothing about the other sheet: nothing is marked for that.)
-    asked_for_values = lambda url: "/api/values" in url                                    # noqa: E731
-    page.route(asked_for_values, lambda route: route.abort())
+    asked_how_it_stands = lambda url: "/api/chain" in url                                  # noqa: E731
+    page.route(asked_how_it_stands, lambda route: route.abort())
     refocused(page)
     page.wait_for_timeout(300)
-    page.unroute(asked_for_values)
+    page.unroute(asked_how_it_stands)
     assert page.evaluate(MARKS) == []
 
     # The other sheet is changed, and saved while the change is still being
@@ -3075,7 +3075,7 @@ def test_a_sheet_is_told_when_the_other_sheet_delivers_other_values(page_and_fol
     # One click on the mark shows what is different, and what this sheet has of it.
     # (Meanwhile the page asks about the other sheet once more, and the answer is slow in coming.)
     held = []
-    asked_briefly = lambda url: "/api/values" in url and "brief=1" in url                  # noqa: E731
+    asked_briefly = lambda url: "/api/chain" in url                                        # noqa: E731
     page.route(asked_briefly, lambda route: held.append(route))
     refocused(page)
     for _ in range(100):
@@ -3097,8 +3097,10 @@ def test_a_sheet_is_told_when_the_other_sheet_delivers_other_values(page_and_fol
     settled(page)
     assert page.evaluate(GIVEN) == ["Fromsource\u00b7rev.2U:=6.0Vn:=3"] and "= 18. V" in shown(page)[1]
     assert page.evaluate(MARKS) == [] and page.evaluate(DIRTY) and page.evaluate(SELECTED) == [True]
-    # The slow answer was about what the region had: it marks nothing now.
-    held[0].continue_()
+    # The slow answer was about what the region had — and is as old as
+    # that: the other sheet as it stood before.  It marks nothing now.
+    before = {"revision": 1, "saved": first["saved"]}
+    held[0].fulfill(json={"cut": False, "sheets": {"source.ipynb": dict(before, name="source", values=dict(before, count=3), takes=[])}})
     page.unroute(asked_briefly)
     page.wait_for_timeout(300)
     assert page.evaluate(MARKS) == []
@@ -4007,3 +4009,744 @@ def test_a_picture_of_what_was_read_is_kept_as_it_was_drawn(page_and_folder):
     page.wait_for_function(f"{picture} && document.querySelector('.region.math img').naturalWidth > 0")
     assert page.evaluate(picture) == drawn and not page.evaluate(DIRTY)
     assert page.evaluate("document.querySelector('#status').title").startswith("Last calculation: 0 statements run, 2 unchanged")
+
+
+# ---- sheets that build on each other --------------------------------------------
+
+# The dialog: each sheet's row — which sheet, what it is called, what it takes, how that goes — and what else is said.
+STEPS = """[...document.querySelectorAll('.dialog.chain .step')].map((row) => [row.dataset.sheet, row.querySelector('.who').textContent,
+           row.querySelector('.what').textContent, row.querySelector('.state').textContent, row.className])"""
+SAID = "[...document.querySelectorAll('.dialog.chain .body p')].map((p) => p.textContent)"
+BEHIND = "[...document.querySelectorAll('.region.given .mark')].map((m) => [m.textContent, m.classList.contains('behind'), m.title])"
+GO = ".dialog.chain .foot .btn.primary"
+INTRO = ("These sheets hold values that have been saved anew since. Each is opened out of sight, given what there is to take, "
+         "calculated, and saved as a new revision \u2014 the first first. A sheet in which the new values lead to an error is left as it is.")
+
+
+def chain_dialog(page):
+    """Edit > Bring values up to date…"""
+    page.click("#edit-menu .menu-button")
+    page.click("#edit-menu [data-cmd='update-values']")
+    page.wait_for_selector(".dialog.chain")
+
+
+def brought_up(page):
+    """The dialog's work is chosen, and has come to its end."""
+    page.click(GO)
+    page.wait_for_selector(".dialog.chain p.end", timeout=120_000)
+
+
+def closed_again(page):
+    page.click(".dialog.chain .foot .btn")
+    page.wait_for_selector(".dialog.chain", state="detached")
+
+
+def a_chain(page, folder, top=False):
+    """Sheets that each build on the one before — limits, supply, stage, and `top` on these — with limits saved anew since.
+    The page is left at the last of them.  Returns the file of limits as it was before that."""
+    keys = page.keyboard
+    typed(page, "U := 5.0 V", "I_max := 2.0 A")
+    settled(page)
+    save_as(page, "limits.ipynb")
+    named(page, "limits")
+    new_sheet(page)
+    values_dialog(page, "limits.ipynb")
+    take(page, "U", "I_max")
+    keys.press("Escape")
+    typed(page, "P := U \\cdot I_max")
+    settled(page)
+    save_as(page, "supply.ipynb")
+    named(page, "supply")
+    new_sheet(page)
+    values_dialog(page, "supply.ipynb")
+    take(page, "P")
+    keys.press("Escape")
+    typed(page, "E := P \\cdot 3.0 s")
+    settled(page)
+    save_as(page, "stage.ipynb")
+    named(page, "stage")
+    assert page.evaluate(MARKS) == [] and "= 30. J" in shown(page)[1]
+    if top:
+        new_sheet(page)
+        values_dialog(page, "stage.ipynb")
+        take(page, "E")
+        keys.press("Escape")
+        typed(page, "cost := E \\cdot 2")
+        settled(page)
+        save_as(page, "top.ipynb")
+        named(page, "top")
+        assert page.evaluate(MARKS) == [] and "= 60. J" in shown(page)[1]
+    first = (folder / "limits.ipynb").read_bytes()
+    saved_with(page, "limits.ipynb", "U := 6.0 V")
+    opened(page, "top.ipynb" if top else "stage.ipynb")
+    return first
+
+
+def saved_with(page, name, *texts):
+    """Open a sheet, write its first regions anew, and save it."""
+    opened(page, name)
+    for which, text in enumerate(texts):
+        page.locator(".region.math").nth(which).click()
+        page.keyboard.press("Control+a")
+        page.keyboard.type(text)
+        page.keyboard.press("Enter")
+    settled(page)
+    save(page)
+
+
+def test_the_sheets_a_sheet_builds_on_are_brought_up_to_date_in_one_go(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    first = a_chain(page, folder, top=True)
+    # Top has what stage hands on — but stage is behind: supply, which it
+    # builds on, has not got what limits delivers now.  The region says so.
+    page.wait_for_selector(".region.given .mark")
+    assert page.evaluate(BEHIND) == [["stage is behind", True, "That sheet takes values that have been saved anew since: bring them up to date"]]
+    assert page.evaluate(GIVEN) == ["Fromstage·rev.1stageisbehindE:=30.J"] and not page.evaluate(DIRTY)
+    # (On the region itself, Enter asks what it is to hold, as on any such
+    # region: what is to be done about the sheets is asked on its mark.)
+    page.click(".region.given .line")
+    keys.press("Enter")
+    page.wait_for_selector(".dialog.given")
+    keys.press("Escape")
+    page.wait_for_selector(".dialog.given", state="detached")
+    assert page.locator(".dialog").count() == 0
+    files = lambda: {name: (folder / name).read_bytes() for name in ("limits.ipynb", "supply.ipynb", "stage.ipynb", "top.ipynb")}     # noqa: E731
+    placed = lambda: [[(cell.metadata["edsl"]["x"], cell.metadata["edsl"]["y"])                                     # noqa: E731
+                       for cell in nbformat.read(str(folder / name), as_version=4).cells if "edsl" in cell.metadata]
+                      for name in ("supply.ipynb", "stage.ipynb")]
+    before, places = files(), placed()
+    sent = []                                                   # (what the pages say to the server, the one out of sight too)
+    page.on("websocket", lambda socket: socket.on("framesent", lambda payload: sent.append(payload if isinstance(payload, str) else "")))
+
+    # A click on that mark shows what is to be done — the first first — and nothing is done yet.
+    page.click(".region.given .mark")
+    page.wait_for_selector(".dialog.chain")
+    assert page.inner_text(".dialog.chain h3") == "Bring values up to date"
+    planned = [["supply.ipynb", "supply · rev. 1", "takes rev. 2 of limits (it has rev. 1)"],
+               ["stage.ipynb", "stage · rev. 1", "takes supply as it is saved then"],
+               ["", "This sheet · left for you to save", "takes stage as it is saved then"]]
+    assert page.evaluate(STEPS) == [row + ["", "step"] for row in planned]
+    assert page.evaluate(SAID) == [INTRO]
+    assert page.inner_text(GO) == "Bring up to date" and page.inner_text(".dialog.chain .foot .btn:not(.primary)") == "Cancel"
+    page.wait_for_function("document.activeElement === document.querySelector('.dialog.chain .foot .btn.primary')")
+    keys.press("Escape")
+    page.wait_for_selector(".dialog.chain", state="detached")
+    assert files() == before and not page.evaluate(DIRTY) and page.locator("iframe").count() == 0
+
+    # What is there to take is seen again when it is done.  With limits as
+    # it was before, by then, there is nothing: each sheet is looked at,
+    # and none is saved.
+    chain_dialog(page)
+    (folder / "limits.ipynb").write_bytes(first)
+    brought_up(page)
+    assert [row[3:] for row in page.evaluate(STEPS)] == [["has what there is", "step done"]] * 3
+    assert page.evaluate(SAID) == [INTRO, "Every sheet has what there is to take."]
+    closed_again(page)
+    (folder / "limits.ipynb").write_bytes(before["limits.ipynb"])
+    assert files() == before and not page.evaluate(DIRTY) and page.locator("iframe").count() == 0
+    sent.clear()
+
+    # The menu shows the same; and there it is done — once the page that
+    # does it has all a page starts with (what the server can do, which
+    # comes late here): it is not put to work before.
+    begun = []                                                  # (how many regions that page has by the time the server answers)
+
+    def late(route):
+        page.wait_for_timeout(3000)
+        begun.append(page.evaluate("document.querySelector('iframe.worker').contentDocument.querySelectorAll('.region').length"))
+        route.continue_()
+
+    page.route("**/api/info", late)
+    chain_dialog(page)
+    assert len(page.evaluate(STEPS)) == 3
+    brought_up(page)
+    page.unroute("**/api/info")
+    assert begun == [0]
+    assert page.evaluate(STEPS) == [row + how for row, how in zip(planned, (["saved as rev. 2", "step done"], ["saved as rev. 2", "step done"],
+                                                                         ["has the new values — it is not saved yet", "step done"]))]
+    assert page.evaluate(SAID) == [INTRO, "2 sheets saved as a new revision; this sheet has the new values, and is yours to save."]
+    assert page.locator(GO).count() == 1 and page.inner_text(GO) == "Close"
+    # The page that did it is gone — it said so, and its kernel went with
+    # it — and the keyboard is where it was: on the dialog, and then on the sheet.
+    assert page.locator("iframe").count() == 0 and [json.loads(frame)["op"] for frame in sent if '"bye"' in frame] == ["bye"]
+    page.wait_for_function("document.activeElement === document.querySelector('.dialog.chain .foot .btn.primary')")
+    keys.press("Enter")
+    page.wait_for_selector(".dialog.chain", state="detached")
+    settled(page)
+
+    # Supply was given what limits delivers, calculated, and saved as a new
+    # revision, which hands on what it comes to; then stage, with what
+    # supply hands on by then.  Their regions are where they were.
+    assert saved_settings(folder, "supply.ipynb")["about"]["revision"] == 2 and saved_settings(folder, "stage.ipynb")["about"]["revision"] == 2
+    assert handed_on(folder, "supply.ipynb") == [2, {"U": "6.0 V", "I_max": "2.0 A", "P": "12. W"}]
+    assert handed_on(folder, "stage.ipynb") == [2, {"P": "12. W", "E": "36. J"}]
+    [of_limits], [of_supply] = given_cells(folder, "supply.ipynb"), given_cells(folder, "stage.ipynb")
+    assert of_limits.metadata["edsl"]["given"]["revision"] == 2 and "6.0" in of_limits.source and "5.0" not in of_limits.source
+    assert of_supply.metadata["edsl"]["given"]["revision"] == 2 and of_supply.metadata["edsl"]["given"]["saved"] == saved_settings(folder, "supply.ipynb")["about"]["saved"]
+    assert placed() == places and [len(place) for place in places] == [2, 2]
+    assert (folder / "limits.ipynb").read_bytes() == before["limits.ipynb"]
+    # Top has what stage hands on now, and calculates with it; it is not
+    # saved — its file is as it was.
+    assert page.evaluate(GIVEN) == ["Fromstage·rev.2E:=36.J"] and "= 72. J" in shown(page)[1]
+    assert page.evaluate(MARKS) == [] and page.evaluate(DIRTY)
+    assert (folder / "top.ipynb").read_bytes() == before["top.ipynb"]
+    # What is typed goes to the sheet in front.
+    typed(page, "after := 1")
+    settled(page)
+    assert len(shown(page)) == 3 and page.locator(".region.editing").count() == 0
+    keys.press("Control+z")
+    settled(page)
+    # Undo gives top back what it had: one step — and what it has then is
+    # behind what stage delivers now.
+    keys.press("Control+z")
+    settled(page)
+    page.wait_for_selector(".region.given .mark")
+    assert page.evaluate(GIVEN) == ["Fromstage·rev.1rev.2isthereE:=30.J"] and "= 60. J" in shown(page)[1]
+    # Asked again, there is that to take, and no sheet to bring up to date first.
+    chain_dialog(page)
+    assert page.evaluate(STEPS) == [["", "This sheet · left for you to save", "takes rev. 2 of stage (it has rev. 1)", "", "step"]]
+    assert page.evaluate(SAID) == ["There are newer values for this sheet to take."]
+    brought_up(page)
+    assert page.evaluate(SAID)[-1] == "This sheet has the new values, and is yours to save."
+    page.click(GO)
+    settled(page)
+    assert page.evaluate(GIVEN) == ["Fromstage·rev.2E:=36.J"] and page.evaluate(MARKS) == []
+    assert page.locator("iframe").count() == 0 and len([frame for frame in sent if '"bye"' in frame]) == 1          # (no page was needed for that)
+    save(page)
+    assert saved_settings(folder, "top.ipynb")["about"]["revision"] == 2 and handed_on(folder, "top.ipynb")[1]["cost"] == "72. J"
+    # With everything as it is delivered, there is nothing to do.
+    chain_dialog(page)
+    assert page.evaluate(STEPS) == [] and page.evaluate(SAID) == ["This sheet, and every sheet it builds on, has what there is to take."]
+    assert page.locator(GO).count() == 0 and page.inner_text(".dialog.chain .foot .btn") == "Close"
+    page.wait_for_function("document.activeElement === document.querySelector('.dialog.chain .foot .btn')")
+    keys.press("Enter")
+    page.wait_for_selector(".dialog.chain", state="detached")
+
+
+def test_a_sheet_that_cannot_be_brought_up_to_date_is_left_as_it_is(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    a_chain(page, folder)
+    page.wait_for_selector(".region.given .mark")
+    files = lambda: {name: (folder / name).read_bytes() for name in ("limits.ipynb", "supply.ipynb", "stage.ipynb")}     # noqa: E731
+    how = lambda: [row[3:] for row in page.evaluate(STEPS)]     # noqa: E731
+    asked = []                                                  # (what the page asks the server)
+    page.on("request", lambda request: asked.append(request.url))
+
+    def menu():
+        page.click("#edit-menu .menu-button")
+        page.click("#edit-menu [data-cmd='update-values']")
+
+    # A sheet that has not been calculated on this computer is not run
+    # behind anyone's back.  Supply becomes one — with something from
+    # elsewhere in it that would leave a trace — after what is to be done
+    # has been shown: when its turn comes, it is left as it is.
+    chain_dialog(page)
+    assert len(page.evaluate(STEPS)) == 2
+    book = nbformat.read(str(folder / "supply.ipynb"), as_version=4)
+    book.cells.append(nbformat.v4.new_code_cell("%%python\nimport pathlib\npathlib.Path('ran.txt').write_text('it ran')",
+                                                metadata={"edsl": {"x": 40, "y": 600}}))
+    nbformat.write(book, str(folder / "supply.ipynb"))
+    before = files()
+    brought_up(page)
+    assert how() == [["left as it is: it has not been calculated on this computer yet", "step left"], ["has what there is", "step done"]]
+    assert page.evaluate(SAID)[-1] == "1 sheet left as it was."
+    closed_again(page)
+    assert files() == before and page.locator("iframe").count() == 0 and not (folder / "ran.txt").exists()
+    # Known to be one, it is not begun; and what waits for it is left, too.
+    chain_dialog(page)
+    assert page.evaluate(STEPS) == [] and page.locator(GO).count() == 0
+    assert page.evaluate(SAID) == ["Nothing can be brought up to date as things are.",
+                                   "supply has not been calculated on this computer yet: open it and choose Calculate. It is left as it is."]
+    closed_again(page)
+    assert files() == before and page.locator("iframe").count() == 0 and not (folder / "ran.txt").exists()
+    # (More sheets than the server looks at: said, too.  And a server that
+    # does not answer is said to say nothing.)
+    more = lambda url: "/api/chain" in url and "trusted=1" in url          # noqa: E731
+
+    def cut(route):
+        response = route.fetch()
+        route.fulfill(response=response, json=dict(response.json(), cut=True))
+
+    page.route(more, cut)
+    chain_dialog(page)
+    assert page.evaluate(SAID)[-1] == "There are more sheets than were looked at: bring the ones further up to date from one of them."
+    closed_again(page)
+    page.unroute(more)
+    page.route(more, lambda route: route.abort())
+    menu()
+    page.wait_for_function(f"{TOAST} === 'The worksheet server does not say how the sheets stand.'")
+    assert page.locator(".dialog").count() == 0
+    page.unroute(more)
+
+    # Opened, and calculated there for once, it is one of the user's own.
+    # It gets a region that fails with what limits delivers now.
+    opened(page, "supply.ipynb")
+    assert not (folder / "ran.txt").exists()
+    page.click("#banner .btn.primary")
+    settled(page)
+    assert (folder / "ran.txt").read_text(encoding="utf-8") == "it ran"
+    typed(page, "ratio := 10 V / (U - 6.0 V)")
+    settled(page)
+    assert page.evaluate("document.querySelectorAll('.region.has-error').length") == 0
+    save(page)
+    opened(page, "stage.ipynb")
+    page.wait_for_selector(".region.given .mark")
+    assert page.evaluate(MARKS) == [["rev. 2 is there", False]]                 # (what stage has itself comes first)
+
+    # A worksheet server that was started before this cannot say how the
+    # sheets stand.  The page does not ask it: it sees what each region
+    # has of its sheet, as it did, and says why it does no more.
+    page.route("**/api/info", lambda route: route.fulfill(json={"root": str(folder), "name": folder.name, "values": True}))
+    asked.clear()
+    page.reload()
+    page.wait_for_selector(".region.given .mark")
+    settled(page)
+    assert page.evaluate(MARKS) == [["rev. 2 is there", False]]
+    menu()
+    page.wait_for_function(f"{TOAST}.startsWith('The worksheet server running here was started before it could say how sheets stand to each other')")
+    assert page.locator(".dialog").count() == 0 and not any("/api/chain" in url for url in asked)
+    page.unroute("**/api/info")
+    page.reload()
+    page.wait_for_selector(".region.given .mark")
+    settled(page)
+
+    before = files()
+    chain_dialog(page)
+    assert page.evaluate(STEPS) == [["supply.ipynb", "supply · rev. 2", "takes rev. 2 of limits (it has rev. 1)", "", "step"],
+                                    ["", "This sheet · left for you to save",
+                                     "takes rev. 2 of supply (it has rev. 1), or what is saved then", "", "step"]]
+    brought_up(page)
+    # With the new values supply has an error: it is not saved — and stage takes what there is of it.
+    assert how() == [["left as it is: the new values lead to an error in it", "step left"], ["has the new values — it is not saved yet", "step done"]]
+    assert page.evaluate(SAID)[-1] == "1 sheet left as it was; this sheet has the new values, and is yours to save."
+    closed_again(page)
+    settled(page)
+    assert files() == before and page.evaluate(GIVEN) == ["Fromsupply·rev.2supplyisbehindP:=10.W"]
+    save(page)
+
+    # Limits hands on other names than the ones that are held.  Supply
+    # cannot take what there is, and is left as it is.  So is the sheet at
+    # hand — a sheet takes all there is for it, or nothing — though supply,
+    # saved by hand since, has newer values for it.
+    opened(page, "stage.ipynb")
+    values_dialog(page, "limits.ipynb")
+    take(page, "I_max")
+    save(page)
+    opened(page, "supply.ipynb")
+    typed(page, "extra := 1")
+    settled(page)
+    save(page)
+    saved_with(page, "limits.ipynb", "V_in := 6.0 V", "I_lim := 2.0 A")
+    opened(page, "stage.ipynb")
+    page.wait_for_function(f"{MARKS}.length === 2")
+    assert page.evaluate(MARKS) == [["rev. 3 is there", False], ["rev. 3 is there", False]]
+    before = files()
+    chain_dialog(page)
+    assert [row[1:3] for row in page.evaluate(STEPS)] == [
+        ["supply · rev. 3", "takes rev. 3 of limits (it has rev. 1)"],
+        ["This sheet · left for you to save", "takes rev. 3 of supply (it has rev. 2), or what is saved then, rev. 3 of limits (it has rev. 2)"]]
+    brought_up(page)
+    assert how() == [["left as it is: limits no longer hands on U, I_max", "step left"],
+                     ["left as it is: limits no longer hands on I_max", "step left"]]
+    assert page.evaluate(SAID)[-1] == "1 sheet left as it was; this sheet is left as it is."
+    closed_again(page)
+    assert files() == before and not page.evaluate(DIRTY) and page.evaluate(GIVEN)[0].startswith("Fromsupply·rev.2")
+
+    # A sheet that is gone gives nothing to take, and holds nothing up:
+    # with a region of such a sheet in the place of that one, stage takes
+    # what supply hands on.
+    page.locator(".region.given").nth(1).locator(".line").click()
+    keys.press("Delete")
+    shutil.copy(folder / "supply.ipynb", folder / "spare.ipynb")
+    values_dialog(page, "spare.ipynb")
+    take(page, "extra")
+    save(page)
+    (folder / "spare.ipynb").unlink()
+    before = files()
+    chain_dialog(page)
+    assert [row[1:3] for row in page.evaluate(STEPS)] == [
+        ["supply · rev. 3", "takes rev. 3 of limits (it has rev. 1)"],
+        ["This sheet · left for you to save", "takes rev. 3 of supply (it has rev. 2), or what is saved then"]]
+    brought_up(page)
+    assert how() == [["left as it is: limits no longer hands on U, I_max", "step left"], ["has the new values — it is not saved yet", "step done"]]
+    assert page.evaluate(SAID)[-1] == "1 sheet left as it was; this sheet has the new values, and is yours to save."
+    closed_again(page)
+    settled(page)
+    page.wait_for_function(f"{MARKS}.length === 2")
+    assert files() == before and page.evaluate(GIVEN)[0].startswith("Fromsupply·rev.3")
+    assert page.evaluate(MARKS) == [["supply is behind", False], ["not found", True]]
+    save(page)
+
+    # Sheets that take from each other in a circle have no first.
+    opened(page, "limits.ipynb")
+    values_dialog(page, "stage.ipynb")
+    take(page, "E")
+    save(page)
+    opened(page, "stage.ipynb")
+    before = files()
+    chain_dialog(page)
+    assert page.evaluate(STEPS) == [] and page.locator(GO).count() == 0
+    assert page.evaluate(SAID) == ["Nothing can be brought up to date as things are.",
+                                   "These sheets take values from each other in a circle: this sheet → supply → limits → this sheet. "
+                                   "None of them can be the first to be brought up to date."]
+    closed_again(page)
+    assert files() == before
+    # A sheet that takes nothing has nothing to bring up to date, and asks nothing about it.
+    asked.clear()
+    new_sheet(page)
+    menu()
+    page.wait_for_function(f"{TOAST} === 'This sheet takes no values from other sheets.'")
+    assert page.locator(".dialog").count() == 0 and not any("/api/chain" in url for url in asked)
+
+
+def test_a_sheet_further_up_is_brought_up_to_date_though_one_in_between_is_left(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    a_chain(page, folder)
+    # Limits builds on a sheet itself, which is saved anew; and supply is
+    # one that has not been calculated on this computer.
+    new_sheet(page)
+    typed(page, "k := 1")
+    settled(page)
+    save_as(page, "base.ipynb")
+    named(page, "base")
+    opened(page, "limits.ipynb")
+    values_dialog(page, "base.ipynb")
+    take(page, "k")
+    save(page)
+    saved_with(page, "base.ipynb", "k := 2")
+    book = nbformat.read(str(folder / "supply.ipynb"), as_version=4)
+    book.cells.append(nbformat.v4.new_markdown_cell("A note from elsewhere."))
+    nbformat.write(book, str(folder / "supply.ipynb"))
+    opened(page, "stage.ipynb")
+    page.wait_for_selector(".region.given .mark")
+    assert page.evaluate(MARKS) == [["supply is behind", False]]
+    files = lambda: {name: (folder / name).read_bytes() for name in ("base.ipynb", "supply.ipynb", "stage.ipynb")}     # noqa: E731
+    before = files()
+    # Limits can be brought up to date, and is — though nothing comes of
+    # that for the sheet at hand as long as supply is in between: it has
+    # no part in what is done, and is not said to have.
+    chain_dialog(page)
+    planned = ["limits.ipynb", "limits · rev. 3", "takes rev. 2 of base (it has rev. 1)"]
+    assert page.evaluate(STEPS) == [planned + ["", "step"]]
+    assert page.evaluate(SAID) == [INTRO, "supply has not been calculated on this computer yet: open it and choose Calculate. It is left as it is."]
+    brought_up(page)
+    assert page.evaluate(STEPS) == [planned + ["saved as rev. 4", "step done"]]
+    assert page.evaluate(SAID)[-1] == "1 sheet saved as a new revision."
+    closed_again(page)
+    assert files() == before and not page.evaluate(DIRTY) and handed_on(folder, "limits.ipynb") == [4, {"U": "6.0 V", "I_max": "2.0 A", "k": "2"}]
+    assert page.evaluate(MARKS) == [["supply is behind", False]]
+
+
+def test_the_page_that_works_out_of_sight_is_out_of_reach_and_can_be_stopped(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    a_chain(page, folder, top=True)
+    # Supply takes its time from now on — in a way that can be cut short,
+    # or in one that cannot — or brings its kernel down, whenever a file
+    # beside it says so.
+    opened(page, "supply.ipynb")
+    for line in ("%%python", "import os, time", "if os.path.exists('slow'): time.sleep(60)", "if os.path.exists('stuck'): sum(range(10 ** 10))"):
+        keys.type(line)
+        keys.press("Shift+Enter")
+    typed(page, "if os.path.exists('gone'): os._exit(1)")
+    settled(page)
+    save(page)
+    (folder / "slow").write_text("", encoding="utf-8")
+    opened(page, "top.ipynb")
+    page.wait_for_selector(".region.given .mark")
+    files = lambda: {name: (folder / name).read_bytes() for name in ("supply.ipynb", "stage.ipynb", "top.ipynb")}       # noqa: E731
+    before = files()
+    working = "document.querySelector('.dialog.chain .step .state').textContent === 'at work…'"
+    there = "document.querySelector('iframe.worker') && document.querySelector('iframe.worker').contentDocument.querySelectorAll('.region').length === 3"
+    how = lambda: [row[3:] for row in page.evaluate(STEPS)]     # noqa: E731
+
+    mine = page.evaluate("sessionStorage.getItem('edsl-session')")
+    chain_dialog(page)
+    # (Supply was saved since stage took of it: there is that to take, too.)
+    assert [row[2] for row in page.evaluate(STEPS)] == ["takes rev. 2 of limits (it has rev. 1)",
+                                                        "takes rev. 2 of supply (it has rev. 1), or what is saved then",
+                                                        "takes stage as it is saved then"]
+    page.click(GO)
+    page.wait_for_function(working)
+    page.wait_for_function(there, timeout=60_000)
+    # The page that does it is one like this one, laid out as this one is —
+    # where nobody sees it, or reaches it with the mouse or the keyboard.
+    frame = page.evaluate("""() => {
+        const frame = document.querySelector('iframe.worker'), box = frame.getBoundingClientRect(), inside = frame.contentDocument;
+        return { box: [box.width, box.height, box.top, box.right < 0], inert: frame.inert, hidden: frame.getAttribute('aria-hidden'),
+                 opacity: getComputedStyle(frame).opacity, pointer: getComputedStyle(frame).pointerEvents,
+                 paper: inside.querySelector('#paper').getBoundingClientRect().width,
+                 regions: [...inside.querySelectorAll('.region')].map((r) => r.getBoundingClientRect().height > 10),
+                 address: frame.contentWindow.location.search, focused: inside.hasFocus(),
+                 session: sessionStorage.getItem('edsl-session') };
+    }""")
+    assert frame == {"box": [1280, 900, 0, True], "inert": True, "hidden": "true", "opacity": "0", "pointer": "none", "paper": frame["paper"],
+                     "regions": [True, True, True], "address": "?worker=1&open=supply.ipynb", "focused": False, "session": mine}
+    assert frame["paper"] > 600 and mine                         # (the kernel of the page in front is that page's still)
+    page.emulate_media(media="print")                           # (nor is it printed)
+    assert page.evaluate("getComputedStyle(document.querySelector('iframe.worker')).display") == "none"
+    page.emulate_media(media="screen")
+    keys.type("typed into nothing")
+    keys.press("Tab")
+    page.wait_for_timeout(300)
+    inside = page.frames[1]
+    assert inside.evaluate("document.querySelectorAll('.region').length") == 3 and inside.locator(".region.editing").count() == 0
+    assert page.locator(".region.editing").count() == 0 and page.evaluate("document.activeElement.closest('.dialog.chain') !== null")
+    # Told to stop, it leaves off: nothing is saved, the next sheet is not begun, and nothing is taken.
+    assert page.inner_text(".dialog.chain .foot .btn:not(.primary)") == "Stop" and page.is_disabled(GO)
+    # (Asked once, it is being done: the button says so.)
+    assert page.evaluate("() => { const stop = document.querySelector('.dialog.chain .foot .btn:not(.primary)'); stop.click(); return stop.disabled; }")
+    page.wait_for_selector(".dialog.chain p.end", timeout=60_000)
+    assert how() == [["left as it is: stopped", "step left"], ["", "step"], ["left as it is: stopped", "step left"]]
+    assert page.evaluate(SAID)[-1] == "1 sheet left as it was; stopped."
+    closed_again(page)
+    assert files() == before and page.locator("iframe").count() == 0 and not page.evaluate(DIRTY)
+
+    # So when the dialog is put away while it is at work: what came of it
+    # is said on the page.  It is said at once, though this time the
+    # kernel is at something that cannot be cut short: it goes with the page.
+    (folder / "slow").unlink()
+    (folder / "stuck").write_text("", encoding="utf-8")
+    chain_dialog(page)
+    page.click(GO)
+    page.wait_for_function(working)
+    page.wait_for_function(there, timeout=60_000)
+    page.wait_for_timeout(1500)
+    keys.press("Escape")
+    page.wait_for_selector(".dialog.chain", state="detached")
+    page.wait_for_function(f"{TOAST} === '1 sheet left as it was; stopped.'", timeout=20_000)
+    page.wait_for_function("!document.querySelector('iframe.worker')")
+    assert files() == before and not page.evaluate(DIRTY)
+
+    # A sheet that brings its kernel down is left as it is — and the one
+    # after it is calculated all the same, by a kernel that is started for
+    # it: stage takes what supply has delivered so far.
+    (folder / "stuck").unlink()
+    (folder / "gone").write_text("", encoding="utf-8")
+    chain_dialog(page)
+    brought_up(page)
+    assert how() == [["left as it is: it could not be calculated", "step left"], ["saved as rev. 2", "step done"],
+                     ["has the new values — it is not saved yet", "step done"]]
+    assert page.evaluate(SAID)[-1] == "1 sheet saved as a new revision; 1 sheet left as it was; this sheet has the new values, and is yours to save."
+    closed_again(page)
+    settled(page)
+    assert (folder / "supply.ipynb").read_bytes() == before["supply.ipynb"] and handed_on(folder, "stage.ipynb") == [2, {"P": "10. W", "E": "30. J"}]
+    assert page.evaluate(GIVEN) == ["Fromstage·rev.2stageisbehindE:=30.J"]
+    save(page)
+
+    # With nothing in its way, it is all done.
+    (folder / "gone").unlink()
+    chain_dialog(page)
+    brought_up(page)
+    assert [row[3] for row in page.evaluate(STEPS)] == ["saved as rev. 3", "saved as rev. 3", "has the new values — it is not saved yet"]
+    closed_again(page)
+    settled(page)
+    assert page.evaluate(GIVEN) == ["Fromstage·rev.3E:=36.J"] and "= 72. J" in shown(page)[1]
+
+
+def test_the_page_that_works_out_of_sight_asks_nobody_and_leaves_what_it_cannot_do(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    a_chain(page, folder, top=True)
+    page.wait_for_selector(".region.given .mark")
+    files = lambda: {name: (folder / name).read_bytes() for name in ("limits.ipynb", "supply.ipynb", "stage.ipynb", "top.ipynb")}     # noqa: E731
+    before = files()
+    as_it_is = ["has what there is", "step done"]
+
+    def came():
+        """It is all asked for: how that went for each sheet, and what is said of it at the end.  Nothing is saved, and nothing taken."""
+        chain_dialog(page)
+        brought_up(page)
+        rows, end = [row[3:] for row in page.evaluate(STEPS)], page.evaluate(SAID)[-1]
+        closed_again(page)
+        assert files() == before and not page.evaluate(DIRTY) and page.locator("iframe").count() == 0
+        return rows, end
+
+    # A file that another program has written since it was opened is not
+    # written over: nobody is there to be asked.  A sheet the page trips
+    # over is left as it is, too.  The ones after either are looked at
+    # all the same.
+    doc = lambda name: (lambda url: "/api/doc" in url and f"path={name}" in url)        # noqa: E731
+
+    def written_meanwhile(route):
+        if route.request.method != "GET":
+            route.continue_()
+            return
+        response = route.fetch()
+        stat = (folder / "supply.ipynb").stat()
+        os.utime(folder / "supply.ipynb", ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
+        route.fulfill(response=response)
+
+    of_supply, of_stage = doc("supply.ipynb"), doc("stage.ipynb")
+    page.route(of_supply, written_meanwhile)
+    page.route(of_stage, lambda route: route.fulfill(json={"regions": 5}))
+    (supply, stage, top), end = came()
+    assert supply == ["left as it is: it could not be saved (This file was changed by another program since it was opened.)", "step left"]
+    assert stage[0].startswith("left as it is: it tripped (") and stage[1] == "step left" and top == as_it_is
+    assert end == "2 sheets left as it was."
+    page.unroute(of_supply)
+    page.unroute(of_stage)
+
+    # Where the page that is to do it does not come to be, each sheet says so.
+    start = lambda url: "worker=1" in url          # noqa: E731
+    page.route(start, lambda route: route.fulfill(body="<html></html>", content_type="text/html"))
+    assert came() == ([["left as it is: the page that does it did not start", "step left"]] * 2 + [as_it_is], "2 sheets left as it was.")
+    page.unroute(start)
+
+    # From here on, the line between a page out of sight and its kernel is
+    # listened in on (that of the pages which are opened from now).
+    line = {}
+
+    def tapped(wire):
+        server = wire.connect_to_server()
+
+        def from_kernel(message):
+            told = json.loads(message) if isinstance(message, str) else {}
+            wire.send(json.dumps({**told, "pass": -1}) if "deaf" in line and told.get("op") == "values" else message)
+
+        def from_page(message):
+            if json.loads(message).get("op") == line.get("cut"):
+                server.close()
+                wire.close(code=line["code"], reason="")
+            else:
+                server.send(message)
+
+        server.on_message(from_kernel)
+        wire.on_message(from_page)
+
+    page.route_web_socket(re.compile(r"/ws"), tapped)
+
+    # A sheet is not saved when its kernel does not say what its values
+    # are (here: it speaks of another pass than the page knows) — it would
+    # hand on the ones it had.
+    line["deaf"] = True
+    assert came() == ([["left as it is: it could not be saved (Its kernel did not say what its values are.)", "step left"], as_it_is, as_it_is],
+                      "1 sheet left as it was.")
+    line.clear()
+    # Nor is a kernel waited for that the server will let the page have no
+    # more: the page was signed out before its kernel said a word, or its
+    # session went elsewhere in the middle of a calculation.
+    for cut, code in (("hello", 4403), ("calc", 4000)):
+        line.update(cut=cut, code=code)
+        assert came() == ([["left as it is: it could not be calculated", "step left"]] * 2 + [as_it_is], "2 sheets left as it was.")
+    line.clear()
+
+    # With nothing in its way, it is all done.
+    chain_dialog(page)
+    brought_up(page)
+    assert [row[3] for row in page.evaluate(STEPS)] == ["saved as rev. 2", "saved as rev. 2", "has the new values — it is not saved yet"]
+    closed_again(page)
+    settled(page)
+    assert page.evaluate(GIVEN) == ["Fromstage·rev.2E:=36.J"] and "= 72. J" in shown(page)[1]
+
+
+def test_a_sheet_in_a_folder_of_its_own_keeps_what_it_read_when_it_is_brought_up_to_date(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    keys = page.keyboard
+    (folder / "sub").mkdir()
+    (folder / "sub" / "gain.txt").write_text("2.0\n", encoding="utf-8")
+    typed(page, "U := 5.0 V")
+    settled(page)
+    save_as(page, "limits.ipynb")
+    named(page, "limits")
+
+    def into_sub():
+        page.wait_for_selector(".dialog .files")
+        page.click(".files div.dir:has-text('sub')")
+        page.wait_for_function("document.querySelector('.dialog .crumbs').textContent.trim().endsWith('sub')")
+
+    # Supply, in a folder of its own: it reads a file beside it and draws
+    # two numbers, one of them scaled by what limits hands on; and it says
+    # where its kernel works.
+    new_sheet(page)
+    values_dialog(page, "limits.ipynb")
+    take(page, "U")
+    keys.press("Escape")
+    keys.press("Control+Shift+s")
+    into_sub()
+    page.fill(".dialog input[type=text]", "supply")
+    keys.press("Enter")
+    named(page, "supply")
+    settled(page)
+    typed(page, "import numpy as np", "gain := np.loadtxt('gain.txt')", "noise := np.random.rand()", "drift := np.random.rand() \\cdot U",
+          "P := U \\cdot 2.0 A \\cdot gain")
+    for line in ("%%python", "import os"):
+        keys.type(line)
+        keys.press("Shift+Enter")
+    typed(page, "where = os.path.basename(os.getcwd())")
+    # (One of its regions has an error, and has had it all along: that is
+    # its author's business, and holds nothing up.)
+    typed(page, "astray := nowhere + 1")
+    settled(page)
+    assert page.evaluate("document.querySelectorAll('.region.has-error').length") == 1
+    save(page)
+    was = handed_on(folder / "sub", "supply.ipynb")[1]
+    assert (was["gain"], was["P"], was["where"]) == ("array(2.)", "20. W", "'sub'")
+    read = lambda: {record["why"][0] + ":" + sorted(record["writes"])[0]: record["at"]                               # noqa: E731
+                    for cell in nbformat.read(str(folder / "sub" / "supply.ipynb"), as_version=4).cells
+                    for record in cell.metadata.get("edsl", {}).get("kept", [])}
+    first = read()
+    assert sorted(first) == ["file:gain", "random:drift", "random:noise"]
+
+    # The sheet at the top takes of it, from the folder above.
+    new_sheet(page)
+    page.click("#edit-menu .menu-button")
+    page.click("#edit-menu [data-cmd='take-values']")
+    into_sub()
+    page.click(".files div:has-text('supply.ipynb')")
+    keys.press("Enter")
+    page.wait_for_selector(".dialog.given")
+    take(page, "P", "noise", "drift")
+    keys.press("Control+s")
+    page.wait_for_selector(".dialog .files")
+    page.click(".dialog .crumbs a")                             # (the folder the worksheet was started in)
+    page.wait_for_function("document.querySelector('.dialog .crumbs').children.length === 1")
+    page.fill(".dialog input[type=text]", "top")
+    keys.press("Enter")
+    named(page, "top")
+    settled(page)
+    assert given_cells(folder, "top.ipynb")[0].metadata["edsl"]["given"]["sheet"] == "sub/supply.ipynb"
+
+    # Limits is saved anew — and the file supply read says something else by now.
+    (folder / "sub" / "gain.txt").write_text("9.0\n", encoding="utf-8")
+    page.wait_for_timeout(1100)                                 # (a reading says when it was made to the second)
+    saved_with(page, "limits.ipynb", "U := 6.0 V")
+    # (Supply sees that from where it is: another sheet is found from the folder of the one that names it.)
+    opened(page, "sub/supply.ipynb")
+    page.wait_for_selector(".region.given .mark")
+    assert page.evaluate(MARKS) == [["rev. 2 is there", False]]
+    opened(page, "top.ipynb")
+    page.wait_for_selector(".region.given .mark")
+    assert page.evaluate(MARKS) == [["supply is behind", False]]
+
+    # (The page that does it is put to work once it has its kernel within
+    # reach — which takes a while here: the kernel is told where a sheet
+    # is as the sheet is opened.)
+    def slow_line(wire):
+        time.sleep(2)
+        wire.connect_to_server()
+
+    page.route_web_socket(re.compile(r"/ws"), slow_line)
+    chain_dialog(page)
+    assert page.evaluate(STEPS) == [["sub/supply.ipynb", "supply · rev. 2", "takes rev. 2 of limits (it has rev. 1)", "", "step"],
+                                    ["", "This sheet · left for you to save", "takes supply as it is saved then", "", "step"]]
+    brought_up(page)
+    assert [row[3] for row in page.evaluate(STEPS)] == ["saved as rev. 3", "has the new values — it is not saved yet"]
+    closed_again(page)
+    settled(page)
+    # Supply was calculated where it is, with what limits delivers now.
+    # What it read stays as it was read — the file, the number that was
+    # drawn — but for what it made of what it was given, which is read anew.
+    now = handed_on(folder / "sub", "supply.ipynb")[1]
+    assert (now["U"], now["P"], now["where"]) == ("6.0 V", "24. W", "'sub'")
+    assert (now["gain"], now["noise"]) == (was["gain"], was["noise"]) and now["drift"] != was["drift"]
+    again = read()
+    assert (again["file:gain"], again["random:noise"]) == (first["file:gain"], first["random:noise"]) and again["random:drift"] > first["random:drift"]
+    assert page.evaluate("document.querySelectorAll('.region.given .line').length") == 3 and page.evaluate(DIRTY)
