@@ -164,6 +164,10 @@ type, and the line becomes a typeset formula with its value beside it.
 - **Header and footer** — on every page, with a logo and with fields
   for the file's name, the date and revision, and the page numbers.
   Templates are ready-made, or your own.
+- **Templates** — *File → New from template…* starts a technical note,
+  or a unit's power requirements, laid out and ready to fill in; see
+  the [examples](examples/), among them a chain of power sheets three
+  levels deep.
 - **Sheets that build on each other** — a sheet takes values from
   another sheet, as that sheet had them at a revision, and says which
   sheet and which revision. When the other sheet moves on, it is told;

@@ -79,6 +79,23 @@ two (the dashed lines are the page breaks). *Arrange → Split region
 into statements* turns a many-line region (a notebook cell, say) into
 one region per statement.
 
+### Starting from a template
+
+*File → New from template…* starts a new sheet that is already laid
+out, with its header and footer:
+
+- **Technical note** — purpose and references, assumptions, the
+  calculation, the result and the conclusion, each under its heading;
+- **Power requirements** — one sheet for each unit: its supply, its
+  loads and its total, which the sheet of the unit above it takes with
+  [values from another sheet](#values-from-another-sheet).
+
+What is in the template is there to be written over. The new sheet is
+calculated at once and has no file until it is saved, as *New* has
+none; its first save is its first revision. [`examples/`](../examples/)
+has a technical note and a chain of power-requirement sheets made from
+them, three levels deep.
+
 ### Arranging
 
 Select regions — drag across empty paper, or Ctrl+A for all — and
@@ -635,9 +652,12 @@ footer of its own for what it prints — the date, the page's address.
 Where it adds them, untick *Headers and footers* under *More settings*
 in its print dialog.)
 
-**Templates.** A template is a header and footer under a name. Three
-are ready-made — *Page numbers*, *File and date*, and *Title block*
-with a place for a logo — and *Save as template…* keeps what you have
+**Templates.** A template here is a header and footer under a name
+(a whole sheet to start from is something else: see
+[Starting from a template](#starting-from-a-template)). Five are
+ready-made — *Page numbers*, *File and date*, *Title block* with a
+place for a logo, and the headers and footers of a *Technical note*
+and of *Power requirements* — and *Save as template…* keeps what you have
 set, logo and all, as one of your own: on this computer, for every
 sheet. *New sheets*, in the same dialog, chooses the template that a
 new sheet starts with. A sheet holds a copy of what it was given, so
@@ -714,6 +734,7 @@ the folder the server was started in.
 | `utils/worksheet/values.py` | a value as text, and back: what a sheet hands on to other sheets. Data only — reading it runs nothing |
 | `utils/worksheet/prefs.py` | what the user chose for the page (grid, symbol panel, text as markdown, the template of a new sheet): a file in Jupyter's data folder, because a browser keeps its own storage per port |
 | `utils/worksheet/templates.py` | the headers and footers a user keeps by name: another file there |
+| `utils/worksheet/starters/` | the sheets *New from template…* starts from: worksheets like any other, made and saved in the worksheet (see `document.starter`) |
 | `utils/worksheet/static/` | the front end: plain ES modules, no build step |
 | `utils/worksheet/make_library.py` | writes `static/data/library.json` — the symbol panel's library — from the Windows palette's list |
 | `utils/worksheet/make_icon.py` | writes `static/icon.ico` from the drawings `static/icon.svg` and `static/icon-small.svg` (needs Playwright and a Chromium) |
@@ -784,7 +805,8 @@ only so is that the 1009 a page of the sheet has.
 python -m pytest tests/test_worksheet_render.py tests/test_worksheet_engine.py \
                  tests/test_worksheet_values.py tests/test_worksheet_kept.py \
                  tests/test_worksheet_document.py tests/test_worksheet_server.py \
-                 tests/test_worksheet_library.py tests/test_worksheet_frontend.py
+                 tests/test_worksheet_library.py tests/test_worksheet_frontend.py \r
+                 tests/test_worksheet_examples.py
 ```
 
 `test_worksheet_engine.py` includes a randomized check that an
@@ -794,3 +816,7 @@ once, kept, and handed to another kernel as text.
 `test_worksheet_frontend.py` runs the front end's pure logic under
 node and drives the real page in a browser; each part skips if its tool
 (node; Playwright with a Chromium) is missing.
+`test_worksheet_examples.py` calculates every example and template
+and holds it to what its file says: an example changed by hand must be
+calculated and saved again in the worksheet (and the sheets that take
+from it brought up to date).

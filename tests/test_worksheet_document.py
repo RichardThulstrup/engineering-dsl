@@ -465,6 +465,30 @@ def test_a_sheet_says_which_toolkit_its_values_were_made_with(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# templates: sheets that come with the worksheet, to start a new sheet from
+# ---------------------------------------------------------------------------
+
+def test_a_new_sheet_starts_as_a_template_has_it_and_is_nothing_of_that_file(tmp_path):
+    assert document.starters() == [{"name": "power_requirements", "title": "Power requirements"},
+                                   {"name": "technical_note", "title": "Technical note"}]
+    for found in document.starters():
+        template = document.load(document.STARTERS / f"{found['name']}.ipynb")
+        new = document.starter(found["name"])
+        # Its regions, where they are, and its header and footer ...
+        assert [(r["kind"], r["source"], r["x"], r["y"]) for r in new["regions"]] == \
+            [(r["kind"], r["source"], r["x"], r["y"]) for r in template["regions"]]
+        assert new["settings"]["frame"] == template["settings"]["frame"] and new["settings"]["frame"]["header"][1].startswith("**")
+        # ... and nothing of the file: no name, path, revision, values or stored results; it may be calculated.
+        assert new["name"] == "Untitled" and new["trusted"] is True and "path" not in new and "mtime" not in new
+        assert "about" not in new["settings"] and new["toolkit"] == ""
+        assert not any(key in region for region in new["regions"] for key in ("saved", "kept", "given"))
+        # (Which the template's own file holds none of either, but its title.)
+        assert template["settings"]["about"] == {"title": found["title"]} and template["toolkit"] == ""
+    for none in ("", "nothing", "../technical_note", "technical_note.ipynb", "Technical note"):
+        assert document.starter(none) is None, none
+
+
+# ---------------------------------------------------------------------------
 # sheets that build on each other: how they stand, as their files say it
 # ---------------------------------------------------------------------------
 

@@ -2545,7 +2545,7 @@ def test_a_template_of_ones_own_is_kept_for_every_sheet_and_new_sheets_start_wit
     page.reload()
     page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
     frame_dialog(page)
-    assert page.evaluate(names) == ["None", "Page numbers", "File and date", "Title block", "Good"]
+    assert page.evaluate(names) == ["None", "Page numbers", "File and date", "Title block", "Technical note", "Power requirements", "Good"]
     page.select_option(".dialog.frame select[aria-label='Template']", "Title block")
     assert cells(page)[1] == "{logo}"
     page.select_option(".dialog.frame select[aria-label='Template']", "Good")
@@ -2553,7 +2553,7 @@ def test_a_template_of_ones_own_is_kept_for_every_sheet_and_new_sheets_start_wit
     page.click(".dialog.frame button:has-text('Delete')")
     page.wait_for_function(f"!{names}.includes('Good')")
     page.select_option(".dialog.frame select[aria-label='Template']", "")
-    assert page.evaluate(names) == ["None", "Page numbers", "File and date", "Title block"]
+    assert page.evaluate(names) == ["None", "Page numbers", "File and date", "Title block", "Technical note", "Power requirements"]
     assert page.is_disabled(".dialog.frame button:has-text('Save as template')") and page.is_disabled(".dialog.frame button:has-text('Delete')")
     page.select_option(".dialog.frame select[aria-label='Template']", "Title block")
     assert cells(page) == ["Title block", "{logo}", "**{title}**\n{file}", "Rev. {revision}\n{saved}", "{author}", "", "Page {page} of {pages}"]
@@ -2573,7 +2573,7 @@ def test_a_template_of_ones_own_is_kept_for_every_sheet_and_new_sheets_start_wit
     page.fill(".dialog.frame input[aria-label='Name of the template']", "ACME")
     keys.press("Enter")
     page.wait_for_function(f"{TOAST}.includes('start it again')")
-    assert page.evaluate(names) == ["None", "Page numbers", "File and date", "Title block", "(as set below)"]
+    assert page.evaluate(names) == ["None", "Page numbers", "File and date", "Title block", "Technical note", "Power requirements", "(as set below)"]
     page.unroute("**/api/templates*")
     # (And what a server will not keep, it says why.)
     page.route("**/api/templates*", lambda route: route.fulfill(status=400, content_type="application/json", body='{"error": "not this one"}'))
@@ -2583,7 +2583,7 @@ def test_a_template_of_ones_own_is_kept_for_every_sheet_and_new_sheets_start_wit
     page.fill(".dialog.frame input[aria-label='Name of the template']", "  ACME ")
     keys.press("Enter")
     page.wait_for_function(f"{names}.includes('ACME')")
-    assert page.evaluate(names) == ["None", "Page numbers", "File and date", "Title block", "ACME"] and cells(page)[0] == "ACME"
+    assert page.evaluate(names) == ["None", "Page numbers", "File and date", "Title block", "Technical note", "Power requirements", "ACME"] and cells(page)[0] == "ACME"
     assert not page.is_visible(".dialog.frame input[aria-label='Name of the template']")
     assert not page.is_disabled(".dialog.frame button:has-text('Delete')")
     # A template that has no logo leaves the sheet the logo it has.
@@ -3773,6 +3773,37 @@ def test_a_figure_that_a_statement_comes_to_is_as_large_as_one_that_is_shown(pag
     rewritten(folder, "value.ipynb", lambda sheet: sheet["settings"]["about"].update(author="Someone else"))
     opened(page, "value.ipynb")
     assert page.is_visible("#banner") and figures(page, 2) == [shown, value]
+
+
+# ---- templates: sheets to start from ----------------------------------------------
+
+def test_a_new_sheet_starts_from_a_template_laid_out_and_calculated(page_and_folder):
+    page, folder = page_and_folder
+    page.wait_for_selector("#status[data-state='idle']", timeout=90_000)
+    typed(page, "x := 1")
+    settled(page)
+    page.click("#file-menu .menu-button")
+    page.click("#file-menu [data-cmd='new-from-template']")
+    page.wait_for_selector(".dialog .foot .btn:has-text('Technical note')")
+    assert page.evaluate("[...document.querySelectorAll('.dialog .foot .btn')].map((b) => b.textContent)") == \
+        ["Cancel", "Power requirements", "Technical note"]
+    page.click(".dialog .foot .btn:has-text('Power requirements')")
+    # (The sheet in front has changes: they are not thrown away without a word.)
+    page.click(".dialog .foot .btn:has-text('Discard')")
+    page.wait_for_function("document.querySelectorAll('.region').length > 5")
+    settled(page)
+    # Its regions where the template has them, calculated; its header and footer; a sheet of no file yet.
+    lines = page.evaluate(LINES)
+    assert shown(page)[0] == "Power requirements: name of the unit" and any(line.endswith("=320mW") for line in lines)
+    assert page.evaluate("document.querySelectorAll('.region.has-error').length") == 0
+    assert "Power requirements" in page.evaluate("[...document.querySelectorAll('.pageframe')].map((band) => band.innerText).join(' ')")
+    assert page.evaluate("document.querySelector('#doc-name').textContent") == "Untitled" and not page.evaluate(DIRTY)
+    # Saved, it is a sheet of its own: its first revision, under its own name.
+    save_as(page, "unit.ipynb")
+    named(page, "unit")
+    settings = saved_settings(folder, "unit.ipynb")
+    assert settings["frame"]["header"][1] == "**Power requirements**\n{title}"
+    assert settings["about"]["revision"] == 1 and "title" not in settings["about"]
 
 
 # ---- what a sheet reads outside itself ------------------------------------------

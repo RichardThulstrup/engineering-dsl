@@ -519,7 +519,7 @@ assert.equal(shortenStroke("M95,702c-2.7,0,-7.17,-2.7,-13.5,-8H400000v40H845z", 
 // ---- the frame of a page: header and footer ---------------------------------
 {
   const frames = await import(js("pageframe.js"));
-  assert.deepEqual(frames.BUILT_IN.map((template) => template.name), ["Page numbers", "File and date", "Title block"]);
+  assert.deepEqual(frames.BUILT_IN.map((template) => template.name), ["Page numbers", "File and date", "Title block", "Technical note", "Power requirements"]);
   const BLOCK = frames.BUILT_IN[2].frame;
   // A frame is made of whatever a file holds — and of nothing but what a frame is.
   for (const none of [null, undefined, "x", 7, [], {}, { header: ["", " \n ", ""], footer: [] }, { header: "{file}" },

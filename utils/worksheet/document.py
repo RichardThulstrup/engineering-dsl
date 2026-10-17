@@ -34,7 +34,7 @@ from pathlib import Path
 
 from .protocol import PREAMBLE
 
-__all__ = ["load", "save", "trust", "listing", "published", "chain", "Conflict", "resolve", "warm_up"]
+__all__ = ["load", "save", "trust", "listing", "published", "chain", "starters", "starter", "Conflict", "resolve", "warm_up"]
 
 # nbformat takes a second or two to import (its schema validator), which
 # the server would rather spend opening the page: it is imported when
@@ -491,6 +491,42 @@ def load(path: Path) -> dict:
         # (Which toolkit its values were made with: another one may make others.)
         "toolkit": record["toolkit"] if record else "",
     }
+
+
+# Sheets that come with the worksheet, to start a new sheet from
+# (File > New from template...): laid-out sheets, each a notebook here.
+STARTERS = Path(__file__).with_name("starters")
+
+
+def starters() -> list:
+    """The sheets a new sheet can start from, by name (the file's stem),
+    each with its title as the sheet gives it."""
+    import json
+    found = []
+    for path in sorted(STARTERS.glob("*.ipynb")):
+        meta = json.loads(path.read_text(encoding="utf-8")).get("metadata") or {}
+        sheet = meta.get("edsl_worksheet") if isinstance(meta.get("edsl_worksheet"), dict) else {}
+        settings = sheet.get("settings") if isinstance(sheet.get("settings"), dict) else {}
+        about = settings.get("about") if isinstance(settings.get("about"), dict) else {}
+        found.append({"name": path.stem, "title": about["title"] if isinstance(about.get("title"), str) else path.stem})
+    return found
+
+
+def starter(name: str) -> dict:
+    """A new sheet, as the sheet ``name`` (see ``starters``) begins it:
+    its regions, where they are, and its header and footer — none of
+    what that sheet is as a file of its own (no file, no revision, no
+    values, no stored results).  ``None`` for a name that is no such
+    sheet."""
+    if name not in {found["name"] for found in starters()}:
+        return None
+    doc = load(STARTERS / f"{name}.ipynb")
+    for region in doc["regions"]:
+        for key in ("saved", "kept", "given"):
+            region.pop(key, None)
+    settings = {key: value for key, value in doc["settings"].items() if key != "about"}
+    return {"name": "Untitled", "trusted": True, "settings": settings, "laidOut": doc["laidOut"],
+            "preamble": doc["preamble"], "regions": doc["regions"], "toolkit": ""}
 
 
 def _clean_outputs(outputs):

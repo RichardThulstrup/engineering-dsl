@@ -660,6 +660,20 @@ def test_headers_and_footers_of_the_users_own_are_kept_by_name(server):
         (server.folder / ".jupyter-data" / "edsl_worksheet_templates.json").unlink(missing_ok=True)
 
 
+def test_the_sheets_to_start_from_are_listed_and_handed_out_as_new_sheets(server):
+    assert fetch(server, "/api/starters", cookie=False)[0] == 403
+    assert fetch(server, "/api/starters?name=technical_note", cookie=False)[0] == 403
+    status, _, text = fetch(server, "/api/starters")
+    assert status == 200 and [found["title"] for found in json.loads(text)["starters"]] == ["Power requirements", "Technical note"]
+    status, _, text = fetch(server, "/api/starters?name=technical_note")
+    new = json.loads(text)
+    assert status == 200 and new["name"] == "Untitled" and "path" not in new and new["regions"]
+    assert new["settings"]["frame"]["header"][1] == "**Technical note**\n{title}"
+    # Only a sheet that is there by that name: no path is followed.
+    for name in ("nothing", "../server", "..%2F..%2Fpyproject", "technical_note.ipynb"):
+        assert fetch(server, f"/api/starters?name={name}")[0] == 404, name
+
+
 def test_no_more_templates_are_kept_than_there_is_use_for(tmp_path, monkeypatch):
     from utils.worksheet import templates
 

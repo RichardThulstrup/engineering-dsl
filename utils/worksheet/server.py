@@ -230,6 +230,24 @@ class _Templates(_Base):
         self.json({"templates": templates.delete(self.get_argument("name", ""))})
 
 
+class _Starters(_Base):
+    """The sheets that come with the worksheet to start a new one from:
+    without ``name`` which there are, with it that one as a new sheet
+    (see ``document.starter``)."""
+
+    async def get(self):
+        self.require_auth()
+        name = self.get_argument("name", None)
+        if name is None:
+            self.json({"starters": document.starters()})
+            return
+        await self.notebooks_ready()
+        doc = document.starter(name)
+        if doc is None:
+            raise tornado.web.HTTPError(404, f"there is no sheet to start from called {name}")
+        self.json(doc)
+
+
 class _List(_Base):
     def get(self):
         self.require_auth()
@@ -460,6 +478,7 @@ def make_app(config: Config) -> tornado.web.Application:
         (r"/api/info", _Info),
         (r"/api/prefs", _Prefs),
         (r"/api/templates", _Templates),
+        (r"/api/starters", _Starters),
         (r"/api/list", _List),
         (r"/api/doc", _Doc),
         (r"/api/values", _Values),

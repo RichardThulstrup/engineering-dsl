@@ -941,6 +941,24 @@ async function newSheet() {
   if (conn.online) scheduleCalc({ now: true });
 }
 
+/** File ▸ New from template…: a new sheet that begins as one of the sheets that come with the worksheet. */
+async function newFromTemplate() {
+  const { ok, status, data } = await api("GET", "/api/starters");
+  if (!ok) {
+    toast(status === 404 ? "The worksheet server running here was started before it had templates: close the worksheet and start it again."
+      : data.error || "The templates could not be read.", "error");
+    return;
+  }
+  const chosen = await ask("New from template", "Start a new sheet from:",
+                           [{ label: "Cancel", value: null }, ...data.starters.map((found) => ({ label: found.title, value: found.name }))]);
+  sheet.focus();
+  if (!chosen || !(await discardOk())) return;
+  const made = await api("GET", `/api/starters?name=${encodeURIComponent(chosen)}`);
+  if (!made.ok) { toast(made.data.error || "That template could not be read.", "error"); return; }
+  adopt(made.data);
+  if (conn.online) scheduleCalc({ now: true });
+}
+
 async function openDialog() {
   if (!(await discardOk())) return;
   const path = await browse({ title: "Open worksheet", action: "Open", dir: folder(state.path) });
@@ -1104,6 +1122,7 @@ function togglePalette({ remember = true } = {}) {
 
 const COMMANDS = {
   new: newSheet,
+  "new-from-template": newFromTemplate,
   open: openDialog,
   save: () => save(false),
   "save-as": () => save(true),
@@ -1163,7 +1182,8 @@ const HELP = [
     ["Tab / Shift+Tab", "edit the next / previous region"],
   ]],
   ["Pages", [
-    ["File ▸ Header and footer…", "a header and a footer on every page: text, a logo, and fields such as {file}, {saved} and {page}"],
+    ["File ▸ New from template…", "a new sheet that begins as a technical note or as a unit's power requirements, laid out with its header and footer"],
+    ["File ▸ Header and footer…","a header and a footer on every page: text, a logo, and fields such as {file}, {saved} and {page}"],
     ["double-click a header or a footer", "change it"],
     ["Ctrl+P", "print the sheet, or save it as a PDF, on the pages it fills"],
   ]],

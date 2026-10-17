@@ -201,4 +201,10 @@ export const BUILT_IN = [
   { name: "Title block",
     frame: { header: ["{logo}", "**{title}**\n{file}", "Rev. {revision}\n{saved}"],
              footer: ["{author}", "", "Page {page} of {pages}"], rule: { header: true, footer: true } } },
+  { name: "Technical note",
+    frame: { header: ["{logo}", "**Technical note**\n{title}", "Rev. {revision}\n{saved}"],
+             footer: ["{author}", "{file}", "Page {page} of {pages}"], rule: { header: true, footer: true } } },
+  { name: "Power requirements",
+    frame: { header: ["{logo}", "**Power requirements**\n{title}", "Rev. {revision}\n{saved}"],
+             footer: ["{author}", "{file}", "Page {page} of {pages}"], rule: { header: true, footer: true } } },
 ].map(({ name, frame }) => ({ name, frame: normal(frame) }));
